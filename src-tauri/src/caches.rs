@@ -30,7 +30,7 @@ pub fn detect_caches(root: Option<&std::path::Path>) -> Vec<CacheInfo> {
 
     let downloads = root
         .map(|r| r.join("downloads"))
-        .unwrap_or_else(|| PathBuf::from(r"D:\DevEnvManager\downloads"));
+        .unwrap_or_else(|| PathBuf::from(r"D:\DevEnv\downloads"));
 
     let items: Vec<(&'static str, &'static str, PathBuf)> = vec![
         ("npm", "npm 缓存", localappdata.join("npm-cache")),

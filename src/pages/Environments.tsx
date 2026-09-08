@@ -6,6 +6,7 @@ import {
   Trash2,
   ScanSearch,
   ExternalLink,
+  Import,
 } from "lucide-react";
 import { PageShell } from "../components/layout/PageShell";
 import { Card, CardHeader } from "../components/ui/Card";
@@ -35,6 +36,7 @@ export function Environments() {
   const [confirmUninstall, setConfirmUninstall] = useState<ManagedEnv | null>(null);
   const [systemEnvs, setSystemEnvs] = useState<ExternalEnv[] | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [integrating, setIntegrating] = useState<string | null>(null);
 
   const refreshOverview = useAppStore((s) => s.refreshOverview);
   const overviewVersion = useAppStore((s) => s.overviewVersion);
@@ -92,6 +94,24 @@ export function Environments() {
       toast.error("扫描失败", String(e));
     } finally {
       setScanning(false);
+    }
+  };
+
+  const doIntegrate = async (env: ExternalEnv) => {
+    if (!env.envType || !env.path) return;
+    setIntegrating(env.tool);
+    try {
+      const name = await api.integrateExternalEnv(env.envType, env.path, env.version);
+      toast.success(
+        `${env.tool} 已纳入管理`,
+        `已注册为 ${name},可在上方列表中设为当前。建议在路径管理中清理原 PATH 条目,避免版本冲突`,
+      );
+      await doScanSystem();
+      refreshOverview();
+    } catch (e) {
+      toast.error("纳入管理失败", String(e));
+    } finally {
+      setIntegrating(null);
     }
   };
 
@@ -222,7 +242,7 @@ export function Environments() {
               系统散装环境
             </span>
           }
-          desc="扫描 PATH 中由其他方式安装的工具(不受 EnvCon 管理)"
+          desc="扫描 PATH 中由其他方式安装的工具,可通过链接纳入 EnvCon 统一管理(不移动文件)"
           actions={
             <Button size="sm" onClick={doScanSystem} loading={scanning}>
               {systemEnvs ? "重新扫描" : "开始扫描"}
@@ -247,6 +267,18 @@ export function Environments() {
                 <span className="flex-1 truncate text-xs text-zinc-400 selectable" title={env.path ?? ""}>
                   {env.path}
                 </span>
+                {env.envType && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    loading={integrating === env.tool}
+                    onClick={() => doIntegrate(env)}
+                    title={`以链接方式注册到 ${ENV_TYPE_META[env.envType].label},不移动原文件`}
+                  >
+                    <Import className="size-3.5" />
+                    纳入管理
+                  </Button>
+                )}
                 <button
                   className="text-zinc-400 hover:text-emerald-600 cursor-pointer"
                   title="打开所在目录"

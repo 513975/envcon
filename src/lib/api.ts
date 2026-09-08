@@ -15,6 +15,8 @@ export const api = {
   getOverview: () => cmd<Overview>("get_overview"),
   setRoot: (path: string) => cmd<string>("set_root", { path }),
   scanSystem: () => cmd<ExternalEnv[]>("scan_system"),
+  integrateExternalEnv: (envType: EnvType, path: string, version: string | null) =>
+    cmd<string>("integrate_external_env", { envType, path, version }),
   switchEnv: (envType: EnvType, name: string) =>
     cmd<void>("switch_env", { envType, name }),
   uninstallEnv: (envType: EnvType, name: string) =>

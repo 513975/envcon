@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EnvCon — Windows 开发环境一站式管理工具</title>
+<meta name="description" content="EnvCon:面向 Windows 的便携式开发环境管理器。下载、安装、多版本切换、PATH 管理、缓存清理,一个应用全搞定。">
+<style>
+  /* ============ 落地页基础 ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: #fafafa; color: #18181b; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(250,250,250,.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid #e4e4e7;
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #18181b; }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, #10b981, #0d9488);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; box-shadow: 0 2px 8px rgba(16,185,129,.35);
+  }
+  .brand-mark svg { width: 16px; height: 16px; }
+  .brand-name { font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+  .nav-links { display: flex; align-items: center; gap: 22px; }
+  .nav-links a { color: #52525b; text-decoration: none; font-size: 14px; font-weight: 500; transition: color .15s; }
+  .nav-links a:hover { color: #18181b; }
+
+  .hero { padding: 76px 0 48px; text-align: center; }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+    border-radius: 999px; padding: 5px 14px; font-size: 13px; font-weight: 600;
+    margin-bottom: 22px;
+  }
+  .hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #059669; }
+  h1 { font-size: clamp(34px, 6vw, 54px); font-weight: 800; letter-spacing: -.03em; line-height: 1.12; }
+  h1 .accent { color: #059669; }
+  .hero-sub { font-size: clamp(15px, 2.2vw, 18px); color: #52525b; max-width: 640px; margin: 18px auto 0; }
+  .hero-actions { display: flex; justify-content: center; gap: 12px; margin-top: 30px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 44px; padding: 0 22px; border-radius: 11px;
+    font-size: 15px; font-weight: 600; text-decoration: none; transition: all .15s;
+  }
+  .btn svg { width: 16px; height: 16px; }
+  .btn-primary { background: #18181b; color: #fff; box-shadow: 0 4px 14px rgba(24,24,27,.18); }
+  .btn-primary:hover { background: #000; transform: translateY(-1px); }
+  .btn-ghost { color: #18181b; border: 1px solid #e4e4e7; background: #fff; }
+  .btn-ghost:hover { border-color: #d4d4d8; transform: translateY(-1px); }
+
+  section { padding: 64px 0; }
+  .section-head { text-align: center; margin-bottom: 40px; }
+  .section-head h2 { font-size: clamp(24px, 4vw, 34px); font-weight: 750; letter-spacing: -.02em; }
+  .section-head p { color: #52525b; margin-top: 10px; font-size: 16px; }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .feature {
+    background: #fff; border: 1px solid #e4e4e7; border-radius: 14px;
+    padding: 24px; transition: all .2s;
+  }
+  .feature:hover { border-color: #a7f3d0; box-shadow: 0 8px 24px rgba(5,150,105,.08); }
+  .feature .icon {
+    width: 40px; height: 40px; border-radius: 10px; font-size: 19px;
+    display: flex; align-items: center; justify-content: center;
+    background: #ecfdf5; margin-bottom: 14px;
+  }
+  .feature h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .feature p { font-size: 14px; color: #52525b; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .chip {
+    background: #fff; border: 1px solid #e4e4e7; border-radius: 999px;
+    padding: 8px 18px; font-size: 14px; font-weight: 600; color: #52525b;
+    transition: all .15s;
+  }
+  .chip:hover { border-color: #059669; color: #047857; }
+
+  .how { background: #fff; border: 1px solid #e4e4e7; border-radius: 14px; padding: 36px; }
+  .how pre {
+    background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 10px;
+    padding: 24px 28px; font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    font-size: 13.5px; line-height: 1.75; color: #52525b; overflow-x: auto;
+  }
+  .how pre b { color: #047857; }
+  .how p { color: #52525b; font-size: 15px; margin-top: 18px; }
+
+  footer { border-top: 1px solid #e4e4e7; padding: 36px 0 44px; }
+  .footer-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 14px; font-size: 14px; color: #a1a1aa;
+  }
+  .footer-inner a { color: #52525b; text-decoration: none; }
+  .footer-inner a:hover { color: #047857; }
+
+  /* ============ 应用预览(代码还原) ============ */
+  .preview-sec { padding-top: 56px; }
+  .preview-hint {
+    text-align: center; color: #a1a1aa; font-size: 13px; margin-bottom: 14px;
+  }
+  .appwin {
+    max-width: 1080px; margin: 0 auto;
+    border: 1px solid #27272a; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 24px 64px rgba(0,0,0,.22);
+    background: #09090b;
+  }
+  .appwin-bar {
+    display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px;
+    background: #18181b; border-bottom: 1px solid #27272a;
+  }
+  .appwin-bar .d { width: 11px; height: 11px; border-radius: 50%; }
+  .d1 { background: #f87171; } .d2 { background: #fbbf24; } .d3 { background: #34d399; }
+  .appwin-bar .title { flex: 1; text-align: center; font-size: 12px; color: #71717a; margin-right: 46px; }
+
+  .app { display: flex; height: 640px; background: #09090b; color: #fafafa; font-size: 14px; }
+
+  /* 侧边栏 */
+  .app-side {
+    width: 208px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: #18181b; border-right: 1px solid #27272a;
+  }
+  .app-logo {
+    display: flex; align-items: center; gap: 10px; height: 56px;
+    padding: 0 16px; border-bottom: 1px solid #1f1f23;
+  }
+  .app-logo .mark {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, #10b981, #0d9488);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+  }
+  .app-logo .mark svg { width: 15px; height: 15px; }
+  .app-logo .name { font-size: 14px; font-weight: 700; }
+  .app-logo .tag { font-size: 10px; color: #71717a; margin-top: -2px; }
+  .app-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .app-nav button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    height: 36px; padding: 0 12px; border: 0; border-radius: 8px;
+    background: transparent; color: #a1a1aa; font-size: 14px; font-weight: 500;
+    font-family: inherit; cursor: pointer; position: relative; text-align: left;
+    transition: background .12s, color .12s;
+  }
+  .app-nav button:hover { background: #27272a; color: #d4d4d8; }
+  .app-nav button.active { background: rgba(16,185,129,.12); color: #34d399; }
+  .app-nav button.active::before {
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 2px; height: 16px; border-radius: 2px; background: #10b981;
+  }
+  .app-nav button svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .app-side-foot {
+    padding: 12px 16px; font-size: 10px; color: #52525b;
+    border-top: 1px solid #1f1f23;
+  }
+
+  /* 主区域 */
+  .app-main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 24px; }
+  .app-main::-webkit-scrollbar { width: 8px; }
+  .app-main::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+  .app-page { display: none; }
+  .app-page.show { display: block; animation: fadein .25s; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+  .page-head h3 { font-size: 19px; font-weight: 700; }
+  .page-head .desc { font-size: 12.5px; color: #71717a; margin-top: 3px; }
+  .abtn {
+    display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
+    border-radius: 8px; border: 1px solid #27272a; background: #18181b;
+    color: #d4d4d8; font-size: 12.5px; font-weight: 500; font-family: inherit;
+    cursor: pointer; transition: all .12s;
+  }
+  .abtn:hover { border-color: #3f3f46; }
+  .abtn svg { width: 13px; height: 13px; }
+  .abtn.primary { background: #10b981; border-color: transparent; color: #052e21; font-weight: 600; }
+  .abtn.primary:hover { background: #34d399; }
+  .abtn.ghost { background: transparent; border-color: transparent; color: #71717a; }
+  .abtn.ghost:hover { color: #d4d4d8; background: #18181b; }
+  .abtn.danger { color: #ef4444; }
+  .abtn.danger:hover { background: rgba(239,68,68,.1); }
+
+  .acard { background: #18181b; border: 1px solid #27272a; border-radius: 12px; overflow: hidden; }
+  .acard + .acard, .grid-gap { margin-top: 18px; }
+  .acard-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 16px; border-bottom: 1px solid #27272a;
+  }
+  .acard-head .t { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .acard-head .t svg { width: 14px; height: 14px; color: #71717a; }
+  .acard-head .d { font-size: 12px; color: #71717a; margin-top: 2px; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+  .stat { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 15px; display: flex; align-items: center; gap: 12px; }
+  .stat .ic { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
+  .stat .ic svg { width: 17px; height: 17px; }
+  .stat .v { font-size: 19px; font-weight: 700; line-height: 1.2; }
+  .stat .l { font-size: 12px; color: #71717a; }
+  .ic-emerald { background: rgba(16,185,129,.12); color: #34d399; }
+  .ic-sky { background: rgba(14,165,233,.12); color: #38bdf8; }
+  .ic-amber { background: rgba(245,158,11,.12); color: #fbbf24; }
+
+  /* 环境类型徽章 */
+  .tbadge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    font-size: 13px; font-weight: 700;
+  }
+  .tb-jdk { color: #fb923c; background: rgba(249,115,22,.1); }
+  .tb-python { color: #38bdf8; background: rgba(14,165,233,.1); }
+  .tb-node { color: #34d399; background: rgba(16,185,129,.1); }
+  .tb-gh { color: #c084fc; background: rgba(168,85,247,.12); }
+  .tb-git { color: #a3e635; background: rgba(132,204,22,.12); }
+  .tb-mingw { color: #60a5fa; background: rgba(59,130,246,.12); }
+  .tb-maven { color: #f87171; background: rgba(239,68,68,.1); }
+
+  .cur-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    background: rgba(16,185,129,.14); color: #34d399;
+  }
+  .cur-badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #10b981; }
+  .pill {
+    display: inline-flex; font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 999px; background: #27272a; color: #a1a1aa;
+  }
+
+  .envgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 15px; }
+  .envcard { border: 1px solid #27272a; border-radius: 10px; padding: 13px; }
+  .envcard .row1 { display: flex; align-items: center; justify-content: space-between; }
+  .envcard .ver { font-size: 16px; font-weight: 700; margin-top: 9px; }
+  .envcard .sub { font-size: 11px; color: #71717a; }
+  .envcard .meta { display: flex; gap: 12px; font-size: 12px; color: #71717a; margin-top: 5px; }
+  .envcard .meta a { color: #52525b; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .envcard .meta a:hover { color: #34d399; }
+  .envcard .meta svg { width: 12px; height: 12px; }
+
+  .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+  .qcard {
+    background: #18181b; border: 1px solid #27272a; border-radius: 12px;
+    padding: 15px; display: flex; align-items: center; gap: 12px;
+  }
+  .qcard .ic { width: 36px; height: 36px; border-radius: 9px; background: #27272a; color: #a1a1aa; display: flex; align-items: center; justify-content: center; }
+  .qcard .ic svg { width: 17px; height: 17px; }
+  .qcard .t { font-size: 13.5px; font-weight: 600; }
+  .qcard .d { font-size: 12px; color: #71717a; }
+
+  .banner {
+    margin-top: 18px; border: 1px solid rgba(16,185,129,.3); border-radius: 10px;
+    background: rgba(16,185,129,.07); padding: 11px 16px;
+    font-size: 12px; color: #34d399;
+  }
+
+  /* Tab 行 */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tabs button, .tabs .taboff {
+    height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid #27272a;
+    background: #18181b; color: #a1a1aa; font-size: 12px; font-weight: 500;
+    font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .tabs button { cursor: pointer; }
+  .tabs .on { background: #fafafa; color: #18181b; border-color: transparent; font-weight: 600; }
+  .tabs .cnt { font-size: 10px; background: #27272a; border-radius: 4px; padding: 0 4px; }
+  .tabs .on .cnt { background: rgba(24,24,27,.12); }
+  .tabs .livedot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+
+  /* 行列表 */
+  .rows { display: flex; flex-direction: column; }
+  .row {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-bottom: 1px solid #1f1f23;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .nm { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .row .meta { display: flex; gap: 12px; font-size: 12px; color: #71717a; margin-top: 3px; }
+  .row .meta .path { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta .mono { font-family: Consolas, monospace; color: #a1a1aa; }
+  .row .actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* 下载中心 */
+  .typegrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; margin-bottom: 14px; }
+  .typegrid button {
+    height: 34px; border-radius: 8px; border: 1px solid #27272a; background: #18181b;
+    color: #a1a1aa; font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
+    transition: all .12s;
+  }
+  .typegrid button:hover { border-color: #3f3f46; }
+  .typegrid button.on { background: #10b981; color: #052e21; border-color: transparent; }
+  .srcrow { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .srcpill {
+    height: 32px; padding: 0 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid #27272a; background: #18181b; color: #a1a1aa;
+  }
+  .srcpill svg { width: 13px; height: 13px; }
+  .srcpill.on { background: #10b981; color: #052e21; border-color: transparent; }
+  .searchbox {
+    flex: 1; height: 32px; border-radius: 8px; border: 1px solid #27272a;
+    background: #09090b; color: #71717a; font-size: 12.5px; font-family: inherit;
+    padding: 0 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .searchbox svg { width: 13px; height: 13px; }
+  .verrow { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid #1f1f23; }
+  .verrow:last-child { border-bottom: 0; }
+  .verrow .v { font-size: 13.5px; font-weight: 600; font-family: Consolas, monospace; }
+  .verrow .d { font-size: 12px; color: #71717a; }
+  .verrow .sz { font-size: 12px; color: #71717a; }
+
+  /* 设置/路径 */
+  .kv { padding: 14px 16px; }
+  .kv .lab { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .kv .inp {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .kv .field {
+    flex: 1; height: 34px; border-radius: 8px; border: 1px solid #27272a;
+    background: #09090b; color: #d4d4d8; font-size: 13px; font-family: Consolas, monospace;
+    padding: 0 12px; display: flex; align-items: center;
+  }
+  .kv .note { font-size: 12px; color: #71717a; margin-top: 8px; }
+
+  @media (max-width: 860px) {
+    .app { height: auto; }
+    .app-side { width: 64px; }
+    .app-nav button span, .app-logo .txt, .app-side-foot { display: none; }
+    .app-nav button { justify-content: center; padding: 0; }
+    .app-logo { justify-content: center; padding: 0; }
+    .stat-grid, .envgrid, .quick { grid-template-columns: 1fr; }
+    .typegrid { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .hero { padding: 52px 0 36px; }
+    section { padding: 48px 0; }
+    .nav-links a.hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SVG 图标库 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-package" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
+    <symbol id="i-dash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+    <symbol id="i-boxes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/><path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/><path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/><path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-hdd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="11" cy="11" r="8"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55 0-.27-.01-1.17-.02-2.12-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.66.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .3.2.67.8.55A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></symbol>
+  </defs>
+</svg>
+
+<nav>
+  <div class="container nav-inner">
+    <a class="brand" href="#">
+      <div class="brand-mark"><svg><use href="#i-package"/></svg></div>
+      <div class="brand-name">EnvCon</div>
+    </a>
+    <div class="nav-links">
+      <a href="#preview" class="hide-sm">预览</a>
+      <a href="#features" class="hide-sm">功能</a>
+      <a href="#how" class="hide-sm">原理</a>
+      <a href="https://github.com/513975/envcon/releases" target="_blank">下载</a>
+      <a href="https://github.com/513975/envcon" target="_blank">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <div class="hero-badge"><span class="dot"></span>v0.1.0 预发布现已开放下载</div>
+    <h1>Windows 开发环境<br><span class="accent">一站式管理</span>工具</h1>
+    <p class="hero-sub">
+      下载、安装、多版本切换、PATH 管理、缓存清理 —— 一个应用全搞定。
+      所有环境绿色便携,NTFS Junction 秒级切换版本,国内镜像高速下载。
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/513975/envcon/releases" target="_blank">
+        <svg><use href="#i-download"/></svg>
+        下载 EnvCon
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/513975/envcon" target="_blank">
+        <svg><use href="#i-github"/></svg>
+        查看源码
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 交互式界面预览(纯代码还原,点击左侧导航切换页面) ============ -->
+<section id="preview" class="preview-sec">
+  <div class="container">
+    <p class="preview-hint">界面预览 · 点击左侧导航切换页面(与实际应用 1:1 还原)</p>
+    <div class="appwin">
+      <div class="appwin-bar">
+        <span class="d d1"></span><span class="d d2"></span><span class="d d3"></span>
+        <span class="title">EnvCon — 开发环境管理</span>
+      </div>
+      <div class="app">
+
+        <!-- 侧边栏 -->
+        <aside class="app-side">
+          <div class="app-logo">
+            <div class="mark"><svg><use href="#i-package"/></svg></div>
+            <div class="txt">
+              <div class="name">EnvCon</div>
+              <div class="tag">开发环境管理</div>
+            </div>
+          </div>
+          <nav class="app-nav">
+            <button data-page="dashboard" class="active"><svg><use href="#i-dash"/></svg><span>仪表盘</span></button>
+            <button data-page="environments"><svg><use href="#i-boxes"/></svg><span>环境管理</span></button>
+            <button data-page="download"><svg><use href="#i-download"/></svg><span>下载中心</span></button>
+            <button data-page="paths"><svg><use href="#i-route"/></svg><span>路径管理</span></button>
+            <button data-page="settings"><svg><use href="#i-gear"/></svg><span>设置</span></button>
+          </nav>
+          <div class="app-side-foot">v0.1.0 · 便携模式就绪</div>
+        </aside>
+
+        <!-- 主区域 -->
+        <main class="app-main">
+
+          <!-- 仪表盘 -->
+          <div class="app-page show" id="page-dashboard">
+            <div class="page-head">
+              <div>
+                <h3>仪表盘</h3>
+                <div class="desc">根目录:D:\DevEnv</div>
+              </div>
+              <button class="abtn"><svg><use href="#i-refresh"/></svg>刷新</button>
+            </div>
+
+            <div class="stat-grid">
+              <div class="stat">
+                <div class="ic ic-emerald"><svg><use href="#i-package"/></svg></div>
+                <div><div class="v">6</div><div class="l">已管理环境</div></div>
+              </div>
+              <div class="stat">
+                <div class="ic ic-sky"><svg><use href="#i-hdd"/></svg></div>
+                <div><div class="v">5.7 GB</div><div class="l">环境占用空间</div></div>
+              </div>
+              <div class="stat">
+                <div class="ic ic-amber"><svg><use href="#i-zap"/></svg></div>
+                <div><div class="v">4 / 15</div><div class="l">已激活环境类型</div></div>
+              </div>
+            </div>
+
+            <div class="acard">
+              <div class="acard-head">
+                <div>
+                  <div class="t">当前激活环境</div>
+                  <div class="d">通过 current 链接指向的版本,终端中使用的即是这些版本</div>
+                </div>
+                <button class="abtn"><svg><use href="#i-download"/></svg>下载新环境</button>
+              </div>
+              <div class="envgrid">
+                <div class="envcard">
+                  <div class="row1"><span class="tbadge tb-jdk">J</span><span class="cur-badge">当前</span></div>
+                  <div class="ver">1.8.0_492</div>
+                  <div class="sub">temurin-8</div>
+                  <div class="meta"><span>190.5 MB</span><a href="#preview"><svg><use href="#i-folder"/></svg>JDK目录</a></div>
+                </div>
+                <div class="envcard">
+                  <div class="row1"><span class="tbadge tb-python">P</span><span class="cur-badge">当前</span></div>
+                  <div class="ver">3.14.6</div>
+                  <div class="sub">python-3.14</div>
+                  <div class="meta"><span>1.6 GB</span><a href="#preview"><svg><use href="#i-folder"/></svg>Python目录</a></div>
+                </div>
+                <div class="envcard">
+                  <div class="row1"><span class="tbadge tb-node">N</span><span class="cur-badge">当前</span></div>
+                  <div class="ver">24.17.0</div>
+                  <div class="sub">node-24</div>
+                  <div class="meta"><span>3.3 GB</span><a href="#preview"><svg><use href="#i-folder"/></svg>Node.js目录</a></div>
+                </div>
+                <div class="envcard">
+                  <div class="row1"><span class="tbadge tb-gh">G</span><span class="cur-badge">当前</span></div>
+                  <div class="ver">2.100.0</div>
+                  <div class="sub">gh-2.100.0</div>
+                  <div class="meta"><span>41.0 MB</span><a href="#preview"><svg><use href="#i-folder"/></svg>GitHub CLI目录</a></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="quick">
+              <div class="qcard">
+                <div class="ic"><svg><use href="#i-boxes"/></svg></div>
+                <div><div class="t">环境管理</div><div class="d">切换版本 / 卸载</div></div>
+              </div>
+              <div class="qcard">
+                <div class="ic"><svg><use href="#i-download"/></svg></div>
+                <div><div class="t">下载中心</div><div class="d">国内镜像高速下载</div></div>
+              </div>
+              <div class="qcard">
+                <div class="ic"><svg><use href="#i-terminal"/></svg></div>
+                <div><div class="t">路径管理</div><div class="d">PATH 与缓存清理</div></div>
+              </div>
+            </div>
+
+            <div class="banner">便携模式运行中 — 配置存储在 exe 旁的 data 目录,可直接放入 U 盘使用</div>
+          </div>
+
+          <!-- 环境管理 -->
+          <div class="app-page" id="page-environments">
+            <div class="page-head">
+              <div>
+                <h3>环境管理</h3>
+                <div class="desc">根目录:D:\DevEnv</div>
+              </div>
+              <button class="abtn"><svg><use href="#i-refresh"/></svg>刷新</button>
+            </div>
+
+            <div class="tabs">
+              <button class="on">JDK <span class="cnt">2</span></button>
+              <button>Python <span class="cnt">1</span> <span class="livedot"></span></button>
+              <button>Node.js <span class="cnt">1</span> <span class="livedot"></span></button>
+              <button>Go</button>
+              <button>Rust</button>
+              <button>Maven <span class="cnt">1</span></button>
+              <button>Gradle <span class="cnt">1</span></button>
+              <button>PHP</button>
+              <button>LLVM</button>
+              <button>Zig</button>
+              <button>Deno</button>
+              <button>Bun</button>
+              <button>Git</button>
+              <button>GitHub CLI <span class="cnt">1</span> <span class="livedot"></span></button>
+              <button>C/C++</button>
+            </div>
+
+            <div class="acard">
+              <div class="rows">
+                <div class="row">
+                  <span class="tbadge tb-jdk">J</span>
+                  <div class="grow">
+                    <div class="nm">temurin-8 <span class="cur-badge">当前</span></div>
+                    <div class="meta"><span>1.8.0_492</span><span>190.5 MB</span><span class="path">D:\DevEnv\envs\jdks\temurin-8</span></div>
+                  </div>
+                  <div class="actions">
+                    <button class="abtn"><svg><use href="#i-folder"/></svg></button>
+                    <button class="abtn ghost danger"><svg><use href="#i-trash"/></svg></button>
+                  </div>
+                </div>
+                <div class="row">
+                  <span class="tbadge tb-jdk">J</span>
+                  <div class="grow">
+                    <div class="nm">temurin-21</div>
+                    <div class="meta"><span>21.0.8</span><span>312.4 MB</span><span class="path">D:\DevEnv\envs\jdks\temurin-21</span></div>
+                  </div>
+                  <div class="actions">
+                    <button class="abtn primary"><svg><use href="#i-check"/></svg>设为当前</button>
+                    <button class="abtn"><svg><use href="#i-folder"/></svg></button>
+                    <button class="abtn ghost danger"><svg><use href="#i-trash"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="acard grid-gap">
+              <div class="acard-head">
+                <div>
+                  <div class="t"><svg><use href="#i-scan"/></svg>系统散装环境</div>
+                  <div class="d">扫描 PATH 中由其他方式安装的工具,可通过链接纳入 EnvCon 统一管理(不移动文件)</div>
+                </div>
+                <button class="abtn">重新扫描</button>
+              </div>
+              <div class="rows">
+                <div class="row">
+                  <span class="pill">Git</span>
+                  <span class="meta mono">2.47.1.windows.1</span>
+                  <div class="grow"><div class="meta"><span class="path">C:\Program Files\Git\cmd\git.exe</span></div></div>
+                  <div class="actions">
+                    <button class="abtn primary"><svg><use href="#i-import"/></svg>纳入管理</button>
+                  </div>
+                </div>
+                <div class="row">
+                  <span class="pill">Maven</span>
+                  <span class="meta mono">3.9.9</span>
+                  <div class="grow"><div class="meta"><span class="path">C:\apache-maven-3.9.9\bin\mvn.cmd</span></div></div>
+                  <div class="actions">
+                    <button class="abtn primary"><svg><use href="#i-import"/></svg>纳入管理</button>
+                  </div>
+                </div>
+                <div class="row">
+                  <span class="pill">GCC</span>
+                  <span class="meta mono">14.2.0</span>
+                  <div class="grow"><div class="meta"><span class="path">C:\mingw64\bin\gcc.exe</span></div></div>
+                  <div class="actions">
+                    <button class="abtn primary"><svg><use href="#i-import"/></svg>纳入管理</button>
+                  </div>
+                </div>
+                <div class="row">
+                  <span class="pill">Rust</span>
+                  <span class="meta mono">1.88.0</span>
+                  <div class="grow"><div class="meta"><span class="path">C:\Users\dev\.cargo\bin\rustc.exe</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 下载中心 -->
+          <div class="app-page" id="page-download">
+            <div class="page-head">
+              <div>
+                <h3>下载中心</h3>
+                <div class="desc">镜像加速下载,自动解压安装到受管目录</div>
+              </div>
+              <button class="abtn"><svg><use href="#i-refresh"/></svg>刷新</button>
+            </div>
+
+            <div class="typegrid">
+              <button>JDK</button><button>Python</button><button class="on">Node.js</button><button>Go</button>
+              <button>Rust</button><button>Maven</button><button>Gradle</button><button>PHP</button>
+              <button>LLVM</button><button>Zig</button><button>Deno</button><button>Bun</button>
+              <button>Git</button><button>GitHub CLI</button><button>C/C++</button>
+            </div>
+
+            <div class="srcrow">
+              <button class="srcpill on"><svg><use href="#i-zap"/></svg>npmmirror 镜像</button>
+              <button class="srcpill"><svg><use href="#i-globe"/></svg>nodejs.org 官方</button>
+              <div class="searchbox"><svg><use href="#i-search"/></svg>搜索 Node.js 版本…</div>
+            </div>
+
+            <div class="acard">
+              <div class="acard-head">
+                <div class="t">版本列表 <span style="color:#71717a;font-weight:400">· 100 个版本</span></div>
+              </div>
+              <div class="rows">
+                <div class="verrow">
+                  <span class="v">v24.17.0</span>
+                  <span class="pill" style="background:rgba(16,185,129,.14);color:#34d399">LTS</span>
+                  <span class="d">2026-08-19</span>
+                  <span class="grow"></span>
+                  <span class="sz">31.2 MB</span>
+                  <button class="abtn primary"><svg><use href="#i-download"/></svg>安装</button>
+                </div>
+                <div class="verrow">
+                  <span class="v">v24.16.0</span>
+                  <span class="d">2026-07-22</span>
+                  <span class="grow"></span>
+                  <span class="sz">31.1 MB</span>
+                  <button class="abtn"><svg><use href="#i-download"/></svg>安装</button>
+                </div>
+                <div class="verrow">
+                  <span class="v">v22.21.1</span>
+                  <span class="pill" style="background:rgba(16,185,129,.14);color:#34d399">LTS</span>
+                  <span class="d">2026-08-05</span>
+                  <span class="grow"></span>
+                  <span class="sz">30.8 MB</span>
+                  <button class="abtn"><svg><use href="#i-download"/></svg>安装</button>
+                </div>
+                <div class="verrow">
+                  <span class="v">v22.20.0</span>
+                  <span class="d">2026-07-15</span>
+                  <span class="grow"></span>
+                  <span class="sz">30.7 MB</span>
+                  <button class="abtn"><svg><use href="#i-download"/></svg>安装</button>
+                </div>
+                <div class="verrow">
+                  <span class="v">v20.19.5</span>
+                  <span class="pill" style="background:rgba(16,185,129,.14);color:#34d399">LTS</span>
+                  <span class="d">2026-07-30</span>
+                  <span class="grow"></span>
+                  <span class="sz">29.9 MB</span>
+                  <button class="abtn"><svg><use href="#i-download"/></svg>安装</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 路径管理 -->
+          <div class="app-page" id="page-paths">
+            <div class="page-head">
+              <div>
+                <h3>路径管理</h3>
+                <div class="desc">PATH、环境变量、包管理器路径与缓存,修改前自动备份</div>
+              </div>
+              <button class="abtn"><svg><use href="#i-refresh"/></svg>刷新</button>
+            </div>
+
+            <div class="acard">
+              <div class="acard-head">
+                <div>
+                  <div class="t">用户 PATH</div>
+                  <div class="d">拖拽排序,保存后新开终端生效</div>
+                </div>
+                <button class="abtn primary"><svg><use href="#i-zap"/></svg>一键集成 current 到 PATH</button>
+              </div>
+              <div class="rows">
+                <div class="row"><span class="pill" style="background:rgba(16,185,129,.14);color:#34d399">current</span><span class="meta mono path">D:\DevEnv\current\gh\bin</span><span class="grow"></span><span class="pill">41.0 MB</span></div>
+                <div class="row"><span class="pill" style="background:rgba(16,185,129,.14);color:#34d399">current</span><span class="meta mono path">D:\DevEnv\current\python\Scripts</span><span class="grow"></span></div>
+                <div class="row"><span class="pill" style="background:rgba(16,185,129,.14);color:#34d399">current</span><span class="meta mono path">D:\DevEnv\current\jdk\bin</span><span class="grow"></span></div>
+                <div class="row"><span class="pill">系统</span><span class="meta mono path">C:\Windows\system32</span><span class="grow"></span><span class="pill">只读</span></div>
+              </div>
+            </div>
+
+            <div class="acard grid-gap">
+              <div class="acard-head">
+                <div>
+                  <div class="t">环境变量</div>
+                  <div class="d">根据当前激活环境给出建议值</div>
+                </div>
+              </div>
+              <div class="rows">
+                <div class="row"><span class="meta mono">JAVA_HOME</span><span class="meta mono path">D:\DevEnv\current\jdk</span><span class="grow"></span><button class="abtn">应用建议值</button></div>
+                <div class="row"><span class="meta mono">GOROOT</span><span class="meta mono path">D:\DevEnv\current\go</span><span class="grow"></span><button class="abtn">应用建议值</button></div>
+                <div class="row"><span class="meta mono">MAVEN_HOME</span><span class="meta mono path">D:\DevEnv\current\maven</span><span class="grow"></span><button class="abtn">应用建议值</button></div>
+              </div>
+            </div>
+
+            <div class="acard grid-gap">
+              <div class="acard-head">
+                <div>
+                  <div class="t">包管理器路径配置</div>
+                  <div class="d">全局安装与缓存统一指向根目录\globals</div>
+                </div>
+                <button class="abtn primary"><svg><use href="#i-zap"/></svg>全部应用</button>
+              </div>
+              <div class="rows">
+                <div class="row"><span class="tbadge tb-node">N</span><div class="grow"><div class="nm">npm</div><div class="meta"><span class="path">D:\DevEnv\globals\npm</span></div></div><button class="abtn">一键配置</button></div>
+                <div class="row"><span class="tbadge tb-node">N</span><div class="grow"><div class="nm">pnpm</div><div class="meta"><span class="path">D:\DevEnv\globals\pnpm</span></div></div><button class="abtn">一键配置</button></div>
+                <div class="row"><span class="tbadge tb-python">P</span><div class="grow"><div class="nm">pip</div><div class="meta"><span class="path">D:\DevEnv\globals\pip</span></div></div><button class="abtn">一键配置</button></div>
+              </div>
+            </div>
+
+            <div class="acard grid-gap">
+              <div class="acard-head">
+                <div>
+                  <div class="t">缓存检测</div>
+                  <div class="d">一键清理各工具缓存,释放磁盘空间</div>
+                </div>
+              </div>
+              <div class="rows">
+                <div class="row"><span class="pill">npm</span><div class="grow"><div class="nm">npm 缓存</div><div class="meta"><span class="path">C:\Users\dev\AppData\Local\npm-cache</span></div></div><span class="meta mono">856.4 MB</span><button class="abtn danger">清理</button></div>
+                <div class="row"><span class="pill">pip</span><div class="grow"><div class="nm">pip 缓存</div><div class="meta"><span class="path">C:\Users\dev\AppData\Local\pip\cache</span></div></div><span class="meta mono">1.2 GB</span><button class="abtn danger">清理</button></div>
+                <div class="row"><span class="pill">maven</span><div class="grow"><div class="nm">Maven 仓库(.m2)</div><div class="meta"><span class="path">C:\Users\dev\.m2\repository</span></div></div><span class="meta mono">3.1 GB</span><button class="abtn danger">清理</button></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 设置 -->
+          <div class="app-page" id="page-settings">
+            <div class="page-head">
+              <div><h3>设置</h3></div>
+            </div>
+
+            <div class="acard">
+              <div class="kv">
+                <div class="lab">管理根目录</div>
+                <div class="inp">
+                  <div class="field">D:\DevEnv</div>
+                  <button class="abtn">浏览…</button>
+                  <button class="abtn primary">应用</button>
+                </div>
+                <div class="note">更换根目录后,旧目录中的环境不会被移动,新环境将安装到新位置。</div>
+              </div>
+            </div>
+
+            <div class="acard grid-gap">
+              <div class="kv">
+                <div class="lab">下载临时目录</div>
+                <div class="inp">
+                  <div class="field">D:\DevEnv\downloads</div>
+                  <button class="abtn">浏览…</button>
+                  <button class="abtn primary">应用</button>
+                </div>
+                <div class="note">安装完成后临时压缩包将自动清理。</div>
+              </div>
+            </div>
+
+            <div class="acard grid-gap">
+              <div class="kv">
+                <div class="lab">数据目录</div>
+                <div class="inp"><div class="field">D:\DevEnv\data(便携模式)</div></div>
+                <div class="note">便携模式:配置与环境同目录存放,复制整个根目录即可迁移到其他电脑。</div>
+              </div>
+            </div>
+
+            <div class="banner">PATH 修改前的自动备份位于 data\path_backups,可随时在路径管理页恢复</div>
+          </div>
+
+        </main>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="container">
+    <div class="section-head">
+      <h2>你关心的,它都管了</h2>
+      <p>从下载安装到版本切换,从 PATH 到缓存,覆盖开发环境管理的完整链路</p>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="icon">📦</div>
+        <h3>多版本管理</h3>
+        <p>JDK、Python、Node.js 等 15 类环境,任意多版本并存互不干扰,一键切换当前版本。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">⚡</div>
+        <h3>国内镜像加速</h3>
+        <p>清华 TUNA、华为云、npmmirror、rsproxy 等镜像源内置,下载速度不再看运气。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🔗</div>
+        <h3>散装环境纳入</h3>
+        <p>扫描 PATH 中已装的散装环境,以链接方式一键纳入统一管理,不移动文件。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🛣️</div>
+        <h3>PATH 可视化管理</h3>
+        <p>用户/系统 PATH 增删排序,JAVA_HOME 等环境变量一键配置,修改前自动备份。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🧹</div>
+        <h3>缓存检测清理</h3>
+        <p>npm、pip、cargo、Maven 等缓存目录一键检测占用并清理,还给磁盘一个清白。</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🧳</div>
+        <h3>绿色便携</h3>
+        <p>不写注册表、不散落 C 盘,整个根目录复制到 U 盘即可整机迁移。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="envs" style="background: linear-gradient(180deg, #f4f4f5 0%, #fafafa 100%);">
+  <div class="container">
+    <div class="section-head">
+      <h2>支持的环境</h2>
+      <p>15 种环境类型,持续增加中</p>
+    </div>
+    <div class="chips">
+      <span class="chip">JDK</span>
+      <span class="chip">Python</span>
+      <span class="chip">Node.js</span>
+      <span class="chip">Go</span>
+      <span class="chip">Rust</span>
+      <span class="chip">Maven</span>
+      <span class="chip">Gradle</span>
+      <span class="chip">PHP</span>
+      <span class="chip">LLVM</span>
+      <span class="chip">Zig</span>
+      <span class="chip">Deno</span>
+      <span class="chip">Bun</span>
+      <span class="chip">Git</span>
+      <span class="chip">GitHub CLI</span>
+      <span class="chip">C/C++ (MinGW)</span>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="container">
+    <div class="section-head">
+      <h2>工作原理</h2>
+      <p>目录即真相,Junction 即切换</p>
+    </div>
+    <div class="how">
+      <pre>D:\DevEnv\
+├── envs\                 <b># 各类型环境的多版本仓库</b>
+│   ├── jdks\temurin-21\
+│   └── nodes\node-22\
+├── current\              <b># Junction 指针(切换版本 = 重指链接)</b>
+│   ├── jdk   →  envs\jdks\temurin-21
+│   └── node  →  envs\nodes\node-22
+└── globals\              <b># npm/pip 等全局包与缓存</b></pre>
+      <p>
+        PATH 中只需保留一条 <code>current\*</code> 路径:切换版本时 Junction 重新指向目标目录,
+        PATH 保持不变,新开终端立即生效。散装环境同样以 Junction 纳入——原安装位置不动,却能用同一套机制切换。
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container footer-inner">
+    <div>EnvCon · MIT License · Tauri 2 + React 19 + Rust</div>
+    <div>
+      <a href="https://github.com/513975/envcon" target="_blank">GitHub</a> ·
+      <a href="https://github.com/513975/envcon/releases" target="_blank">Releases</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // 侧边栏切换页面
+  const navBtns = document.querySelectorAll('.app-nav button[data-page]');
+  const pages = document.querySelectorAll('.app-page');
+  navBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      navBtns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+      pages.forEach(function (p) { p.classList.toggle('show', p.id === 'page-' + btn.dataset.page); });
+    });
+  });
+</script>
+
+</body>
+</html>

@@ -147,6 +147,8 @@ pub struct ExternalEnv {
     pub version: Option<String>,
     pub path: Option<String>,
     pub source: String,
+    /// 可纳入管理的环境类型(结构不兼容时为 None)
+    pub env_type: Option<EnvType>,
 }
 
 #[derive(Debug, Clone, Serialize)]

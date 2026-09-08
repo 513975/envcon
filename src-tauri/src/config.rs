@@ -7,7 +7,7 @@ use crate::error::Result;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// 管理根目录(如 D:\DevEnvManager)
+    /// 管理根目录(如 D:\DevEnv)
     pub root: Option<String>,
     /// 下载临时目录
     pub downloads_dir: Option<String>,
@@ -76,7 +76,7 @@ impl AppConfig {
         Ok(())
     }
 
-    /// 解析管理根目录:设置优先 → D:\DevEnvManager 存在则用 → None
+    /// 解析管理根目录:设置优先 → 默认目录存在则用(新名优先,兼容旧名) → None
     pub fn resolve_root(&self) -> Option<PathBuf> {
         if let Some(r) = &self.settings.root {
             let p = PathBuf::from(r);
@@ -84,9 +84,11 @@ impl AppConfig {
                 return Some(p);
             }
         }
-        let default = PathBuf::from(r"D:\DevEnvManager");
-        if default.exists() {
-            return Some(default);
+        for d in [r"D:\DevEnv", r"D:\DevEnvManager"] {
+            let p = PathBuf::from(d);
+            if p.exists() {
+                return Some(p);
+            }
         }
         None
     }

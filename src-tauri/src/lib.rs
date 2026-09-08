@@ -27,6 +27,7 @@ pub fn run() {
             commands::get_overview,
             commands::set_root,
             commands::scan_system,
+            commands::integrate_external_env,
             commands::switch_env,
             commands::uninstall_env,
             commands::open_path,

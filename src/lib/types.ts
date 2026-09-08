@@ -74,6 +74,8 @@ export interface ExternalEnv {
   version: string | null;
   path: string | null;
   source: string;
+  /** 可纳入管理的环境类型(结构不兼容时为 null) */
+  envType: EnvType | null;
 }
 
 export interface PathState {

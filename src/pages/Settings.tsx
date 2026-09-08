@@ -134,7 +134,7 @@ export function Settings() {
             <input
               value={rootInput}
               onChange={(e) => setRootInput(e.target.value)}
-              placeholder="D:\DevEnvManager"
+              placeholder="D:\DevEnv"
               className="h-9 flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 text-sm outline-none focus:border-emerald-500"
             />
             <Button onClick={pickRoot}>浏览…</Button>

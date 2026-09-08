@@ -60,14 +60,14 @@ export function Dashboard() {
           <Empty
             icon={<Harddrive />}
             title="设置管理根目录"
-            desc="EnvCon 通过一个根目录统一管理所有开发环境(推荐空目录或沿用 D:\DevEnvManager)。环境将安装在 根目录/envs 下。"
+            desc="EnvCon 通过一个根目录统一管理所有开发环境(推荐空目录或沿用 D:\DevEnv)。环境将安装在 根目录/envs 下。"
             action={
               rootSetting ? (
                 <div className="flex items-center gap-2">
                   <input
                     value={rootInput}
                     onChange={(e) => setRootInput(e.target.value)}
-                    placeholder="D:\DevEnvManager"
+                    placeholder="D:\DevEnv"
                     className="h-9 w-72 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 text-sm outline-none focus:border-emerald-500"
                   />
                   <Button variant="primary" onClick={applyRoot}>

@@ -66,7 +66,106 @@ pub async fn set_root(state: State<'_, AppState>, path: String) -> Result<String
 #[tauri::command]
 pub async fn scan_system(state: State<'_, AppState>) -> Result<Vec<crate::types::ExternalEnv>> {
     let root = state.with_cfg(|c| c.resolve_root());
-    Ok(system::scan_system(root.as_deref()).await)
+    let integrated = integrated_targets(root.as_deref());
+    Ok(system::scan_system(root.as_deref(), &integrated).await)
+}
+
+/// 收集 envs\ 下所有 junction 链接的目标(即已纳入管理的散装环境)
+fn integrated_targets(root: Option<&Path>) -> Vec<PathBuf> {
+    let Some(root) = root else {
+        return vec![];
+    };
+    let mut out = Vec::new();
+    let Ok(cats) = std::fs::read_dir(root.join("envs")) else {
+        return out;
+    };
+    for cat in cats.flatten() {
+        let Ok(entries) = std::fs::read_dir(cat.path()) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            let is_link = std::fs::symlink_metadata(&p)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+            if is_link {
+                if let Ok(t) = std::fs::read_link(&p) {
+                    out.push(t);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 将散装环境以 junction 链接方式纳入管理(不移动/复制文件),返回环境名
+#[tauri::command]
+pub async fn integrate_external_env(
+    state: State<'_, AppState>,
+    env_type: EnvType,
+    path: String,
+    version: Option<String>,
+) -> Result<String> {
+    let root = require_root(&state)?;
+    let exe = PathBuf::from(&path);
+    if !exe.exists() {
+        return Err(AppError::msg(format!("路径不存在: {path}")));
+    }
+    let install_root = system::install_root_for(env_type, &exe)
+        .ok_or_else(|| AppError::msg("无法识别该工具的安装目录结构,不支持纳入管理"))?;
+    if install_root.starts_with(&root) {
+        return Err(AppError::msg("该环境已位于管理根目录内"));
+    }
+    // 名称:system-{版本},冲突时追加序号
+    let base = match version.as_deref().and_then(version_token) {
+        Some(v) => format!("system-{v}"),
+        None => format!("system-{}", env_type.junction()),
+    };
+    let cat_dir = root.join("envs").join(env_type.folder());
+    std::fs::create_dir_all(&cat_dir)?;
+    let mut name = base.clone();
+    let mut n = 2;
+    while cat_dir.join(&name).exists() {
+        name = format!("{base}-{n}");
+        n += 1;
+    }
+    let link = cat_dir.join(&name);
+    junction::create(&install_root, &link)
+        .map_err(|e| AppError::msg(format!("创建链接失败: {e}")))?;
+    Ok(name)
+}
+
+/// 从版本输出行提取纯版本号(如 `openjdk version "17.0.12" ...` → `17.0.12`)
+fn version_token(raw: &str) -> Option<String> {
+    let b = raw.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_digit() {
+            let start = i;
+            let mut j = i;
+            let mut dots = 0;
+            while j < b.len() && (b[j].is_ascii_digit() || b[j] == b'.') {
+                if b[j] == b'.' {
+                    // 点后必须紧跟数字,否则结束
+                    if j + 1 < b.len() && b[j + 1].is_ascii_digit() {
+                        dots += 1;
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                } else {
+                    j += 1;
+                }
+            }
+            if dots >= 1 {
+                return Some(raw[start..j].to_string());
+            }
+            i = j.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -94,6 +193,15 @@ pub async fn uninstall_env(
     let junction = root.join("current").join(env_type.junction());
     if crate::config::junction_target_name(&junction).as_deref() == Some(name.as_str()) {
         switcher::remove_junction_for(&root, env_type)?;
+    }
+    // 链接环境(纳入管理的散装环境):只删链接本身,不动原安装目录
+    let is_link = std::fs::symlink_metadata(&env_dir)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if is_link {
+        junction::delete(&env_dir)
+            .map_err(|e| AppError::msg(format!("移除链接失败: {e}")))?;
+        return Ok(());
     }
     tokio::task::spawn_blocking(move || force_remove_dir_all(&env_dir))
         .await

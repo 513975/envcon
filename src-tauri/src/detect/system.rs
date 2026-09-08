@@ -1,10 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use tokio::process::Command;
 
-use crate::types::ExternalEnv;
+use crate::types::{EnvType, ExternalEnv};
 
 /// 工具定义:(展示名, 可执行名, 版本参数, 版本命令超时)
 const TOOLS: &[(&str, &str, &[&str], Duration)] = &[
@@ -40,8 +39,84 @@ const TOOLS: &[(&str, &str, &[&str], Duration)] = &[
     ("Docker", "docker", &["--version"], Duration::from_secs(8)),
 ];
 
-/// 扫描系统散装环境:where.exe 定位 + 版本探测(并行执行,跳过管理器目录内的)
-pub async fn scan_system(managed_root: Option<&Path>) -> Vec<ExternalEnv> {
+/// 工具名 → 可纳入管理的环境类型(结构不兼容的不支持)
+fn integrable_type(tool: &str) -> Option<EnvType> {
+    match tool {
+        "Java" => Some(EnvType::Jdk),
+        "Python" => Some(EnvType::Python),
+        "Node.js" => Some(EnvType::Node),
+        "Go" => Some(EnvType::Go),
+        "PHP" => Some(EnvType::Php),
+        "Zig" => Some(EnvType::Zig),
+        "LLVM" => Some(EnvType::Llvm),
+        "Deno" => Some(EnvType::Deno),
+        "Bun" => Some(EnvType::Bun),
+        "GitHub CLI" => Some(EnvType::Gh),
+        "Maven" => Some(EnvType::Maven),
+        "Gradle" => Some(EnvType::Gradle),
+        "Git" => Some(EnvType::Git),
+        "GCC" => Some(EnvType::Mingw),
+        _ => None,
+    }
+}
+
+/// 目录是否符合该类型环境的预期结构(防止链接到错误目录)
+fn looks_like(env_type: EnvType, root: &Path) -> bool {
+    let has = |p: PathBuf| p.exists();
+    match env_type {
+        EnvType::Jdk => has(root.join("bin").join("java.exe")),
+        EnvType::Python => has(root.join("python.exe")),
+        EnvType::Node => has(root.join("node.exe")),
+        EnvType::Go => has(root.join("bin").join("go.exe")),
+        EnvType::Maven => has(root.join("bin").join("mvn.cmd")) || has(root.join("bin").join("mvn.bat")),
+        EnvType::Gradle => has(root.join("bin").join("gradle.bat")),
+        EnvType::Php => has(root.join("php.exe")),
+        EnvType::Llvm => has(root.join("bin").join("clang.exe")),
+        EnvType::Zig => has(root.join("zig.exe")),
+        EnvType::Deno => has(root.join("deno.exe")),
+        EnvType::Bun => has(root.join("bun.exe")),
+        EnvType::Git => has(root.join("cmd").join("git.exe")),
+        EnvType::Gh => has(root.join("bin").join("gh.exe")),
+        EnvType::Mingw => has(root.join("bin").join("gcc.exe")),
+        // rustup 代理结构(cargo\bin\rustc.exe)与受管结构不兼容
+        EnvType::Rust => false,
+    }
+}
+
+/// 从 where.exe 定位到的可执行文件推导安装根目录
+pub fn install_root_for(env_type: EnvType, exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let dir_name = dir.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    match dir_name.as_deref() {
+        // exe 位于 bin\ / cmd\ 下:安装根目录一般是其父级
+        Some("bin") | Some("cmd") => {
+            if let Some(p) = dir.parent() {
+                candidates.push(p.to_path_buf());
+            }
+        }
+        // shim 目录(scoop 等)不是真实安装目录
+        Some("shims") => return None,
+        _ => {}
+    }
+    candidates.push(dir.to_path_buf());
+    candidates.into_iter().find(|c| looks_like(env_type, c))
+}
+
+/// 路径等价比较(不区分大小写与分隔符方向)
+fn paths_eq(a: &Path, b: &Path) -> bool {
+    let norm = |p: &Path| {
+        p.to_string_lossy()
+            .to_lowercase()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_string()
+    };
+    norm(a) == norm(b)
+}
+
+/// 扫描系统散装环境:where.exe 定位 + 版本探测(并行执行,跳过管理器目录内与已纳入管理的)
+pub async fn scan_system(managed_root: Option<&Path>, integrated: &[PathBuf]) -> Vec<ExternalEnv> {
     let mut out: Vec<ExternalEnv> = Vec::new();
 
     // 分批并行(每批 8 个),避免进程风暴
@@ -79,11 +154,21 @@ pub async fn scan_system(managed_root: Option<&Path>) -> Vec<ExternalEnv> {
                     continue;
                 }
             }
+            let env_type = integrable_type(&tool);
+            // 已通过链接纳入 envs\ 管理的不再列出
+            if let Some(t) = env_type {
+                if let Some(install_root) = install_root_for(t, &p) {
+                    if integrated.iter().any(|i| paths_eq(i, &install_root)) {
+                        continue;
+                    }
+                }
+            }
             out.push(ExternalEnv {
                 tool,
                 version,
                 path: Some(path),
                 source: "PATH".to_string(),
+                env_type,
             });
         }
     }
