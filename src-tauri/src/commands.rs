@@ -85,11 +85,8 @@ fn integrated_targets(root: Option<&Path>) -> Vec<PathBuf> {
         };
         for e in entries.flatten() {
             let p = e.path();
-            let is_link = std::fs::symlink_metadata(&p)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(false);
-            if is_link {
-                if let Ok(t) = std::fs::read_link(&p) {
+            if junction::exists(&p).unwrap_or(false) {
+                if let Ok(t) = junction::get_target(&p) {
                     out.push(t);
                 }
             }

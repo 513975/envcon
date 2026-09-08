@@ -65,7 +65,7 @@ export function Sidebar() {
       </nav>
 
       <div className="px-4 py-3 text-[10px] text-zinc-400 dark:text-zinc-600 border-t border-zinc-100 dark:border-zinc-800">
-        v0.1.0 · 便携模式就绪
+        v0.1.1 · 便携模式就绪
       </div>
     </aside>
   );

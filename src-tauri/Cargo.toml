@@ -1,6 +1,6 @@
 [package]
 name = "envcon"
-version = "0.1.0"
+version = "0.1.1"
 description = "EnvCon — Windows 开发环境一站式管理工具"
 authors = ["island"]
 edition = "2021"

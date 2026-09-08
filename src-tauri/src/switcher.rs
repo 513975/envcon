@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use crate::error::{AppError, Result};
 use crate::types::EnvType;
@@ -25,30 +26,79 @@ pub fn remove_junction_for(root: &Path, env_type: EnvType) -> Result<()> {
     remove_junction(&junction)
 }
 
-/// 安全移除 junction:仅当它是链接时;带重试(进程占用场景)
-fn remove_junction(junction: &Path) -> Result<()> {
-    let meta = match std::fs::symlink_metadata(junction) {
-        Ok(m) => m,
-        Err(_) => return Ok(()), // 不存在,视为已移除
-    };
-    if !meta.file_type().is_symlink() {
-        return Err(AppError::msg(format!(
-            "{} 不是链接(可能是真实目录),为避免误删已跳过,请手动处理",
-            junction.display()
-        )));
-    }
-    let mut last_err = None;
+/// 判定路径是否为链接(junction 或符号链接)
+fn is_link(path: &Path) -> bool {
+    junction::exists(path).unwrap_or(false)
+        || std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+}
+
+/// 目录是否为空(读取失败按非空处理,保守起见)
+fn is_empty_dir(path: &Path) -> bool {
+    std::fs::read_dir(path).is_ok_and(|mut rd| rd.next().is_none())
+}
+
+/// 带重试执行删除操作(进程占用场景)
+fn retry_remove(label: &str, mut f: impl FnMut() -> std::io::Result<()>) -> Result<()> {
+    let mut last_err: Option<std::io::Error> = None;
     for i in 0..5 {
-        match junction::delete(junction) {
+        match f() {
             Ok(()) => return Ok(()),
+            // 期间被并发移除,视为成功
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(e) => {
                 last_err = Some(e);
-                std::thread::sleep(std::time::Duration::from_millis(200 * (i + 1)));
+                std::thread::sleep(Duration::from_millis(200 * (i + 1)));
             }
         }
     }
+    let msg = last_err.map(|e| e.to_string()).unwrap_or_default();
     Err(AppError::msg(format!(
-        "移除链接失败(可能有进程占用,请关闭相关程序后重试): {:?}",
-        last_err
+        "{label}失败(可能有进程占用,请关闭相关程序后重试): {msg}"
     )))
+}
+
+/// 把路径改名挪开为 <名称>.old-<时间戳>(非空真实目录,避免误删数据)
+fn rename_aside(path: &Path) -> Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".into());
+    let parent = path.parent().ok_or_else(|| AppError::msg("路径异常"))?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut bak = parent.join(format!("{name}.old-{ts}"));
+    let mut n = 1u64;
+    while bak.exists() {
+        n += 1;
+        bak = parent.join(format!("{name}.old-{ts}-{n}"));
+    }
+    std::fs::rename(path, &bak).map_err(|e| {
+        AppError::msg(format!(
+            "{} 为真实目录且无法自动挪开({e}),请手动处理后重试",
+            path.display()
+        ))
+    })
+}
+
+/// 安全清除 current/<junction> 占位,为重新创建链接做准备:
+/// - 链接 → 只删链接本身(RemoveDirectoryW 对 junction 不会触碰目标内容;
+///   不能用 junction::delete,它只清除链接属性,残留的空目录会挡住后续重建)
+/// - 空的真实目录(历史损坏残留) → 直接删除
+/// - 非空真实目录/文件 → 改名挪开为 <名称>.old-<时间戳>,不误删数据
+fn remove_junction(junction: &Path) -> Result<()> {
+    let Ok(meta) = std::fs::symlink_metadata(junction) else {
+        return Ok(()); // 不存在,视为已移除
+    };
+
+    if is_link(junction) {
+        return retry_remove("移除链接", || std::fs::remove_dir(junction));
+    }
+    if meta.is_dir() && is_empty_dir(junction) {
+        return retry_remove("清理残留目录", || std::fs::remove_dir(junction));
+    }
+    rename_aside(junction)
 }
