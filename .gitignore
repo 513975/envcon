@@ -24,6 +24,7 @@ src-tauri/target-*/
 
 # Local test scripts and artifacts (not published)
 /tests/
+/src-tauri/tests/
 
 # TRAE IDE
 .trae/
