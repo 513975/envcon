@@ -15,6 +15,7 @@ import { Badge } from "../components/ui/Badge";
 import { Empty } from "../components/ui/Empty";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
+import { APP_VERSION } from "../lib/version";
 import { useAppStore } from "../lib/store";
 import { cn } from "../lib/format";
 
@@ -229,7 +230,7 @@ export function Settings() {
           <Package className="size-4 text-white" />
         </div>
         <div className="flex-1">
-          <div className="text-sm font-bold">EnvCon v0.1.0</div>
+          <div className="text-sm font-bold">EnvCon v{APP_VERSION}</div>
           <div className="text-xs text-zinc-400">Windows 开发环境一站式管理工具 · Tauri 2</div>
         </div>
       </Card>

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { InstallTask } from "./types";
 import { api } from "./api";
+import { toast } from "./toast";
 
 interface InstallState {
   tasks: Record<number, InstallTask>;
@@ -26,8 +27,8 @@ export const useInstallStore = create<InstallState>((set) => ({
       set({
         tasks: Object.fromEntries(list.map((t) => [t.id, t])),
       });
-    } catch {
-      /* ignore */
+    } catch (e) {
+      toast.error("读取安装任务失败", String(e));
     }
   },
 }));
@@ -39,12 +40,20 @@ let unlisteners: UnlistenFn[] = [];
 export async function startInstallListener() {
   if (started) return;
   started = true;
-  await useInstallStore.getState().init();
-  unlisteners.push(
-    await listen<InstallTask>("install://update", (e) => {
-      useInstallStore.getState().apply(e.payload);
-    }),
-  );
+  const pending: InstallTask[] = [];
+  let initialized = false;
+  try {
+    unlisteners.push(await listen<InstallTask>("install://update", (e) => {
+      if (initialized) useInstallStore.getState().apply(e.payload);
+      else pending.push(e.payload);
+    }));
+    await useInstallStore.getState().init();
+    pending.forEach(t => useInstallStore.getState().apply(t));
+    initialized = true;
+  } catch (e) {
+    started = false;
+    toast.error("安装状态监听失败", String(e));
+  }
 }
 
 export function stopInstallListener() {

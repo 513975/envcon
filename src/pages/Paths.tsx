@@ -7,23 +7,20 @@ import {
   ArrowDown,
   Zap,
   FolderOpen,
-  Eraser,
   Lock,
   Check,
   Variable,
   Wand2,
-  Package,
 } from "lucide-react";
 import { PageShell } from "../components/layout/PageShell";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Spinner, Empty } from "../components/ui/Empty";
-import { ConfirmDialog } from "../components/ui/Modal";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
-import { formatBytes, cn } from "../lib/format";
-import type { PathState, CacheInfo, EnvVarInfo, ToolConfig } from "../lib/types";
+import { cn } from "../lib/format";
+import type { PathState, EnvVarInfo } from "../lib/types";
 
 export function Paths() {
   // PATH 状态
@@ -38,16 +35,6 @@ export function Paths() {
   const [envVars, setEnvVars] = useState<EnvVarInfo[] | null>(null);
   const [envVarEdits, setEnvVarEdits] = useState<Record<string, string>>({});
   const [envVarSaving, setEnvVarSaving] = useState<string | null>(null);
-
-  // 包管理器路径配置
-  const [toolConfigs, setToolConfigs] = useState<ToolConfig[] | null>(null);
-  const [toolBusy, setToolBusy] = useState<string | null>(null);
-
-  // 缓存
-  const [caches, setCaches] = useState<CacheInfo[] | null>(null);
-  const [cacheLoading, setCacheLoading] = useState(false);
-  const [confirmClean, setConfirmClean] = useState<CacheInfo | null>(null);
-  const [cleaning, setCleaning] = useState(false);
 
   const loadPath = async () => {
     try {
@@ -70,76 +57,10 @@ export function Paths() {
     }
   };
 
-  const loadToolConfigs = async () => {
-    try {
-      setToolConfigs(await api.getToolConfigs());
-    } catch (e) {
-      toast.error("读取包管理器配置失败", String(e));
-    }
-  };
-
-  const loadCaches = async () => {
-    setCacheLoading(true);
-    try {
-      setCaches(await api.getCaches());
-    } catch (e) {
-      toast.error("缓存检测失败", String(e));
-    } finally {
-      setCacheLoading(false);
-    }
-  };
-
   useEffect(() => {
     loadPath();
-    loadCaches();
     loadEnvVars();
-    loadToolConfigs();
   }, []);
-
-  /** 应用单个工具的默认路径 */
-  const applyTool = async (t: ToolConfig) => {
-    setToolBusy(t.tool);
-    try {
-      const applied = await api.applyToolConfig(
-        t.tool,
-        t.defaultGlobal ?? null,
-        t.defaultCache ?? null,
-      );
-      toast.success(`${t.name} 已配置`, applied.join("\n") || undefined);
-      await loadToolConfigs();
-    } catch (e) {
-      toast.error(`${t.name} 配置失败`, String(e));
-    } finally {
-      setToolBusy(null);
-    }
-  };
-
-  /** 一键:全部可用工具的路径指向 根目录\globals */
-  const applyAllTools = async () => {
-    if (!toolConfigs) return;
-    const targets = toolConfigs.filter(
-      (t) => t.available && (t.defaultGlobal || t.defaultCache),
-    );
-    if (targets.length === 0) {
-      toast.info("没有可配置的工具", "未检测到 npm/pnpm/yarn/pip");
-      return;
-    }
-    setToolBusy("__all__");
-    let ok = 0;
-    for (const t of targets) {
-      try {
-        await api.applyToolConfig(t.tool, t.defaultGlobal ?? null, t.defaultCache ?? null);
-        ok += 1;
-      } catch {
-        /* 单个失败继续 */
-      }
-    }
-    setToolBusy(null);
-    if (ok > 0) {
-      toast.success(`已配置 ${ok} 个工具`, "全局与缓存路径已指向 根目录\\globals");
-    }
-    await loadToolConfigs();
-  };
 
   const saveEnvVar = async (v: EnvVarInfo) => {
     const value = envVarEdits[v.name] ?? "";
@@ -170,15 +91,17 @@ export function Paths() {
     }
     setEnvVarSaving("__all__");
     let ok = 0;
+    const failures: string[] = [];
     for (const v of targets) {
       try {
         await api.saveEnvVar(v.name, v.suggested!);
         ok += 1;
-      } catch {
-        /* 单个失败继续 */
+      } catch (e) {
+        failures.push(`${v.name}: ${String(e)}`);
       }
     }
     setEnvVarSaving(null);
+    if (failures.length) toast.error(`${failures.length} 个变量未更新`, failures.join("\n"));
     if (ok > 0) {
       toast.success(`已更新 ${ok} 个变量`, "全部指向当前激活环境,新开终端即生效");
     }
@@ -216,21 +139,6 @@ export function Paths() {
     }
   };
 
-  const doClean = async () => {
-    if (!confirmClean) return;
-    setCleaning(true);
-    try {
-      const freed = await api.cleanCache(confirmClean.tool);
-      toast.success("缓存已清理", `释放 ${formatBytes(freed)}`);
-      setConfirmClean(null);
-      await loadCaches();
-    } catch (e) {
-      toast.error("清理失败", String(e));
-    } finally {
-      setCleaning(false);
-    }
-  };
-
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= userPath.length) return;
@@ -263,7 +171,7 @@ export function Paths() {
   return (
     <PageShell
       title="路径管理"
-      desc="用户 PATH 编辑 / 环境一键集成 / 缓存清理"
+      desc="用户 PATH 与开发环境变量"
       actions={
         <Button size="sm" onClick={loadPath}>
           <RefreshCw className="size-3.5" />
@@ -294,7 +202,7 @@ export function Paths() {
       <Card>
         <CardHeader
           title="用户 PATH"
-          desc="保存前自动备份;修改对新开的终端立即生效"
+          desc="保存前自动备份；新开的终端会读取更新后的 PATH"
           actions={
             <>
               {dirty && (
@@ -504,157 +412,6 @@ export function Paths() {
         )}
       </Card>
 
-      {/* 包管理器路径配置 */}
-      <Card className="mt-5">
-        <CardHeader
-          title={
-            <span className="flex items-center gap-1.5">
-              <Package className="size-3.5 text-zinc-400" />
-              包管理器路径
-            </span>
-          }
-          desc="npm / pnpm / yarn / pip 的全局安装与缓存路径,一键收纳到 根目录\\globals"
-          actions={
-            <>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={applyAllTools}
-                loading={toolBusy === "__all__"}
-              >
-                <Wand2 className="size-3.5" />
-                一键配置全部
-              </Button>
-              <Button size="sm" onClick={loadToolConfigs} loading={toolBusy === null && !toolConfigs}>
-                <RefreshCw className="size-3.5" />
-              </Button>
-            </>
-          }
-        />
-        {!toolConfigs ? (
-          <Spinner />
-        ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {toolConfigs.map((t) => (
-              <div key={t.tool} className="flex items-center gap-3 px-4 py-3">
-                <div className="w-16 shrink-0">
-                  <div className="text-sm font-semibold">{t.name}</div>
-                  {!t.available && (
-                    <div className="text-[10px] text-zinc-400">未安装</div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1 grid grid-cols-2 gap-x-4 gap-y-1">
-                  <div>
-                    <div className="text-[10px] text-zinc-400">全局安装</div>
-                    <div
-                      className="text-xs font-mono truncate selectable"
-                      title={t.globalPath ?? "默认(用户目录)"}
-                    >
-                      {t.defaultGlobal
-                        ? t.globalPath ?? <span className="text-zinc-400">未自定义</span>
-                        : "—"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-zinc-400">缓存</div>
-                    <div
-                      className="text-xs font-mono truncate selectable"
-                      title={t.cachePath ?? "默认(用户目录)"}
-                    >
-                      {t.cachePath ?? <span className="text-zinc-400">未自定义</span>}
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  disabled={!t.available || !t.defaultCache}
-                  loading={toolBusy === t.tool}
-                  title={t.defaultGlobal ? `设为 ${t.defaultGlobal} / ${t.defaultCache}` : undefined}
-                  onClick={() => applyTool(t)}
-                >
-                  <Wand2 className="size-3.5" />
-                  收纳到根目录
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* 缓存管理 */}
-      <Card className="mt-5">
-        <CardHeader
-          title="开发缓存"
-          desc="包管理器与构建工具的本地缓存,可安全清理"
-          actions={
-            <Button size="sm" onClick={loadCaches} loading={cacheLoading}>
-              <RefreshCw className="size-3.5" />
-              重新统计
-            </Button>
-          }
-        />
-        {cacheLoading && !caches ? (
-          <Spinner />
-        ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {(caches ?? []).map((c) => (
-              <div key={c.tool} className="flex items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{c.name}</span>
-                    {!c.exists && <Badge>未检测到</Badge>}
-                  </div>
-                  <div className="mt-0.5 text-xs text-zinc-400 truncate selectable" title={c.path}>
-                    {c.path}
-                  </div>
-                </div>
-                <span className={cn("text-sm font-semibold tabular-nums", c.exists ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400")}>
-                  {c.exists ? formatBytes(c.sizeBytes) : "—"}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    onClick={() => api.openPath(c.path).catch(() => toast.error("打开失败", "目录不存在"))}
-                  >
-                    <FolderOpen className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950 disabled:hidden"
-                    disabled={!c.exists || (c.sizeBytes ?? 0) === 0}
-                    onClick={() => setConfirmClean(c)}
-                  >
-                    <Eraser className="size-3.5" />
-                    清理
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <ConfirmDialog
-        open={confirmClean !== null}
-        onClose={() => setConfirmClean(null)}
-        onConfirm={doClean}
-        danger
-        confirmText="清理"
-        loading={cleaning}
-        title={`清理 ${confirmClean?.name ?? ""}`}
-        message={
-          <>
-            <p>
-              将删除 <b className="selectable">{confirmClean?.path}</b> 下的全部内容
-              (释放约 {formatBytes(confirmClean?.sizeBytes ?? null)})。
-            </p>
-            <p className="mt-1.5 text-xs text-zinc-400">
-              缓存清理是安全的,下次安装依赖时会自动重新下载。
-            </p>
-          </>
-        }
-      />
     </PageShell>
   );
 }

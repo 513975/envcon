@@ -26,27 +26,71 @@ pub async fn probe_version(env_type: EnvType, dir: &Path) -> Option<String> {
     }
 }
 
-/// 执行命令取第一行输出(java 输出在 stderr 也要兼容)
-async fn run_capture(exe: &Path, args: &[&str], timeout: Duration) -> Option<String> {
-    let fut = Command::new(exe)
+/// 执行命令并保留 stdout/stderr，避免把启动提示误当版本。
+/// `kill_on_drop` 确保超时后不会留下仍在运行的探测进程。
+async fn run_capture_with_env(
+    exe: &Path,
+    args: &[&str],
+    timeout: Duration,
+    envs: &[(&str, &Path)],
+) -> Result<String, String> {
+    let mut command = Command::new(exe);
+    command
         .args(args)
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        .output();
-    let out = tokio::time::timeout(timeout, fut).await.ok()?.ok()?;
-    let s = if out.stdout.is_empty() {
-        String::from_utf8_lossy(&out.stderr).to_string()
-    } else {
-        String::from_utf8_lossy(&out.stdout).to_string()
-    };
-    s.lines().next().map(|l| l.trim().to_string())
+        .creation_flags(0x08000000)
+        .kill_on_drop(true);
+    for (name, value) in envs {
+        command.env(name, value);
+    }
+    let out = tokio::time::timeout(timeout, command.output())
+        .await
+        .map_err(|_| format!("探测超时（{} 秒）", timeout.as_secs()))?
+        .map_err(|e| format!("无法启动: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let detail = if stderr.trim().is_empty() { stdout.trim() } else { stderr.trim() };
+        return Err(format!("退出码 {}: {}", out.status.code().unwrap_or(-1),
+            if detail.is_empty() { "命令未提供错误输出" } else { detail }));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    Ok(format!("{stdout}\n{stderr}"))
+}
+
+async fn run_capture(exe: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+    run_capture_with_env(exe, args, timeout, &[]).await
+}
+
+/// 从命令输出中提取类似 3.14.0、20.1.0.windows.1 的版本 token。
+fn version_token(raw: &str) -> Option<String> {
+    for token in raw.split_whitespace() {
+        let Some(start) = token.find(|c: char| c.is_ascii_digit()) else { continue };
+        let candidate = token[start..]
+            .trim_matches(|c: char| matches!(c, '"' | '\'' | '(' | ')' | '[' | ']' | ',' | ';'));
+        let mut value = String::new();
+        let mut dots = 0;
+        for c in candidate.chars() {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+') {
+                if c == '.' { dots += 1; }
+                value.push(c);
+            } else {
+                break;
+            }
+        }
+        if dots >= 1 && value.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            return Some(value.trim_end_matches(['.', '-', '+']).to_string());
+        }
+    }
+    None
 }
 
 async fn probe_cmd(exe: &Path, args: &[&str]) -> Option<String> {
     if !exe.exists() {
         return None;
     }
-    let line = run_capture(exe, args, Duration::from_secs(3)).await?;
-    let s = line.trim();
+    let output = run_capture(exe, args, Duration::from_secs(3)).await.ok()?;
+    let s = output.trim();
     // 兼容 "v24.17.0" / "Python 3.14.0" / "deno 2.1.0 (...)" / "bun 1.1.x"
     let s = s
         .strip_prefix("Python ")
@@ -58,8 +102,7 @@ async fn probe_cmd(exe: &Path, args: &[&str]) -> Option<String> {
     } else {
         s
     };
-    // 取首词(去掉 deno "(stable, ...)" 之类的尾巴)
-    Some(s.split_whitespace().next().unwrap_or(s).to_string())
+    version_token(s).or_else(|| s.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_string))
 }
 
 /// 去掉 "word " 前缀(仅当后跟版本号数字)
@@ -74,33 +117,34 @@ fn strip_word_prefix<'a>(s: &'a str, word: &str) -> Option<&'a str> {
 
 /// JDK:读 release 文件 JAVA_VERSION="17.0.12"
 async fn probe_jdk(dir: &Path) -> Option<String> {
-    let release = tokio::fs::read_to_string(dir.join("release")).await.ok()?;
-    for line in release.lines() {
-        if let Some(v) = line.strip_prefix("JAVA_VERSION=") {
-            let v = v.trim().trim_matches('"');
-            if !v.is_empty() {
-                return Some(v.to_string());
+    if let Ok(release) = tokio::fs::read_to_string(dir.join("release")).await {
+        for line in release.lines() {
+            if let Some(v) = line.strip_prefix("JAVA_VERSION=") {
+                let v = v.trim().trim_matches('"');
+                if !v.is_empty() { return Some(v.to_string()); }
             }
         }
     }
-    None
+    let java = dir.join("bin").join("java.exe");
+    let output = run_capture(&java, &["-version"], Duration::from_secs(5)).await.ok()?;
+    output.lines().find(|line| line.contains("version")).and_then(version_token)
 }
 
 /// Go:读 VERSION 文件(内容如 go1.24.0);失败执行 go.exe
 async fn probe_go(dir: &Path) -> Option<String> {
     if let Ok(s) = tokio::fs::read_to_string(dir.join("VERSION")).await {
-        if let Some(v) = s.trim().strip_prefix("go") {
-            return Some(v.to_string());
+        if let Some(line) = s.lines().map(str::trim).find(|line| !line.is_empty()) {
+            if let Some(v) = line.strip_prefix("go").and_then(version_token) {
+                return Some(v);
+            }
         }
     }
     let go_exe = dir.join("bin").join("go.exe");
     if go_exe.exists() {
-        if let Some(line) = run_capture(&go_exe, &["version"], Duration::from_secs(3)).await {
+        if let Ok(line) = run_capture(&go_exe, &["version"], Duration::from_secs(3)).await {
             // "go version go1.24.0 windows/amd64"
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                return Some(parts[2].trim_start_matches("go").to_string());
-            }
+            if parts.len() >= 3 { return parts[2].trim_start_matches("go").parse::<String>().ok().and_then(|v| version_token(&v)); }
         }
     }
     None
@@ -108,14 +152,19 @@ async fn probe_go(dir: &Path) -> Option<String> {
 
 /// Rust:rustup 结构 → cargo.exe --version;否则文件夹名
 async fn probe_rust(dir: &Path) -> Option<String> {
-    let cargo = dir.join("cargo-home").join("bin").join("cargo.exe");
+    let cargo_home = dir.join("cargo-home");
+    let rustup_home = dir.join("rustup-home");
+    let envs = [("CARGO_HOME", cargo_home.as_path()), ("RUSTUP_HOME", rustup_home.as_path())];
+    let rustc = cargo_home.join("bin").join("rustc.exe");
+    if rustc.exists() {
+        if let Ok(output) = run_capture_with_env(&rustc, &["--version"], Duration::from_secs(8), &envs).await {
+            if let Some(v) = version_token(&output) { return Some(v); }
+        }
+    }
+    let cargo = cargo_home.join("bin").join("cargo.exe");
     if cargo.exists() {
-        if let Some(line) = run_capture(&cargo, &["--version"], Duration::from_secs(5)).await {
-            // "cargo 1.75.0 (1d84205a9 2023-11-20)"
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                return Some(parts[1].to_string());
-            }
+        if let Ok(output) = run_capture_with_env(&cargo, &["--version"], Duration::from_secs(8), &envs).await {
+            if let Some(v) = version_token(&output) { return Some(v); }
         }
     }
     None
@@ -134,7 +183,8 @@ async fn probe_maven(dir: &Path) -> Option<String> {
             return Some(v.to_string());
         }
     }
-    None
+    let mvn = dir.join("bin").join("mvn.cmd");
+    run_capture(&mvn, &["--version"], Duration::from_secs(8)).await.ok().and_then(|s| version_token(&s))
 }
 
 /// Gradle:解析 lib/gradle-base-services-{v}.jar 文件名
@@ -150,7 +200,8 @@ async fn probe_gradle(dir: &Path) -> Option<String> {
             return Some(v.to_string());
         }
     }
-    None
+    let gradle = dir.join("bin").join("gradle.bat");
+    run_capture(&gradle, &["--version"], Duration::from_secs(8)).await.ok().and_then(|s| version_token(&s))
 }
 
 /// PHP:php.exe -v → "PHP 8.3.16 (cli)..."
@@ -159,9 +210,8 @@ async fn probe_php(dir: &Path) -> Option<String> {
     if !php.exists() {
         return None;
     }
-    let line = run_capture(&php, &["-v"], Duration::from_secs(3)).await?;
-    let s = line.trim();
-    s.strip_prefix("PHP ").map(|r| r.split_whitespace().next().unwrap_or(r).to_string())
+    let output = run_capture(&php, &["-v"], Duration::from_secs(3)).await.ok()?;
+    version_token(&output)
 }
 
 /// LLVM:clang --version → "clang version 20.1.0"
@@ -170,10 +220,8 @@ async fn probe_llvm(dir: &Path) -> Option<String> {
     if !clang.exists() {
         return None;
     }
-    let line = run_capture(&clang, &["--version"], Duration::from_secs(3)).await?;
-    let s = line.trim();
-    s.strip_prefix("clang version ")
-        .map(|r| r.split_whitespace().next().unwrap_or(r).to_string())
+    let output = run_capture(&clang, &["--version"], Duration::from_secs(3)).await.ok()?;
+    version_token(&output)
 }
 
 /// Git(PortableGit):cmd\git.exe --version → "git version 2.55.0.windows.5"
@@ -182,9 +230,8 @@ async fn probe_git(dir: &Path) -> Option<String> {
     if !git.exists() {
         return None;
     }
-    let line = run_capture(&git, &["--version"], Duration::from_secs(5)).await?;
-    let s = line.trim();
-    s.strip_prefix("git version ").map(|r| r.to_string())
+    let output = run_capture(&git, &["--version"], Duration::from_secs(5)).await.ok()?;
+    version_token(&output)
 }
 
 /// GitHub CLI:bin\gh.exe --version → "gh version 2.100.0 (...)"
@@ -193,9 +240,8 @@ async fn probe_gh(dir: &Path) -> Option<String> {
     if !gh.exists() {
         return None;
     }
-    let line = run_capture(&gh, &["--version"], Duration::from_secs(5)).await?;
-    let s = line.trim();
-    s.strip_prefix("gh version ").map(|r| r.split_whitespace().next().unwrap_or(r).to_string())
+    let output = run_capture(&gh, &["--version"], Duration::from_secs(5)).await.ok()?;
+    version_token(&output)
 }
 
 /// MinGW(WinLibs):bin\gcc.exe --version → "gcc.exe (...) 16.2.0"(取末词版本号)
@@ -204,6 +250,27 @@ async fn probe_mingw(dir: &Path) -> Option<String> {
     if !gcc.exists() {
         return None;
     }
-    let line = run_capture(&gcc, &["--version"], Duration::from_secs(5)).await?;
-    line.split_whitespace().last().map(|v| v.to_string())
+    let output = run_capture(&gcc, &["--version"], Duration::from_secs(5)).await.ok()?;
+    version_token(&output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_token;
+
+    #[test]
+    fn extracts_versions_without_accepting_non_versions() {
+        assert_eq!(version_token("openjdk version \"21.0.4\""), Some("21.0.4".into()));
+        assert_eq!(version_token("clang version 20.1.0 (vendor build)"), Some("20.1.0".into()));
+        assert_eq!(version_token("gcc.exe (WinLibs) 14.2.0"), Some("14.2.0".into()));
+        assert_eq!(version_token("installation unavailable"), None);
+    }
+
+    #[test]
+    fn handles_go_version_file_with_metadata_lines() {
+        let version_file = "go1.24.0\ntime 2025-02-11T00:00:00Z\n";
+        let version = version_file.lines().map(str::trim).find(|line| !line.is_empty())
+            .and_then(|line| line.strip_prefix("go")).and_then(version_token);
+        assert_eq!(version.as_deref(), Some("1.24.0"));
+    }
 }

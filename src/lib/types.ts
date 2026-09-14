@@ -50,6 +50,11 @@ export interface ManagedEnv {
   version: string | null;
   sizeBytes: number | null;
   isCurrent: boolean;
+  status: "available" | "broken" | "inaccessible";
+  statusDetail: string | null;
+  sizeComplete: boolean;
+  identityPath: string;
+  isExternalLink: boolean;
 }
 
 export interface CategoryOverview {
@@ -58,6 +63,8 @@ export interface CategoryOverview {
   /** current junction 指向的环境名(未设置或损坏时为 null) */
   current: string | null;
   junctionPath: string | null;
+  scanWarning: string | null;
+  currentError: string | null;
 }
 
 export interface Overview {
@@ -74,8 +81,18 @@ export interface ExternalEnv {
   version: string | null;
   path: string | null;
   source: string;
+  command: string;
+  isPreferred: boolean;
+  error: string | null;
   /** 可纳入管理的环境类型(结构不兼容时为 null) */
   envType: EnvType | null;
+  installRoot: string | null;
+  identityPath: string | null;
+}
+
+export interface ScanReport {
+  tools: ExternalEnv[];
+  warnings: string[];
 }
 
 export interface PathState {
@@ -89,6 +106,8 @@ export interface CacheInfo {
   path: string;
   exists: boolean;
   sizeBytes: number | null;
+  sizeComplete: boolean;
+  sizeDetail: string | null;
 }
 
 export interface VersionInfo {
@@ -119,10 +138,81 @@ export interface ToolConfig {
   tool: string;
   name: string;
   available: boolean;
+  executablePath: string | null;
+  error: string | null;
   globalPath: string | null;
   cachePath: string | null;
   defaultGlobal: string | null;
   defaultCache: string | null;
+}
+
+export interface PackageList {
+  tool: string; executable: string; scope: string; source: string | null;
+  packages: { name: string; version: string | null; path: string | null; detail: string | null }[];
+  warnings: string[];
+}
+
+export interface PackageScanStatus {
+  status: "running" | "done" | "partial" | "canceled" | "error";
+  visited: number;
+  currentPath: string;
+  sources: { tool: string; path: string; packages: number; reinstallable: number; current: boolean; error: string | null }[];
+  warnings: string[];
+  warningCount: number;
+  skippedProjects: number;
+  roots: string[];
+}
+
+export interface MigrationPlan {
+  tool: string;
+  kind: "global" | "cache";
+  source: string;
+  target: string;
+  files: number;
+  bytes: number;
+  links: number;
+}
+
+export interface MigrationResult {
+  target: string;
+  backup: string;
+  files: number;
+  bytes: number;
+  journal: string;
+}
+
+export interface PipReinstallPlan {
+  source: string;
+  sourceKind: "python" | "directory";
+  python: string;
+  destination: string;
+  sourceVersion: string;
+  targetVersion: string;
+  packages: { name: string; version: string; reason: string | null }[];
+}
+
+export interface PipReinstallStatus {
+  status: "running" | "done" | "partial" | "error" | "canceled";
+  message: string;
+  destination: string;
+  report: string;
+  items: { name: string; version: string; status: string; detail: string | null }[];
+  dependencyCheck: string | null;
+}
+export interface GlobalReinstallPlan {
+  tool: string; executable: string; toolVersion: string;
+  source: string; destination: string; binPath: string; cachePath: string; packages: { name: string; version: string; reason: string | null }[];
+}
+export interface GlobalReinstallStatus { tool: string; status: string; message: string; destination: string; binPath: string; report: string; items: { name: string; version: string; status: string; detail: string | null }[] }
+
+export interface OldPackageCleanupPreview {
+  token: string; tool: string; source: string; destination: string;
+  packages: { name: string; version: string; path: string | null; reason: string | null }[];
+  warnings: string[];
+}
+export interface OldPackageCleanupResult {
+  report: string;
+  items: { name: string; version: string; status: string; detail: string | null }[];
 }
 
 export interface Settings {
@@ -165,7 +255,7 @@ export type InstallTask =
     }
   & (
       | { status: "downloading"; downloaded: number; total: number | null; speed: number }
-      | { status: "installing"; message: string }
+      | { status: "installing"; message: string; cancelable: boolean }
       | { status: "done" }
       | { status: "error"; message: string }
       | { status: "canceled" }

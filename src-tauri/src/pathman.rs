@@ -24,7 +24,11 @@ pub fn get_path_state() -> Result<PathState> {
 
 fn read_path(hkey: HKEY, subkey: &str) -> Result<Vec<String>> {
     let key = RegKey::predef(hkey).open_subkey_with_flags(subkey, KEY_READ)?;
-    let raw = key.get_raw_value(PATH_VALUE)?;
+    let raw = match key.get_raw_value(PATH_VALUE) {
+        Ok(value) => value,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
     let s = decode_reg_string(&raw.bytes);
     Ok(split_path(&s))
 }
@@ -41,7 +45,10 @@ pub fn save_user_path(entries: &[String], backups_dir: &Path) -> Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let env = hkcu.open_subkey_with_flags(HKCU_ENV, KEY_READ | KEY_WRITE)?;
 
-    let old_raw = env.get_raw_value(PATH_VALUE)?;
+    let old_raw = env.get_raw_value(PATH_VALUE).unwrap_or(RegValue {
+        bytes: encode_reg_string(""),
+        vtype: RegType::REG_EXPAND_SZ,
+    });
     let old = decode_reg_string(&old_raw.bytes);
     backup_path(&old, backups_dir)?;
 
@@ -65,7 +72,10 @@ pub fn integrate_entries(new_entries: &[String], backups_dir: &Path) -> Result<V
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let env = hkcu.open_subkey_with_flags(HKCU_ENV, KEY_READ | KEY_WRITE)?;
-    let old_raw = env.get_raw_value(PATH_VALUE)?;
+    let old_raw = env.get_raw_value(PATH_VALUE).unwrap_or(RegValue {
+        bytes: encode_reg_string(""),
+        vtype: RegType::REG_EXPAND_SZ,
+    });
     let old = decode_reg_string(&old_raw.bytes);
     backup_path(&old, backups_dir)?;
 
@@ -137,12 +147,14 @@ fn backup_path(old: &str, backups_dir: &Path) -> Result<()> {
 
 /// UTC 时间戳字符串(备份文件名用):20260908T054401Z
 fn timestamp_utc() -> String {
-    let secs = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+        .unwrap_or_default();
+    let secs = now.as_secs();
     let (y, mo, d, h, mi, s) = unix_to_utc(secs);
-    format!("{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}Z")
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}Z-{:09}-{}-{sequence}", now.subsec_nanos(), std::process::id())
 }
 
 fn unix_to_utc(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
@@ -160,6 +172,17 @@ fn unix_to_utc(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d, h, mi, s)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rapid_path_changes_keep_distinct_backups() {
+        let dir = crate::test_support::TestDir::new();
+        super::backup_path("D:\\first", dir.path()).unwrap();
+        super::backup_path("D:\\second", dir.path()).unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
 }
 
 /// 广播环境变量变更,新开的终端立即生效
@@ -221,6 +244,7 @@ pub fn set_user_env_var(name: &str, value: &str, backups_dir: &Path) -> Result<(
 
 /// 删除用户环境变量(自动备份旧值 + 广播)
 pub fn delete_user_env_var(name: &str, backups_dir: &Path) -> Result<()> {
+    if name.is_empty() || name.eq_ignore_ascii_case(PATH_VALUE) || name.contains(['\0', '=']) { return Err(crate::error::AppError::msg("变量名无效")); }
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let env = hkcu.open_subkey_with_flags(HKCU_ENV, KEY_READ | KEY_WRITE)?;
 

@@ -3,6 +3,17 @@
 use envcon_lib::sources::{self, SOURCE_MIRROR, SOURCE_OFFICIAL};
 use envcon_lib::types::{EnvType, ALL_ENV_TYPES};
 
+#[test]
+fn download_spec_rust_channel_is_independent_of_directory_name() {
+    for channel in ["stable", "beta", "nightly", "1.85.0"] {
+        for source in [SOURCE_MIRROR, SOURCE_OFFICIAL] {
+            let spec = sources::download_spec(EnvType::Rust, channel, "my-rust-stable", source, None).unwrap();
+            let sources::InstallMethod::RustupInit { channel: actual, .. } = spec.method else { panic!("expected rustup") };
+            assert_eq!(actual, channel);
+        }
+    }
+}
+
 #[tokio::test]
 async fn all_sources_list_versions_mirror() {
     let cache = std::env::temp_dir().join("envcon_test_version_cache.json");

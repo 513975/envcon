@@ -387,7 +387,7 @@
 
 <header class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="dot"></span>v0.1.0 预发布现已开放下载</div>
+    <div class="hero-badge"><span class="dot"></span>v0.5.0 本地构建</div>
     <h1>Windows 开发环境<br><span class="accent">一站式管理</span>工具</h1>
     <p class="hero-sub">
       下载、安装、多版本切换、PATH 管理、缓存清理 —— 一个应用全搞定。
@@ -431,9 +431,10 @@
             <button data-page="environments"><svg><use href="#i-boxes"/></svg><span>环境管理</span></button>
             <button data-page="download"><svg><use href="#i-download"/></svg><span>下载中心</span></button>
             <button data-page="paths"><svg><use href="#i-route"/></svg><span>路径管理</span></button>
+            <button data-page="packages"><svg><use href="#i-package"/></svg><span>包管理器</span></button>
             <button data-page="settings"><svg><use href="#i-gear"/></svg><span>设置</span></button>
           </nav>
-          <div class="app-side-foot">v0.1.1 · 便携模式就绪</div>
+          <div class="app-side-foot">v0.5.0 · 便携模式就绪</div>
         </aside>
 
         <!-- 主区域 -->
@@ -511,7 +512,7 @@
               </div>
               <div class="qcard">
                 <div class="ic"><svg><use href="#i-terminal"/></svg></div>
-                <div><div class="t">路径管理</div><div class="d">PATH 与缓存清理</div></div>
+                <div><div class="t">路径管理</div><div class="d">PATH 与环境变量</div></div>
               </div>
             </div>
 
@@ -691,7 +692,7 @@
             <div class="page-head">
               <div>
                 <h3>路径管理</h3>
-                <div class="desc">PATH、环境变量、包管理器路径与缓存,修改前自动备份</div>
+                <div class="desc">PATH 与环境变量，PATH 修改前自动备份</div>
               </div>
               <button class="abtn"><svg><use href="#i-refresh"/></svg>刷新</button>
             </div>
@@ -723,6 +724,19 @@
                 <div class="row"><span class="meta mono">JAVA_HOME</span><span class="meta mono path">D:\DevEnv\current\jdk</span><span class="grow"></span><button class="abtn">应用建议值</button></div>
                 <div class="row"><span class="meta mono">GOROOT</span><span class="meta mono path">D:\DevEnv\current\go</span><span class="grow"></span><button class="abtn">应用建议值</button></div>
                 <div class="row"><span class="meta mono">MAVEN_HOME</span><span class="meta mono path">D:\DevEnv\current\maven</span><span class="grow"></span><button class="abtn">应用建议值</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="app-page" id="page-packages">
+            <div class="page-head">
+              <div><h3>包管理器</h3><div class="desc">已安装包 · 路径与迁移</div></div>
+              <a class="abtn" href="package-managers.md">使用说明</a>
+            </div>
+            <div class="acard">
+              <div class="acard-head"><div class="t">已安装包 · npm · 全局包</div></div>
+              <div class="rows">
+                <div class="row"><span class="meta mono">typescript</span><span class="pill">5.9.3</span><span class="meta mono path">D:\DevEnv\globals\npm\node_modules\typescript</span></div>
               </div>
             </div>
 
@@ -794,7 +808,7 @@
               </div>
             </div>
 
-            <div class="banner">PATH 修改前的自动备份位于 data\path_backups,可随时在路径管理页恢复</div>
+            <div class="banner">PATH 修改前的自动备份位于数据目录 backups\path，可随时在路径管理页恢复</div>
           </div>
 
         </main>
@@ -887,7 +901,7 @@
 └── globals\              <b># npm/pip 等全局包与缓存</b></pre>
       <p>
         PATH 中只需保留一条 <code>current\*</code> 路径:切换版本时 Junction 重新指向目标目录,
-        PATH 保持不变,新开终端立即生效。散装环境同样以 Junction 纳入——原安装位置不动,却能用同一套机制切换。
+        PATH 保持不变；将 current 路径置于优先位置后，新开终端即可使用所选版本。散装环境同样以 Junction 纳入，原安装位置不动。
       </p>
     </div>
   </div>

@@ -1,0 +1,112 @@
+[
+  {
+    "id": "npm",
+    "name": "npm",
+    "family": "node",
+    "adapter": "nodeCli",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": true
+  },
+  {
+    "id": "pnpm",
+    "name": "pnpm",
+    "family": "node",
+    "adapter": "nodeCli",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": true
+  },
+  {
+    "id": "yarn",
+    "name": "Yarn",
+    "family": "node",
+    "adapter": "nodeCli",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": true
+  },
+  {
+    "id": "pip",
+    "name": "pip",
+    "family": "python",
+    "adapter": "pythonPip",
+    "reinstall": "venv",
+    "globalConfig": false,
+    "cacheConfig": true,
+    "migrateGlobal": false,
+    "projectQuery": true
+  },
+  {
+    "id": "bun",
+    "name": "Bun",
+    "family": "node",
+    "adapter": "isolated",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": true
+  },
+  {
+    "id": "uv",
+    "name": "uv Tools",
+    "family": "python",
+    "adapter": "isolated",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": false
+  },
+  {
+    "id": "pipx",
+    "name": "pipx",
+    "family": "python",
+    "adapter": "isolated",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": false
+  },
+  {
+    "id": "cargo",
+    "name": "Cargo",
+    "family": "native",
+    "adapter": "isolated",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": false,
+    "migrateGlobal": true,
+    "projectQuery": false
+  },
+  {
+    "id": "composer",
+    "name": "Composer",
+    "family": "native",
+    "adapter": "isolated",
+    "reinstall": "global",
+    "globalConfig": true,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": true
+  },
+  {
+    "id": "dotnet",
+    "name": ".NET Tools",
+    "family": "native",
+    "adapter": "isolated",
+    "reinstall": "global",
+    "globalConfig": false,
+    "cacheConfig": true,
+    "migrateGlobal": true,
+    "projectQuery": false
+  }
+]

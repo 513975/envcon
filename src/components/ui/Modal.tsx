@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X, AlertTriangle } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/format";
@@ -13,6 +13,23 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    panel.current?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const elements = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.getClientRects().length);
+      const first = elements[0], last = elements[elements.length - 1];
+      if (!first) { e.preventDefault(); return; }
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", trap);
+    return () => { document.removeEventListener("keydown", trap); previous?.focus(); };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -28,19 +45,20 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="w-[440px] max-w-[90vw] rounded-2xl bg-white dark:bg-zinc-900 shadow-xl border border-zinc-200 dark:border-zinc-800 animate-[modal-in_.15s_ease-out]">
+      <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className="flex flex-col max-h-[90dvh] w-[440px] max-w-[90vw] rounded-lg bg-white dark:bg-zinc-900 shadow-xl border border-zinc-200 dark:border-zinc-800 animate-[modal-in_.15s_ease-out]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
-          <h3 className="text-sm font-semibold">{title}</h3>
+          <h3 id={titleId} className="text-sm font-semibold">{title}</h3>
           <button
             onClick={onClose}
+            aria-label="关闭弹窗"
             className="p-1 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
           >
             <X className="size-4" />
           </button>
         </div>
-        <div className="px-5 py-4 text-sm text-zinc-600 dark:text-zinc-300">{children}</div>
+        <div className="min-h-0 overflow-y-auto px-5 py-4 text-sm text-zinc-600 dark:text-zinc-300">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 px-5 py-3.5 border-t border-zinc-100 dark:border-zinc-800">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 px-5 py-3.5 border-t border-zinc-100 dark:border-zinc-800">
             {footer}
           </div>
         )}

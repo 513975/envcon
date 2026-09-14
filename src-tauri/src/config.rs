@@ -80,13 +80,11 @@ impl AppConfig {
     pub fn resolve_root(&self) -> Option<PathBuf> {
         if let Some(r) = &self.settings.root {
             let p = PathBuf::from(r);
-            if p.exists() {
-                return Some(p);
-            }
+            return if p.is_absolute() && p.is_dir() { Some(p) } else { None };
         }
         for d in [r"D:\DevEnv", r"D:\DevEnvManager"] {
             let p = PathBuf::from(d);
-            if p.exists() {
+            if p.is_dir() {
                 return Some(p);
             }
         }
@@ -96,14 +94,15 @@ impl AppConfig {
     /// 设置根目录并初始化 envs/current/downloads 结构
     pub fn set_root(&mut self, root: &str) -> Result<PathBuf> {
         let p = PathBuf::from(root);
+        if !p.is_absolute() { return Err(crate::error::AppError::msg("管理根目录必须是绝对路径")); }
         if !p.exists() {
             fs::create_dir_all(&p)?;
         }
         for sub in ["envs", "current", "downloads"] {
             fs::create_dir_all(p.join(sub))?;
         }
-        self.settings.root = Some(root.to_string());
-        self.save()?;
+        let old = self.settings.root.replace(root.to_string());
+        if let Err(e) = self.save() { self.settings.root = old; return Err(e); }
         Ok(p)
     }
 
@@ -118,6 +117,20 @@ impl AppConfig {
 
     pub fn backups_dir(&self) -> PathBuf {
         self.data_dir.join("path_backups")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn missing_explicit_root_never_falls_back_and_failed_save_restores_settings() {
+        let dir = crate::test_support::TestDir::new();
+        let missing = dir.path().join("missing").to_string_lossy().into_owned();
+        let mut cfg = AppConfig { data_dir: dir.path().into(), portable: false, settings: Settings { root: Some(missing.clone()), ..Default::default() }, config_path: dir.path().join("absent/config.json") };
+        assert!(cfg.resolve_root().is_none());
+        assert!(cfg.set_root(&dir.path().join("new").to_string_lossy()).is_err());
+        assert_eq!(cfg.settings.root.as_deref(), Some(missing.as_str()));
     }
 }
 

@@ -36,7 +36,7 @@ pub enum InstallMethod {
     /// exe 静默安装器(Python/LLVM NSIS)
     Installer { args: Vec<String> },
     /// rustup-init 引导安装;dist_server 为 None 时用官方
-    RustupInit { dist_server: Option<String> },
+    RustupInit { channel: String, dist_server: Option<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -124,7 +124,13 @@ pub async fn list_versions(
             Ok(versions)
         }
         Err(e) => match load_cache(env_type, source, cache_path) {
-            Some(v) => Ok(v),
+            Some(mut v) => {
+                for version in &mut v {
+                    let previous = version.note.take().unwrap_or_default();
+                    version.note = Some(format!("离线缓存（在线查询失败）{}", if previous.is_empty() { String::new() } else { format!("；{previous}") }));
+                }
+                Ok(v)
+            },
             None => Err(e),
         },
     }
@@ -165,7 +171,7 @@ pub fn download_spec(
             };
             Ok(DownloadSpec {
                 url: format!("{base}/go{v}.windows-amd64.zip", v = version),
-                method: InstallMethod::Unzip { strip_top: false },
+                method: InstallMethod::Unzip { strip_top: true },
             })
         }
         EnvType::Python => {
@@ -246,13 +252,14 @@ pub fn download_spec(
                 Ok(DownloadSpec {
                     url: "https://rsproxy.cn/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe".into(),
                     method: InstallMethod::RustupInit {
+                        channel: version.to_string(),
                         dist_server: Some("https://rsproxy.cn".into()),
                     },
                 })
             } else {
                 Ok(DownloadSpec {
                     url: "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe".into(),
-                    method: InstallMethod::RustupInit { dist_server: None },
+                    method: InstallMethod::RustupInit { channel: version.to_string(), dist_server: None },
                 })
             }
         }
@@ -301,7 +308,7 @@ pub fn download_spec(
             })?;
             Ok(DownloadSpec {
                 url: gh(url),
-                method: InstallMethod::Unzip { strip_top: false },
+                method: InstallMethod::Unzip { strip_top: true },
             })
         }
         EnvType::Git => {

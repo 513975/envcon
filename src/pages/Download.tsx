@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RefreshCw,
   Search,
@@ -69,8 +69,17 @@ function defaultTargetName(envType: EnvType, version: string): string {
 export function Download() {
   const [envType, setEnvType] = useState<EnvType>("node");
   const [source, setSource] = useState<string>("mirror");
-  const [sources, setSources] = useState<SourceInfo[]>([]);
-  const [versions, setVersions] = useState<VersionInfo[] | null>(null);
+  const [sourceList, setSourceList] = useState<{
+    envType: EnvType; items: SourceInfo[];
+  } | null>(null);
+  const sources = sourceList?.envType === envType ? sourceList.items : [];
+  const sourcesReady = sourceList?.envType === envType;
+  const [versionList, setVersionList] = useState<{
+    envType: EnvType; source: string; items: VersionInfo[];
+  } | null>(null);
+  const versions = versionList?.envType === envType && versionList.source === source
+    ? versionList.items : null;
+  const requestId = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -80,18 +89,20 @@ export function Download() {
   const refreshOverview = useAppStore((s) => s.refreshOverview);
   const overviewVersion = useAppStore((s) => s.overviewVersion);
 
-  const load = async (t: EnvType, src: string) => {
+  const load = useCallback(async (t: EnvType, src: string) => {
+    const id = ++requestId.current;
     setLoading(true);
     setError(null);
-    setVersions(null);
+    setVersionList(null);
     try {
-      setVersions(await api.listVersions(t, src));
+      const items = await api.listVersions(t, src);
+      if (id === requestId.current) setVersionList({ envType: t, source: src, items });
     } catch (e) {
-      setError(String(e));
+      if (id === requestId.current) setError(String(e));
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
-  };
+  }, []);
 
   // 切换类型:加载该类型可用源,默认取第一个
   useEffect(() => {
@@ -100,11 +111,12 @@ export function Download() {
       try {
         const list = await api.getSources(envType);
         if (canceled) return;
-        setSources(list);
+        setSourceList({ envType, items: list });
         const def = list.find((s) => s.id === "mirror") ?? list[0];
         setSource(def?.id ?? "mirror");
       } catch {
-        setSources([]);
+        if (canceled) return;
+        setSourceList({ envType, items: [] });
         setSource("mirror");
       }
     })();
@@ -118,9 +130,9 @@ export function Download() {
 
   // 类型或源变化时加载版本列表
   useEffect(() => {
-    load(envType, source);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [envType, source]);
+    if (sourcesReady) void load(envType, source);
+    return () => { requestId.current += 1; };
+  }, [envType, source, sourcesReady, load]);
 
   const doneToastFired = useMemo(() => new Set<number>(), [envType]);
   useEffect(() => {
@@ -145,6 +157,7 @@ export function Download() {
   );
 
   const start = async (v: VersionInfo) => {
+    if (!sourcesReady || loading || !versions?.includes(v)) return;
     const name = targetNames[v.version] ?? defaultTargetName(envType, v.version);
     try {
       await api.startInstall(envType, v.version, name, source, v.url);
@@ -163,7 +176,7 @@ export function Download() {
       title="下载中心"
       desc="镜像/官方双源下载,支持自定义安装目录名"
       actions={
-        <Button size="sm" onClick={() => load(envType, source)} loading={loading}>
+        <Button size="sm" onClick={() => load(envType, source)} loading={loading || !sourcesReady}>
           <RefreshCw className="size-3.5" />
           刷新
         </Button>
@@ -205,6 +218,8 @@ export function Download() {
                   size="sm"
                   variant="ghost"
                   className="text-red-500"
+                  disabled={t.status === "installing" && !t.cancelable}
+                  title={t.status === "installing" && !t.cancelable ? "安装器正在执行，当前阶段无法取消" : "取消安装"}
                   onClick={() =>
                     api.cancelInstall(t.id).catch((e) => toast.error("取消失败", String(e)))
                   }
@@ -283,7 +298,7 @@ export function Download() {
           )}
         </div>
 
-        {loading ? (
+        {loading || !sourcesReady ? (
           <Spinner />
         ) : error ? (
           <Empty

@@ -10,7 +10,20 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+tests/tooling/
+tests/envcon-test-*/
+tests/envcon-regression-*/
+src-tauri/target-*/
 *.local
+
+# Local dev docs and process notes (not published)
+/docs/*.md
+/findings.md
+/progress.md
+/task_plan.md
+
+# Local test scripts and artifacts (not published)
+/tests/
 
 # TRAE IDE
 .trae/

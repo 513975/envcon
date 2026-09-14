@@ -3,25 +3,56 @@ use std::time::Duration;
 
 use crate::error::{AppError, Result};
 use crate::types::EnvType;
+static SWITCH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 切换 current/<junction> 指向指定环境
 pub fn switch(root: &Path, env_type: EnvType, name: &str) -> Result<()> {
+    let _guard = SWITCH_LOCK.lock().unwrap();
+    validate_name(name)?;
     let env_dir = root.join("envs").join(env_type.folder()).join(name);
-    if !env_dir.exists() {
+    if !env_dir.is_dir() {
         return Err(AppError::msg(format!("环境目录不存在: {}", env_dir.display())));
     }
 
     let junction = root.join("current").join(env_type.junction());
     std::fs::create_dir_all(root.join("current"))?;
 
-    remove_junction(&junction)?;
-    junction::create(&env_dir, &junction)
-        .map_err(|e| AppError::msg(format!("创建链接失败: {e}")))?;
+    let previous = std::fs::read_link(&junction).ok();
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let prepared = root.join("current").join(format!(".{}-next-{stamp}", env_type.junction()));
+    junction::create(&env_dir, &prepared).map_err(|e| AppError::msg(format!("创建新链接失败，当前环境保留: {e}")))?;
+    if let Err(e) = remove_junction(&junction) { let _ = std::fs::remove_dir(&prepared); return Err(e); }
+    if let Err(e) = std::fs::rename(&prepared, &junction) {
+        let restored = previous.map(|target| junction::create(target, &junction)).transpose();
+        let _ = std::fs::remove_dir(&prepared);
+        return Err(AppError::msg(format!("切换失败: {e}；旧链接恢复结果: {restored:?}")));
+    }
     Ok(())
+}
+
+pub(crate) fn validate_name(name: &str) -> Result<()> {
+    let reserved = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if name.is_empty() || name == "." || name == ".." || name.ends_with(['.', ' '])
+        || name.chars().any(|c| c.is_control() || "\\/:*?\"<>|".contains(c))
+        || matches!(reserved.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|p| reserved.strip_prefix(p).is_some_and(|n| matches!(n, "1"|"2"|"3"|"4"|"5"|"6"|"7"|"8"|"9"))) {
+        return Err(AppError::msg("环境名称必须是单个有效目录名，不能包含路径或 Windows 保留名称"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn environment_names_cannot_escape_managed_directory() {
+        for name in ["../outside", "..", "D:\\outside", "a/b", "a\\b", "NUL", "COM1.zip", "name."] { assert!(super::validate_name(name).is_err(), "{name}"); }
+        for name in ["node-22.1", "jdk 21", "自定义环境"] { assert!(super::validate_name(name).is_ok(), "{name}"); }
+    }
 }
 
 /// 移除指定类型的 current junction(不删除目标内容)
 pub fn remove_junction_for(root: &Path, env_type: EnvType) -> Result<()> {
+    let _guard = SWITCH_LOCK.lock().unwrap();
     let junction = root.join("current").join(env_type.junction());
     remove_junction(&junction)
 }

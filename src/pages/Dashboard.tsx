@@ -89,10 +89,14 @@ export function Dashboard() {
 
   const categories = overview?.categories ?? [];
   const managedCount = categories.reduce((n, c) => n + c.envs.length, 0);
-  const totalSize = categories.reduce(
-    (n, c) => n + c.envs.reduce((m, e) => m + (e.sizeBytes ?? 0), 0),
-    0,
-  );
+  const countedIdentities = new Set<string>();
+  const countedEnvs = categories.flatMap((c) => c.envs).filter((env) => {
+    if (env.isExternalLink || countedIdentities.has(env.identityPath)) return false;
+    countedIdentities.add(env.identityPath);
+    return true;
+  });
+  const totalSize = countedEnvs.reduce((n, env) => n + (env.sizeBytes ?? 0), 0);
+  const totalSizeComplete = countedEnvs.every((env) => env.sizeComplete);
   const currentEnvs = categories.filter((c) => c.current);
 
   return (
@@ -125,7 +129,7 @@ export function Dashboard() {
               <HardDrive className="size-4.5 text-sky-600 dark:text-sky-400" />
             </div>
             <div>
-              <div className="text-xl font-bold text-zinc-900 dark:text-white">{formatBytes(totalSize)}</div>
+              <div className="text-xl font-bold text-zinc-900 dark:text-white">{totalSizeComplete ? formatBytes(totalSize) : `≥ ${formatBytes(totalSize)}`}</div>
               <div className="text-xs text-zinc-500">环境占用空间</div>
             </div>
           </div>
@@ -147,7 +151,7 @@ export function Dashboard() {
       <Card>
         <CardHeader
           title="当前激活环境"
-          desc="通过 current 链接指向的版本,终端中使用的即是这些版本"
+          desc="current 链接指向的受管版本；终端是否实际使用它取决于 PATH 和项目环境"
           actions={
             <Button size="sm" onClick={() => setPage("download")}>
               <DownloadIcon className="size-3.5" />
@@ -158,7 +162,7 @@ export function Dashboard() {
         {currentEnvs.length === 0 ? (
           <Empty
             title="尚未激活任何环境"
-            desc="在环境管理页点击“设为当前”即可激活,激活后终端立即可用"
+            desc="在环境管理页设置 current 链接；新终端是否命中该版本取决于 PATH 顺序"
             action={<Button size="sm" variant="primary" onClick={() => setPage("environments")}>去环境管理</Button>}
           />
         ) : (

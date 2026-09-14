@@ -8,12 +8,14 @@ import { Environments } from "./pages/Environments";
 import { Download } from "./pages/Download";
 import { Paths } from "./pages/Paths";
 import { Settings } from "./pages/Settings";
+import { PackageManagers } from "./pages/PackageManagers";
 
 const PAGES: { id: Page; Component: ComponentType }[] = [
   { id: "dashboard", Component: Dashboard },
   { id: "environments", Component: Environments },
   { id: "download", Component: Download },
   { id: "paths", Component: Paths },
+  { id: "packages", Component: PackageManagers },
   { id: "settings", Component: Settings },
 ];
 
@@ -36,11 +38,11 @@ export default function App() {
     startInstallListener();
   }, []);
 
-  // 快捷键 Ctrl+1..5 切换页面
+  // Preserve existing shortcuts; the new page uses Ctrl+6.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
-      const pages: Page[] = ["dashboard", "environments", "download", "paths", "settings"];
+      const pages: Page[] = ["dashboard", "environments", "download", "paths", "settings", "packages"];
       const idx = parseInt(e.key, 10) - 1;
       if (idx >= 0 && idx < pages.length) {
         e.preventDefault();

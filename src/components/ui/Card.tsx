@@ -23,7 +23,7 @@ export function CardHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800">
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800">
       <div className="min-w-0">
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{title}</h3>
         {desc && (

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   RefreshCw,
   FolderOpen,
   Check,
   Trash2,
   ScanSearch,
-  ExternalLink,
-  Import,
+  X,
+  FolderPlus,
 } from "lucide-react";
 import { PageShell } from "../components/layout/PageShell";
 import { Card, CardHeader } from "../components/ui/Card";
@@ -15,10 +16,12 @@ import { Badge } from "../components/ui/Badge";
 import { Spinner, Empty } from "../components/ui/Empty";
 import { ConfirmDialog } from "../components/ui/Modal";
 import { EnvTypeBadge } from "../components/EnvTypeBadge";
+import { ScanResults } from "../components/ScanResults";
+import { SelectionButton } from "../components/ui/SelectionButton";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
-import { formatBytes, cn } from "../lib/format";
+import { formatBytes } from "../lib/format";
 import {
   ALL_ENV_TYPES,
   ENV_TYPE_META,
@@ -36,6 +39,14 @@ export function Environments() {
   const [confirmUninstall, setConfirmUninstall] = useState<ManagedEnv | null>(null);
   const [systemEnvs, setSystemEnvs] = useState<ExternalEnv[] | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [projectDirs, setProjectDirs] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("envcon.scan.projectDirs");
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string").slice(0, 8) : [];
+    } catch { return []; }
+  });
+  const [scanWarnings, setScanWarnings] = useState<string[]>([]);
   const [integrating, setIntegrating] = useState<string | null>(null);
 
   const refreshOverview = useAppStore((s) => s.refreshOverview);
@@ -56,6 +67,10 @@ export function Environments() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overviewVersion]);
+
+  useEffect(() => {
+    localStorage.setItem("envcon.scan.projectDirs", JSON.stringify(projectDirs));
+  }, [projectDirs]);
 
   const doSwitch = async (env: ManagedEnv) => {
     setBusy(`switch:${env.name}`);
@@ -89,7 +104,9 @@ export function Environments() {
   const doScanSystem = async () => {
     setScanning(true);
     try {
-      setSystemEnvs(await api.scanSystem());
+      const report = await api.scanSystem(projectDirs);
+      setSystemEnvs(report.tools);
+      setScanWarnings(report.warnings);
     } catch (e) {
       toast.error("扫描失败", String(e));
     } finally {
@@ -97,9 +114,18 @@ export function Environments() {
     }
   };
 
+  const addProject = async () => {
+    try {
+      const dir = await open({ directory: true, title: "选择项目或虚拟环境目录" });
+      if (typeof dir === "string") {
+        setProjectDirs((dirs) => dirs.includes(dir) ? dirs : [...dirs, dir].slice(0, 8));
+      }
+    } catch (error) { toast.error("选择目录失败", String(error)); }
+  };
+
   const doIntegrate = async (env: ExternalEnv) => {
     if (!env.envType || !env.path) return;
-    setIntegrating(env.tool);
+    setIntegrating(env.path);
     try {
       const name = await api.integrateExternalEnv(env.envType, env.path, env.version);
       toast.success(
@@ -116,7 +142,7 @@ export function Environments() {
   };
 
   if (loading && !overview) return <Spinner className="py-24 flex justify-center" />;
-  if (!overview || !overview.rootExists) {
+  if (!overview) {
     return (
       <PageShell title="环境管理">
         <Card>
@@ -131,7 +157,7 @@ export function Environments() {
   return (
     <PageShell
       title="环境管理"
-      desc={`根目录:${overview.root}`}
+      desc={overview.rootExists ? `根目录:${overview.root}` : "尚未设置管理根目录"}
       actions={
         <Button size="sm" onClick={load} loading={loading}>
           <RefreshCw className="size-3.5" />
@@ -146,35 +172,24 @@ export function Environments() {
           const count = cat?.envs.length ?? 0;
           const active = cat?.current != null;
           return (
-            <button
+            <SelectionButton
               key={t}
               onClick={() => setTab(t)}
-              className={cn(
-                "h-8 px-3 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5 cursor-pointer",
-                tab === t
-                  ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                  : "bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:border-zinc-300",
-              )}
+              selected={tab === t}
+              count={count}
+              indicator={active ? "available" : undefined}
+              statusLabel="已设置当前环境"
             >
               {ENV_TYPE_META[t].label}
-              {count > 0 && (
-                <span
-                  className={cn(
-                    "rounded px-1 text-[10px]",
-                    tab === t ? "bg-white/20" : "bg-zinc-100 dark:bg-zinc-800",
-                  )}
-                >
-                  {count}
-                </span>
-              )}
-              {active && <span className="size-1.5 rounded-full bg-emerald-500" />}
-            </button>
+            </SelectionButton>
           );
         })}
       </div>
 
       {/* 环境列表 */}
       <Card>
+        {category?.scanWarning && <div className="px-4 py-2 text-xs text-amber-700 dark:text-amber-300 border-b border-zinc-100 dark:border-zinc-800">{category.scanWarning}</div>}
+        {category?.currentError && <div className="px-4 py-2 text-xs text-red-600 dark:text-red-400 border-b border-zinc-100 dark:border-zinc-800">{category.currentError}</div>}
         {category && category.envs.length > 0 ? (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {category.envs.map((env) => (
@@ -186,14 +201,18 @@ export function Environments() {
                       {env.name}
                     </span>
                     {env.isCurrent && <Badge color="green">当前</Badge>}
+                    {env.status !== "available" && <Badge color="red">{env.status === "inaccessible" ? "不可访问" : "损坏"}</Badge>}
+                    {env.isExternalLink && <Badge color="blue">外部链接</Badge>}
                   </div>
                   <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-500">
                     <span>{env.version ?? "未知版本"}</span>
                     <span>{formatBytes(env.sizeBytes)}</span>
+                    {!env.sizeComplete && <span className="text-amber-600 dark:text-amber-400">大小统计不完整</span>}
                     <span className="truncate max-w-64 selectable" title={env.path}>
                       {env.path}
                     </span>
                   </div>
+                  {env.statusDetail && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{env.statusDetail}</div>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {!env.isCurrent && (
@@ -201,6 +220,7 @@ export function Environments() {
                       size="sm"
                       variant="primary"
                       loading={busy === `switch:${env.name}`}
+                      disabled={env.status !== "available"}
                       onClick={() => doSwitch(env)}
                     >
                       <Check className="size-3.5" />
@@ -239,58 +259,42 @@ export function Environments() {
           title={
             <span className="flex items-center gap-1.5">
               <ScanSearch className="size-3.5 text-zinc-400" />
-              系统散装环境
+              本机工具与包管理器
             </span>
           }
-          desc="扫描 PATH 中由其他方式安装的工具,可通过链接纳入 EnvCon 统一管理(不移动文件)"
           actions={
+            <div className="flex gap-2">
+            <Button size="sm" onClick={addProject} disabled={scanning || projectDirs.length >= 8}>
+              <FolderPlus className="size-3.5" />项目目录
+            </Button>
             <Button size="sm" onClick={doScanSystem} loading={scanning}>
+              <ScanSearch className="size-3.5" />
               {systemEnvs ? "重新扫描" : "开始扫描"}
             </Button>
+            </div>
           }
         />
+        {projectDirs.length > 0 && <div className="px-4 py-2 space-y-1">
+          {projectDirs.map((dir) => <div key={dir} className="flex items-center gap-2 text-xs text-zinc-500">
+            <span className="min-w-0 flex-1 break-all">{dir}</span>
+            <button disabled={scanning} title="移除扫描目录" aria-label={`移除 ${dir}`}
+              onClick={() => setProjectDirs((dirs) => dirs.filter((p) => p !== dir))}>
+              <X className="size-3.5" />
+            </button>
+          </div>)}
+        </div>}
+        {scanWarnings.length > 0 && <details className="px-4 py-2 text-xs text-amber-700 dark:text-amber-400 space-y-1">
+          <summary className="cursor-pointer">扫描提示（{scanWarnings.length}）</summary>
+          {scanWarnings.map((warning, i) => <p key={i} className="break-all">{warning}</p>)}
+        </details>}
         {systemEnvs === null ? (
           <Empty
             title="尚未扫描"
-            desc="点击“开始扫描”检测本机 PATH 中的外部开发环境"
           />
         ) : systemEnvs.length === 0 ? (
-          <Empty title="未发现散装环境" desc="PATH 中没有 EnvCon 之外安装的开发工具" />
+          <Empty title="未发现可用工具" />
         ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {systemEnvs.map((env, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                <Badge color="blue">{env.tool}</Badge>
-                <span className="text-xs font-mono text-zinc-600 dark:text-zinc-300">
-                  {env.version ?? "—"}
-                </span>
-                <span className="flex-1 truncate text-xs text-zinc-400 selectable" title={env.path ?? ""}>
-                  {env.path}
-                </span>
-                {env.envType && (
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    loading={integrating === env.tool}
-                    onClick={() => doIntegrate(env)}
-                    title={`以链接方式注册到 ${ENV_TYPE_META[env.envType].label},不移动原文件`}
-                  >
-                    <Import className="size-3.5" />
-                    纳入管理
-                  </Button>
-                )}
-                <button
-                  className="text-zinc-400 hover:text-emerald-600 cursor-pointer"
-                  title="打开所在目录"
-                  onClick={() =>
-                    env.path && api.openPath(env.path).catch((e) => toast.error("打开失败", String(e)))
-                  }
-                >
-                  <ExternalLink className="size-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
+          <ScanResults rows={systemEnvs} canIntegrate={overview.rootExists} integrating={integrating} onIntegrate={doIntegrate} />
         )}
       </Card>
 

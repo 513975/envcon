@@ -117,6 +117,12 @@ pub struct ManagedEnv {
     pub version: Option<String>,
     pub size_bytes: Option<u64>,
     pub is_current: bool,
+    /// 可用、损坏或不可访问；旧数据兼容时默认为可用。
+    pub status: String,
+    pub status_detail: Option<String>,
+    pub size_complete: bool,
+    pub identity_path: String,
+    pub is_external_link: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +133,8 @@ pub struct CategoryOverview {
     /// current junction 指向的环境名
     pub current: Option<String>,
     pub junction_path: String,
+    pub scan_warning: Option<String>,
+    pub current_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,8 +155,20 @@ pub struct ExternalEnv {
     pub version: Option<String>,
     pub path: Option<String>,
     pub source: String,
+    pub command: String,
+    pub is_preferred: bool,
+    pub error: Option<String>,
     /// 可纳入管理的环境类型(结构不兼容时为 None)
     pub env_type: Option<EnvType>,
+    pub install_root: Option<String>,
+    pub identity_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanReport {
+    pub tools: Vec<ExternalEnv>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

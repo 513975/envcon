@@ -23,7 +23,7 @@
 
 EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JDK、Python、Node.js、Go 等各类开发工具统一收纳到独立目录中,通过 **NTFS Junction** 实现版本秒级切换,配合国内镜像加速下载,从此告别"配环境配一天"的日子。
 
-所有环境均为绿色便携安装——不写注册表、不散落 C 盘、复制整个根目录即可整机迁移。
+优先将环境安装到指定根目录。部分运行时需要调用安装器；PATH 和环境变量设置会写入 Windows 用户配置。跨机器复制后需重新配置路径并检查 Junction 目标。
 
 ## 功能特性
 
@@ -47,9 +47,19 @@ EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JD
 ### 🛣️ 路径管理
 - 用户 / 系统 PATH 可视化编辑(增删、排序、去重)
 - 常用环境变量配置(`JAVA_HOME`、`GOPATH`、`CARGO_HOME` 等),自动给出建议值
-- **包管理器路径配置**:一键设置 npm / pnpm / yarn / pip 的全局安装路径与缓存路径
-- 缓存检测与一键清理(npm / pip / cargo 等缓存目录)
 - **每次修改 PATH 前自动备份**,可随时恢复
+
+### 包管理器
+- **0.5.0 通用包管理器工作区**：集中能力定义，支持 npm、pnpm、Yarn Classic、pip、Bun、uv Tools、pipx、Cargo、Composer、.NET Tools。新增常见位置、本地磁盘、指定目录的旧包扫描，按来源查看包并进入重装。[能力与限制](docs/package-managers.md) · [开发架构](docs/package-manager-architecture.md)。
+- **历史全局包**：可查询旧目录并进入重装，跳过 npm 隐藏更新残留；支持已配置的空目标，预览实际命令及缓存路径，拒绝非空冲突。[使用说明](docs/global-package-reinstall.md)。
+- **0.4.2 旧包清理**：全部重装成功后，可预览并确认卸载指定旧包，保留运行时及新环境；支持逐包诊断和清理报告。[范围与限制](docs/old-package-cleanup.md)。
+- **0.4.1 界面整理**：与环境管理共用选择按钮，已验证可用管理器显示绿灯；路径操作跟随所选管理器。本机扫描按工具分类汇总，多路径与诊断展开查看。[扫描结果说明](docs/scan-results.md)。
+- **包管理器路径配置**:一键设置 npm / pnpm / yarn / pip 的全局安装路径与缓存路径
+- **包管理器数据迁移与全局包重装**:预览旧目录并迁移数据，或在新目录逐包恢复 npm、pnpm、Yarn Classic、pip 全局包。详见 [迁移说明](docs/package-manager-migration.md) 和 [重装说明](docs/global-package-reinstall.md)。
+- **0.3.1 审查修订**:修复 npm 配置冲突、pnpm 11 安装组识别及安装进程树超时清理，完善任务恢复、逐包结果和弹窗布局。[审查与验证记录](docs/reinstall-audit-2026-09-12.md)。
+- **Python 包重装**:从旧解释器或 site-packages 读取清单，按选择的旧版本安装到新虚拟环境，展示失败与依赖检查结果。详见 [重装说明](docs/python-package-reinstall.md)。
+- **0.4.0 包管理器工作区**:左侧独立入口，查看 npm/pnpm/Yarn Classic 全局包、项目直接依赖及 pip 当前/虚拟环境包，支持搜索版本与安装位置。路径设置、缓存、迁移与重装集中放置。[使用说明](docs/package-managers.md) · [关键代码审计](docs/key-function-audit-2026-09-12.md)。
+- 缓存检测与一键清理(npm / pip / cargo 等缓存目录)
 
 ### ⚙️ 设置
 - 自定义环境根目录与下载目录
@@ -58,7 +68,7 @@ EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JD
 
 ### 🎨 体验细节
 - 深色 / 浅色主题自动跟随系统
-- `Ctrl+1..5` 快捷键切换页面
+- `Ctrl+1..5` 保持原有页面快捷键，`Ctrl+6` 打开包管理器
 - 页面 keep-alive,切换不重载
 
 ## 支持的环境类型
@@ -99,13 +109,13 @@ D:\DevEnv\
 └── globals\       # npm/pip 等全局包与缓存(可配置)
 ```
 
-切换版本时只需将 `current\jdk` 重新指向目标版本,**PATH 中只保留 `current\*` 一条路径**,改版本不改 PATH,新开的终端立即生效。
+切换版本时只需将 `current\jdk` 重新指向目标版本。确保 `current\*` 位于用户 PATH 的优先位置后，新开的终端会读取该版本；已打开的终端需重新打开。
 
 ## 从源码构建
 
 ### 环境要求
 
-- [Node.js](https://nodejs.org/) ≥ 18
+- [Node.js](https://nodejs.org/) 20.19+ 或 22.12+（Vite 8 要求）
 - [Rust](https://www.rust-lang.org/) (stable 工具链)
 - [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (含 C++ 桌面开发工作负载)
 - [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (Windows 10/11 一般已内置)
@@ -134,7 +144,7 @@ npm run tauri build
 ```
 envcon/
 ├── src/                        # 前端 (React + TypeScript)
-│   ├── pages/                  #   五个页面:仪表盘/环境管理/下载中心/路径管理/设置
+│   ├── pages/                  #   六个页面:仪表盘/环境管理/下载中心/路径管理/包管理器/设置
 │   ├── components/             #   通用组件与 UI 库
 │   └── lib/                    #   API 封装、状态管理、类型定义
 └── src-tauri/                  # 后端 (Rust + Tauri 2)
@@ -146,6 +156,7 @@ envcon/
         ├── switcher.rs         #   Junction 版本切换
         ├── pathman.rs          #   PATH / 环境变量 / 注册表操作
         ├── pkgtools.rs         #   包管理器全局路径配置
+        ├── packages.rs         #   已安装包查询与结构化清单解析
         ├── caches.rs           #   缓存检测与清理
         ├── detect/             #   系统环境扫描
         └── config.rs           #   应用配置持久化
@@ -164,7 +175,8 @@ envcon/
 
 - 修改 PATH / 环境变量后,**新开的终端**才能读到新值
 - PATH 修改前的备份存放在数据目录 `backups\path\` 下,可在"路径管理"页恢复
-- 便携模式:整个根目录可直接复制到其他机器使用
+- `src-tauri/target/release/envcon.exe` 可直接启动，需已安装 WebView2；NSIS 安装包可协助安装运行时。
+- 跨机器复制管理根后，检查绝对路径、Junction 和包管理器配置，再配置新机器的 PATH。
 
 ## 许可证
 

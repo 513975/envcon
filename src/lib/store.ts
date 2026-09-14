@@ -5,6 +5,7 @@ export type Page =
   | "environments"
   | "download"
   | "paths"
+  | "packages"
   | "settings";
 
 interface AppState {
