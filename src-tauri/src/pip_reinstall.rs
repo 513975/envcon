@@ -610,6 +610,30 @@ async fn inspect_cleanup_source(plan: &Plan) -> Result<(PathBuf, CleanupInspecti
     Ok((python, inspection))
 }
 
+pub(crate) async fn scanned_cleanup_candidates(
+    plan: &Plan,
+) -> Result<Vec<crate::old_packages::Candidate>> {
+    let (_, old) = inspect_cleanup_source(plan).await?;
+    let mut counts = std::collections::HashMap::new();
+    for p in &old.packages {
+        *counts.entry(normalize(&p.name)).or_insert(0) += 1;
+    }
+    Ok(old
+        .packages
+        .into_iter()
+        .map(|mut p| {
+            let key = normalize(&p.name);
+            if counts[&key] > 1
+                || !index_pin(&p.name, &p.version)
+                || matches!(key.as_str(), "pip" | "setuptools" | "wheel")
+            {
+                p.reason = Some("基础工具、重复或无效包，禁止自动卸载".into());
+            }
+            p
+        })
+        .collect())
+}
+
 pub(crate) async fn cleanup_candidates(
     plan: &Plan,
     items: &[ItemResult],

@@ -53,6 +53,7 @@ pub struct CleanupResult {
 
 static SOURCES: Mutex<BTreeMap<String, SourcePlan>> = Mutex::new(BTreeMap::new());
 static PREVIEWS: Mutex<BTreeMap<String, Preview>> = Mutex::new(BTreeMap::new());
+static SCANNED: Mutex<BTreeMap<String, (Preview, SourcePlan)>> = Mutex::new(BTreeMap::new());
 static SERIAL: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn verify_separate(source: &Path, destination: &Path) -> Result<()> {
@@ -113,6 +114,68 @@ async fn candidates(plan: &SourcePlan, items: &[ItemResult]) -> Result<Vec<Candi
     }
 }
 
+async fn scanned_candidates(plan: &SourcePlan) -> Result<Vec<Candidate>> {
+    match plan {
+        SourcePlan::Global(p) => global_reinstall::scanned_cleanup_candidates(p).await,
+        SourcePlan::Pip(p) => pip_reinstall::scanned_cleanup_candidates(p).await,
+    }
+}
+
+pub async fn preview_scanned(
+    tool: String,
+    source: String,
+    executable: String,
+    reports: String,
+) -> Result<Preview> {
+    let _guard = crate::migration::LOCK
+        .try_lock()
+        .map_err(|_| AppError::msg("正在扫描或修改包，请稍后重试"))?;
+    crate::package_managers::definition(&tool)?;
+    let scan = crate::package_scan::status().ok_or_else(|| AppError::msg("请先扫描旧包"))?;
+    if scan.status == "running"
+        || !scan
+            .sources
+            .iter()
+            .any(|s| s.tool == tool && s.path == source && s.error.is_none())
+    {
+        return Err(AppError::msg("来源不在已完成的扫描结果中，请重新扫描"));
+    }
+    std::fs::create_dir_all(&reports)?;
+    let plan = if tool == "pip" {
+        SourcePlan::Pip(pip_reinstall::Plan {
+            source: source.clone(),
+            source_kind: "directory".into(),
+            python: String::new(),
+            destination: reports.clone(),
+            source_version: String::new(),
+            target_version: String::new(),
+            packages: vec![],
+        })
+    } else {
+        SourcePlan::Global(
+            global_reinstall::scanned_cleanup_plan(
+                tool.clone(),
+                executable,
+                source.clone(),
+                reports.clone(),
+            )
+            .await?,
+        )
+    };
+    let packages = scanned_candidates(&plan).await?;
+    let preview = Preview {
+        token: format!("scan-{}-{}", std::process::id(), SERIAL.fetch_add(1, Ordering::SeqCst)),
+        tool: tool.clone(), source, destination: reports, packages,
+        warnings: vec!["直接卸载所选来源中的包，无需先重装。此操作不可撤销，不会放入回收站，依赖这些包的命令或项目可能失效。".into(),
+            "包管理器可能同时移除不再需要的依赖；运行时和其他顶层包保留，外置命令入口可能残留。".into()],
+    };
+    SCANNED
+        .lock()
+        .unwrap()
+        .insert(tool, (preview.clone(), plan));
+    Ok(preview)
+}
+
 pub async fn preview(tool: String, destination: String) -> Result<Preview> {
     let _guard = crate::migration::LOCK
         .try_lock()
@@ -152,15 +215,32 @@ pub async fn execute(tool: String, token: String, names: Vec<String>) -> Result<
     let guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("正在重装、迁移或清理，请稍后重试"))?;
-    let preview = PREVIEWS
-        .lock()
-        .unwrap()
-        .remove(&tool)
-        .filter(|p| p.token == token)
-        .ok_or_else(|| AppError::msg("清理预览已失效，请重新预览"))?;
+    let scanned = if token.starts_with("scan-") {
+        SCANNED.lock().unwrap().remove(&tool)
+    } else {
+        None
+    };
+    let (preview, plan, items, direct) = if let Some((preview, plan)) = scanned {
+        if preview.token != token {
+            return Err(AppError::msg("删除预览已失效，请重新预览"));
+        }
+        (preview, plan, vec![], true)
+    } else {
+        let preview = PREVIEWS
+            .lock()
+            .unwrap()
+            .remove(&tool)
+            .filter(|p| p.token == token)
+            .ok_or_else(|| AppError::msg("清理预览已失效，请重新预览"))?;
+        let (plan, items) = context(&tool, &preview.destination)?;
+        (preview, plan, items, false)
+    };
     let selected = selected(&preview, &names)?;
-    let (plan, items) = context(&tool, &preview.destination)?;
-    let fresh = candidates(&plan, &items).await?;
+    let fresh = if direct {
+        scanned_candidates(&plan).await?
+    } else {
+        candidates(&plan, &items).await?
+    };
     if fresh != preview.packages {
         return Err(AppError::msg(
             "新旧包或安装路径已变化，请重新预览；未删除任何包",
@@ -193,7 +273,11 @@ pub async fn execute(tool: String, token: String, names: Vec<String>) -> Result<
         write_report(&mut file, &result)?;
         for (i, package) in selected.iter().enumerate() {
             // Check both installations again before each uninstall, including shared dependency changes.
-            let check = candidates(&plan, &items).await;
+            let check = if direct {
+                scanned_candidates(&plan).await
+            } else {
+                candidates(&plan, &items).await
+            };
             let outcome = match check {
                 Ok(rows) if rows.iter().any(|p| p == package) => match &plan {
                     SourcePlan::Global(p) => global_reinstall::remove_old(p, package).await,

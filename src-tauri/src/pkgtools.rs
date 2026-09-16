@@ -25,6 +25,54 @@ pub(crate) struct Invocation {
     pub prefix: Vec<String>,
 }
 
+pub(crate) fn self_update_command(
+    tool: &str,
+    inv: &Invocation,
+) -> Result<(Invocation, Vec<String>)> {
+    let mut updater = inv.clone();
+    let mut arguments = match tool {
+        "npm" | "yarn" => vec!["install", "--global", if tool == "npm" { "npm@latest" } else { "yarn@latest" }],
+        "pnpm" => vec!["self-update"],
+        "bun" => vec!["upgrade"],
+        "uv" => vec!["self", "update"],
+        "pip" => vec!["install", "--upgrade", "pip"],
+        "composer" => vec!["self-update"],
+        "pipx" => return Err(AppError::msg("pipx 没有通用自更新命令，请通过安装它的 Python 执行 python -m pip install --upgrade pipx，或通过原安装管理器更新")),
+        "cargo" => return Err(AppError::msg("Cargo 随 Rust 工具链发布，请运行 rustup update stable")),
+        "dotnet" => return Err(AppError::msg(".NET CLI 由 .NET SDK 随附，请更新 SDK 后重启应用")),
+        _ => return Err(AppError::msg("不支持的包管理器")),
+    }.drain(..).map(str::to_owned).collect::<Vec<_>>();
+    let parent = Path::new(&inv.program)
+        .parent()
+        .ok_or_else(|| AppError::msg("命令路径无效"))?;
+    if matches!(tool, "npm" | "yarn") {
+        let prefix = parent.canonicalize()?;
+        if !prefix
+            .join("node_modules")
+            .join(tool)
+            .join("package.json")
+            .is_file()
+            || !prefix.join("npm.cmd").is_file()
+        {
+            return Err(AppError::msg("无法确认当前命令对应的 npm 安装目录；Corepack 或其他安装方式请通过原安装管理器更新"));
+        }
+        updater.program = prefix.join("npm.cmd").to_string_lossy().into();
+        updater.prefix.clear();
+        arguments.extend(["--prefix".into(), prefix.to_string_lossy().into()]);
+    } else if tool == "pip" && inv.prefix.is_empty() {
+        let python = [
+            parent.join("python.exe"),
+            parent.parent().unwrap_or(parent).join("python.exe"),
+        ]
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| AppError::msg("未找到 pip 所属解释器，请通过原 Python 安装更新 pip"))?;
+        updater.program = python.to_string_lossy().into();
+        updater.prefix = vec!["-m".into(), "pip".into()];
+    }
+    Ok((updater, arguments))
+}
+
 fn effective_path(root: Option<&Path>) -> std::ffi::OsString {
     let mut entries = Vec::new();
     if let Some(root) = root {
@@ -162,6 +210,18 @@ pub(crate) async fn output(
         .map_err(|e| e.to_string())
 }
 
+/// Execute a mutating package-manager command and require a successful exit.
+pub(crate) async fn mutate(
+    inv: &Invocation,
+    args: &[&str],
+    timeout_secs: u64,
+) -> std::result::Result<String, String> {
+    let output = execute(inv, args, timeout_secs).await?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let err = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    Ok(if text.is_empty() { err } else { text })
+}
+
 async fn execute(
     inv: &Invocation,
     args: &[&str],
@@ -189,7 +249,7 @@ async fn execute(
     Ok(output)
 }
 
-async fn run(
+pub(crate) async fn run(
     inv: &Invocation,
     args: &[&str],
     timeout_secs: u64,
@@ -326,41 +386,44 @@ pub(crate) async fn values(
 }
 
 pub async fn get_tool_configs(root: Option<&Path>) -> Vec<ToolConfig> {
-    let mut out = Vec::new();
-    for definition in managers::definitions() {
-        let tool = definition.id.as_str();
-        let name = definition.name.as_str();
-        let inv = find_invocation(root, tool).await;
-        let (available, global, cache, error) = if let Some(inv) = &inv {
-            match run(inv, &["--version"], 15).await {
-                Ok(_) => {
-                    let (g, c, e) = values(inv, tool).await;
-                    (true, g, c, e)
+    use futures_util::{stream, StreamExt};
+    stream::iter(managers::definitions().to_vec())
+        .map(|definition| async move {
+            let tool = definition.id.as_str();
+            let name = definition.name.as_str();
+            let inv = find_invocation(root, tool).await;
+            let (available, global, cache, error) = if let Some(inv) = &inv {
+                match run(inv, &["--version"], 15).await {
+                    Ok(_) => {
+                        let (g, c, e) = values(inv, tool).await;
+                        (true, g, c, e)
+                    }
+                    Err(e) => (false, None, None, Some(format!("版本探测失败: {e}"))),
                 }
-                Err(e) => (false, None, None, Some(format!("版本探测失败: {e}"))),
+            } else {
+                (false, None, None, Some("未找到可执行命令".into()))
+            };
+            let base = root.map(|r| r.join("globals"));
+            ToolConfig {
+                tool: tool.into(),
+                name: name.into(),
+                available,
+                executable_path: inv.as_ref().map(|i| i.program.clone()),
+                error,
+                global_path: global,
+                cache_path: cache,
+                default_global: base
+                    .as_ref()
+                    .filter(|_| definition.global_config)
+                    .map(|p| p.join(format!("{tool}-global")).to_string_lossy().into()),
+                default_cache: base
+                    .filter(|_| definition.cache_config)
+                    .map(|p| p.join(format!("{tool}-cache")).to_string_lossy().into()),
             }
-        } else {
-            (false, None, None, Some("未找到可执行命令".into()))
-        };
-        let base = root.map(|r| r.join("globals"));
-        out.push(ToolConfig {
-            tool: tool.into(),
-            name: name.into(),
-            available,
-            executable_path: inv.as_ref().map(|i| i.program.clone()),
-            error,
-            global_path: global,
-            cache_path: cache,
-            default_global: base
-                .as_ref()
-                .filter(|_| definition.global_config)
-                .map(|p| p.join(format!("{tool}-global")).to_string_lossy().into()),
-            default_cache: base
-                .filter(|_| definition.cache_config)
-                .map(|p| p.join(format!("{tool}-cache")).to_string_lossy().into()),
-        });
-    }
-    out
+        })
+        .buffered(4)
+        .collect()
+        .await
 }
 
 /// 返回包管理器实际查询到的缓存目录，供缓存页与配置页使用同一来源。
@@ -456,6 +519,35 @@ pub async fn apply_tool_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn self_update_targets_original_installation() {
+        let dir = crate::test_support::TestDir::new();
+        let inv = Invocation {
+            program: dir.path().join("npm.cmd").to_string_lossy().into(),
+            prefix: vec![],
+        };
+        assert!(self_update_command("npm", &inv).is_err());
+        std::fs::create_dir_all(dir.path().join("node_modules/npm")).unwrap();
+        std::fs::write(dir.path().join("node_modules/npm/package.json"), "{}").unwrap();
+        std::fs::write(&inv.program, "").unwrap();
+        let (_, args) = self_update_command("npm", &inv).unwrap();
+        assert_eq!(args[3], "--prefix");
+        assert!(crate::detect::system::paths_eq(
+            Path::new(&args[4]),
+            dir.path()
+        ));
+        std::fs::create_dir(dir.path().join("Scripts")).unwrap();
+        std::fs::write(dir.path().join("python.exe"), "").unwrap();
+        let pip = Invocation {
+            program: dir.path().join("Scripts/pip.exe").to_string_lossy().into(),
+            prefix: vec![],
+        };
+        let (updater, _) = self_update_command("pip", &pip).unwrap();
+        assert_eq!(updater.prefix, ["-m", "pip"]);
+        assert_eq!(Path::new(&updater.program), dir.path().join("python.exe"));
+        assert!(self_update_command("pipx", &inv).is_err());
+    }
 
     #[tokio::test]
     async fn silent_config_writes_succeed_but_queries_still_require_values() {

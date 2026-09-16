@@ -200,6 +200,7 @@ export interface PipReinstallStatus {
   dependencyCheck: string | null;
 }
 export interface GlobalReinstallPlan {
+  allowUnknownRegistry?: boolean;
   tool: string; executable: string; toolVersion: string;
   source: string; destination: string; binPath: string; cachePath: string; packages: { name: string; version: string; reason: string | null }[];
 }

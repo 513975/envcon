@@ -50,7 +50,7 @@ EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JD
 - **每次修改 PATH 前自动备份**,可随时恢复
 
 ### 包管理器
-- **0.5.0 通用包管理器工作区**：集中能力定义，支持 npm、pnpm、Yarn Classic、pip、Bun、uv Tools、pipx、Cargo、Composer、.NET Tools。新增常见位置、本地磁盘、指定目录的旧包扫描，按来源查看包并进入重装。[能力与限制](docs/package-managers.md) · [开发架构](docs/package-manager-architecture.md)。
+- **0.5.1 通用包管理器工作区**：支持包管理器自更新、扫描后直接删除旧包、环境删除及启动后台预热。npm 缺少来源记录时可确认从公共仓库按固定版本恢复；工具自更新按安装方式提供支持或明确提示。[能力与限制](docs/package-managers.md) · [本轮审计](docs/key-function-audit-2026-09-15.md)。
 - **历史全局包**：可查询旧目录并进入重装，跳过 npm 隐藏更新残留；支持已配置的空目标，预览实际命令及缓存路径，拒绝非空冲突。[使用说明](docs/global-package-reinstall.md)。
 - **0.4.2 旧包清理**：全部重装成功后，可预览并确认卸载指定旧包，保留运行时及新环境；支持逐包诊断和清理报告。[范围与限制](docs/old-package-cleanup.md)。
 - **0.4.1 界面整理**：与环境管理共用选择按钮，已验证可用管理器显示绿灯；路径操作跟随所选管理器。本机扫描按工具分类汇总，多路径与诊断展开查看。[扫描结果说明](docs/scan-results.md)。

@@ -24,6 +24,8 @@ use tokio::process::Command;
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
+    #[serde(default)]
+    pub allow_unknown_registry: bool,
     pub tool: String,
     pub executable: String,
     pub tool_version: String,
@@ -318,6 +320,7 @@ pub async fn preview(
     .await
     .map_err(|e| AppError::msg(e.to_string()))??;
     Ok(Plan {
+        allow_unknown_registry: false,
         tool: tool.clone(),
         executable: executable.to_string_lossy().into(),
         tool_version: version,
@@ -336,6 +339,17 @@ pub async fn preview(
     })
 }
 
+pub(crate) fn allow_registry_recovery(plan: &mut Plan, allow: bool) {
+    plan.allow_unknown_registry = allow && plan.tool == "npm";
+    if plan.allow_unknown_registry {
+        for package in &mut plan.packages {
+            if package.reason.as_deref() == Some(crate::package_managers::node::UNKNOWN_ORIGIN) {
+                package.reason = None;
+            }
+        }
+    }
+}
+
 fn install_args(tool: &str, dest: &Path, pin: &str) -> Result<Vec<String>> {
     let d = |suffix: &str| dest.join(suffix).to_string_lossy().into_owned();
     Ok(match tool {
@@ -346,6 +360,7 @@ fn install_args(tool: &str, dest: &Path, pin: &str) -> Result<Vec<String>> {
             &dest.to_string_lossy(),
             "--no-audit",
             "--no-fund",
+            "--registry=https://registry.npmjs.org/",
             "--",
             pin,
         ]),
@@ -410,13 +425,14 @@ pub async fn start(plan: Plan, names: Vec<String>) -> Result<()> {
     let guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("已有重装、迁移或配置任务正在执行"))?;
-    let fresh = preview(
+    let mut fresh = preview(
         plan.tool.clone(),
         plan.executable.clone(),
         plan.source.clone(),
         plan.destination.clone(),
     )
     .await?;
+    allow_registry_recovery(&mut fresh, plan.allow_unknown_registry);
     if fresh != plan {
         return Err(AppError::msg("源清单或工具版本变化，请重新预览"));
     }
@@ -524,8 +540,12 @@ async fn install(plan: &Plan, packages: &[Package]) -> Result<()> {
             }
         })?;
     }
-    let verified =
-        installed_packages(&plan.tool, dest).map(|rows| rows.into_iter().map(|(p, _)| p).collect());
+    let verified = installed_packages(&plan.tool, dest).map(|rows| {
+        let mut verified = plan.clone();
+        verified.packages = rows.into_iter().map(|(p, _)| p).collect();
+        allow_registry_recovery(&mut verified, plan.allow_unknown_registry);
+        verified.packages
+    });
     update(|t| finish(t, &verified, CANCEL.load(Ordering::SeqCst)))
 }
 
@@ -689,6 +709,106 @@ async fn verify_cleanup_scope(plan: &Plan, scratch: &Path) -> Result<PathBuf> {
     Ok(scope)
 }
 
+pub(crate) async fn scanned_cleanup_plan(
+    tool: String,
+    executable: String,
+    source: String,
+    reports: String,
+) -> Result<Plan> {
+    crate::package_managers::definition(&tool)?;
+    let source_path = Path::new(&source);
+    if !source_path.is_absolute() || !source_path.is_dir() {
+        return Err(AppError::msg("请选择已存在的旧包目录"));
+    }
+    crate::old_packages::verify_separate(source_path, Path::new(&reports))?;
+    let executable = launcher(&executable)?;
+    let scratch = cleanup_scratch(Path::new(&reports))?;
+    let version = manager_version(
+        &tool,
+        &run(
+            &executable,
+            &scratch.0,
+            &tool,
+            Some(&scratch.0),
+            &args(&["--version"]),
+            30,
+        )
+        .await?,
+    );
+    if !valid_version(&version) || (tool == "yarn" && !version.starts_with("1.")) {
+        return Err(AppError::msg("无法确认兼容的包管理器版本"));
+    }
+    let plan = Plan {
+        allow_unknown_registry: false,
+        tool,
+        executable: executable.to_string_lossy().into(),
+        tool_version: version,
+        source,
+        destination: reports,
+        bin_path: String::new(),
+        cache_path: String::new(),
+        packages: vec![],
+    };
+    verify_cleanup_scope(&plan, &scratch.0).await?;
+    Ok(plan)
+}
+
+pub(crate) async fn scanned_cleanup_candidates(
+    plan: &Plan,
+) -> Result<Vec<crate::old_packages::Candidate>> {
+    let scratch = cleanup_scratch(Path::new(&plan.destination))?;
+    verify_cleanup_scope(plan, &scratch.0).await?;
+    let tool = plan.tool.clone();
+    let source = PathBuf::from(&plan.source);
+    tokio::task::spawn_blocking(move || {
+        installed_packages(&tool, &source)?
+            .into_iter()
+            .map(|(p, path)| {
+                let mut reason = p.reason;
+                if reason.as_deref() == Some(crate::package_managers::node::UNKNOWN_ORIGIN) {
+                    reason = None;
+                }
+                if matches!(
+                    p.name.as_str(),
+                    "npm"
+                        | "pnpm"
+                        | "yarn"
+                        | "corepack"
+                        | "bun"
+                        | "uv"
+                        | "pipx"
+                        | "cargo"
+                        | "composer"
+                        | "dotnet"
+                ) {
+                    reason = Some("包管理器自身不能通过旧包删除入口卸载".into());
+                }
+                if path
+                    .as_ref()
+                    .is_some_and(|p| !crate::detect::system::path_within(&source, p))
+                {
+                    reason = Some("包文件位于来源目录之外".into());
+                }
+                if crate::package_managers::isolated(&tool) {
+                    if let Err(e) =
+                        crate::package_managers::verify_cleanup_files(&tool, &source, &p.name)
+                    {
+                        reason = Some(e.to_string());
+                    }
+                }
+                Ok(crate::old_packages::Candidate {
+                    name: p.name,
+                    version: p.version,
+                    path: path.map(|p| p.to_string_lossy().into()),
+                    reason,
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError::msg(e.to_string()))?
+}
+
 pub(crate) async fn cleanup_candidates(
     plan: &Plan,
     items: &[ItemResult],
@@ -726,10 +846,15 @@ pub(crate) async fn cleanup_candidates(
                 .is_some_and(|p| p.reason.is_none() && p.version == item.version)
             {
                 Some("不在原可重装清单内".into())
-            } else if !target
-                .iter()
-                .any(|p| p.name == item.name && p.version == item.version && p.reason.is_none())
-            {
+            } else if !target.iter().any(|p| {
+                p.name == item.name
+                    && p.version == item.version
+                    && (p.reason.is_none()
+                        || (plan.tool == "npm"
+                            && plan.allow_unknown_registry
+                            && p.reason.as_deref()
+                                == Some(crate::package_managers::node::UNKNOWN_ORIGIN)))
+            }) {
                 Some("新目录中要求的包版本不存在或来源异常".into())
             } else if cleanup_error.is_some() {
                 cleanup_error
@@ -741,6 +866,13 @@ pub(crate) async fn cleanup_candidates(
                         if !crate::detect::system::path_within(Path::new(&plan.source), path) =>
                     {
                         Some("旧包文件指向来源目录以外".into())
+                    }
+                    Some((p, _))
+                        if plan.allow_unknown_registry
+                            && p.reason.as_deref()
+                                == Some(crate::package_managers::node::UNKNOWN_ORIGIN) =>
+                    {
+                        None
                     }
                     Some((p, _)) => p.reason.clone(),
                 }
@@ -923,6 +1055,7 @@ mod tests {
                     .unwrap(),
             );
             let plan = Plan {
+                allow_unknown_registry: false,
                 tool: tool.into(),
                 executable: exe.to_string_lossy().into(),
                 tool_version: version,
@@ -1064,6 +1197,9 @@ mod tests {
         assert!(valid_version("1.2.3-beta.1+build"));
         assert!(!valid_version("1.2.3 & whoami"));
         assert!(install_args("unknown", Path::new("D:/target"), "tool@1.0.0").is_err());
+        assert!(install_args("npm", Path::new("D:/target"), "tool@1.0.0")
+            .unwrap()
+            .contains(&"--registry=https://registry.npmjs.org/".to_owned()));
     }
     #[test]
     fn only_reads_direct_pnpm_dependencies_and_handles_scopes() {
@@ -1119,6 +1255,44 @@ mod tests {
             .iter()
             .filter(|p| p.name != "registry")
             .all(|p| p.reason.is_some()));
+        let mut plan = Plan {
+            tool: "npm".into(),
+            executable: String::new(),
+            tool_version: String::new(),
+            source: String::new(),
+            destination: String::new(),
+            bin_path: String::new(),
+            cache_path: String::new(),
+            packages: p,
+            allow_unknown_registry: false,
+        };
+        allow_registry_recovery(&mut plan, true);
+        assert!(plan
+            .packages
+            .iter()
+            .find(|p| p.name == "unknown")
+            .unwrap()
+            .reason
+            .is_none());
+        assert!(plan
+            .packages
+            .iter()
+            .find(|p| p.name == "url")
+            .unwrap()
+            .reason
+            .is_some());
+        std::fs::rename(
+            d.path().join("node_modules/.package-lock.json"),
+            d.path().join("package-lock.json"),
+        )
+        .unwrap();
+        assert!(inventory("npm", d.path())
+            .unwrap()
+            .iter()
+            .find(|p| p.name == "registry")
+            .unwrap()
+            .reason
+            .is_none());
     }
 
     #[test]
@@ -1163,7 +1337,8 @@ mod tests {
             ),
         )
         .unwrap();
-        let plan = Plan {
+        let mut plan = Plan {
+            allow_unknown_registry: false,
             tool: "npm".into(),
             executable: exe.to_string_lossy().into(),
             tool_version: "1.0.0".into(),
@@ -1180,6 +1355,31 @@ mod tests {
             detail: None,
         }];
         assert!(cleanup_candidates(&plan, &items).await.unwrap()[0]
+            .reason
+            .is_none());
+        for root in [&old, &new] {
+            std::fs::write(
+                root.join("node_modules/fixture/package.json"),
+                r#"{"name":"fixture","version":"1.0.0"}"#,
+            )
+            .unwrap();
+        }
+        assert!(cleanup_candidates(&plan, &items).await.unwrap()[0]
+            .reason
+            .is_some());
+        allow_registry_recovery(&mut plan, true);
+        assert!(cleanup_candidates(&plan, &items).await.unwrap()[0]
+            .reason
+            .is_none());
+        let direct = scanned_cleanup_plan(
+            "npm".into(),
+            plan.executable.clone(),
+            plan.source.clone(),
+            plan.destination.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(scanned_cleanup_candidates(&direct).await.unwrap()[0]
             .reason
             .is_none());
         std::fs::write(

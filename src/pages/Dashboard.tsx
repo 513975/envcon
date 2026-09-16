@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { HardDrive, Package, RefreshCw, Terminal, Zap, FolderOpen, Download as DownloadIcon } from "lucide-react";
+import {
+  HardDrive,
+  Package,
+  RefreshCw,
+  Terminal,
+  Zap,
+  FolderOpen,
+  Download as DownloadIcon,
+} from "lucide-react";
 import { PageShell } from "../components/layout/PageShell";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -22,10 +30,10 @@ export function Dashboard() {
   const overviewVersion = useAppStore((s) => s.overviewVersion);
   const setPage = useAppStore((s) => s.setPage);
 
-  const load = async () => {
+  const load = async (force = false) => {
     setLoading(true);
     try {
-      setOverview(await api.getOverview());
+      setOverview(await api.getOverview(force));
     } catch (e) {
       toast.error("加载失败", String(e));
     } finally {
@@ -50,7 +58,8 @@ export function Dashboard() {
     }
   };
 
-  if (loading && !overview) return <Spinner className="py-24 flex justify-center" />;
+  if (loading && !overview)
+    return <Spinner className="py-24 flex justify-center" />;
 
   if (overview && !overview.rootExists) {
     // 首次使用引导
@@ -76,7 +85,13 @@ export function Dashboard() {
                   <Button onClick={() => setRootSetting(false)}>取消</Button>
                 </div>
               ) : (
-                <Button variant="primary" onClick={() => { setRootInput("D:\\DevEnvManager"); setRootSetting(true); }}>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setRootInput("D:\\DevEnvManager");
+                    setRootSetting(true);
+                  }}
+                >
                   选择根目录
                 </Button>
               )
@@ -90,11 +105,14 @@ export function Dashboard() {
   const categories = overview?.categories ?? [];
   const managedCount = categories.reduce((n, c) => n + c.envs.length, 0);
   const countedIdentities = new Set<string>();
-  const countedEnvs = categories.flatMap((c) => c.envs).filter((env) => {
-    if (env.isExternalLink || countedIdentities.has(env.identityPath)) return false;
-    countedIdentities.add(env.identityPath);
-    return true;
-  });
+  const countedEnvs = categories
+    .flatMap((c) => c.envs)
+    .filter((env) => {
+      if (env.isExternalLink || countedIdentities.has(env.identityPath))
+        return false;
+      countedIdentities.add(env.identityPath);
+      return true;
+    });
   const totalSize = countedEnvs.reduce((n, env) => n + (env.sizeBytes ?? 0), 0);
   const totalSizeComplete = countedEnvs.every((env) => env.sizeComplete);
   const currentEnvs = categories.filter((c) => c.current);
@@ -104,7 +122,7 @@ export function Dashboard() {
       title="仪表盘"
       desc={overview ? `根目录:${overview.root}` : undefined}
       actions={
-        <Button size="sm" onClick={load} loading={loading}>
+        <Button size="sm" onClick={() => load(true)} loading={loading}>
           <RefreshCw className="size-3.5" />
           刷新
         </Button>
@@ -118,7 +136,9 @@ export function Dashboard() {
               <Package className="size-4.5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
-              <div className="text-xl font-bold text-zinc-900 dark:text-white">{managedCount}</div>
+              <div className="text-xl font-bold text-zinc-900 dark:text-white">
+                {managedCount}
+              </div>
               <div className="text-xs text-zinc-500">已管理环境</div>
             </div>
           </div>
@@ -129,7 +149,11 @@ export function Dashboard() {
               <HardDrive className="size-4.5 text-sky-600 dark:text-sky-400" />
             </div>
             <div>
-              <div className="text-xl font-bold text-zinc-900 dark:text-white">{totalSizeComplete ? formatBytes(totalSize) : `≥ ${formatBytes(totalSize)}`}</div>
+              <div className="text-xl font-bold text-zinc-900 dark:text-white">
+                {totalSizeComplete
+                  ? formatBytes(totalSize)
+                  : `≥ ${formatBytes(totalSize)}`}
+              </div>
               <div className="text-xs text-zinc-500">环境占用空间</div>
             </div>
           </div>
@@ -140,7 +164,9 @@ export function Dashboard() {
               <Zap className="size-4.5 text-amber-600 dark:text-amber-400" />
             </div>
             <div>
-              <div className="text-xl font-bold text-zinc-900 dark:text-white">{currentEnvs.length} / {categories.length}</div>
+              <div className="text-xl font-bold text-zinc-900 dark:text-white">
+                {currentEnvs.length} / {categories.length}
+              </div>
               <div className="text-xs text-zinc-500">已激活环境类型</div>
             </div>
           </div>
@@ -163,7 +189,15 @@ export function Dashboard() {
           <Empty
             title="尚未激活任何环境"
             desc="在环境管理页设置 current 链接；新终端是否命中该版本取决于 PATH 顺序"
-            action={<Button size="sm" variant="primary" onClick={() => setPage("environments")}>去环境管理</Button>}
+            action={
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => setPage("environments")}
+              >
+                去环境管理
+              </Button>
+            }
           />
         ) : (
           <div className="p-4 grid grid-cols-2 gap-3">
@@ -189,7 +223,12 @@ export function Dashboard() {
                     <span>{formatBytes(env?.sizeBytes)}</span>
                     <button
                       className="inline-flex items-center gap-1 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
-                      onClick={() => env && api.openPath(env.path).catch((e) => toast.error("打开失败", String(e)))}
+                      onClick={() =>
+                        env &&
+                        api
+                          .openPath(env.path)
+                          .catch((e) => toast.error("打开失败", String(e)))
+                      }
                     >
                       <FolderOpen className="size-3" />
                       {meta.label}目录
@@ -205,9 +244,24 @@ export function Dashboard() {
       {/* 快捷入口 */}
       <div className="grid grid-cols-3 gap-4 mt-5">
         {[
-          { page: "environments" as const, icon: Package, title: "环境管理", desc: "切换版本 / 卸载" },
-          { page: "download" as const, icon: DownloadIcon, title: "下载中心", desc: "国内镜像高速下载" },
-          { page: "paths" as const, icon: Terminal, title: "路径管理", desc: "PATH 与缓存清理" },
+          {
+            page: "environments" as const,
+            icon: Package,
+            title: "环境管理",
+            desc: "切换版本 / 卸载",
+          },
+          {
+            page: "download" as const,
+            icon: DownloadIcon,
+            title: "下载中心",
+            desc: "国内镜像高速下载",
+          },
+          {
+            page: "paths" as const,
+            icon: Terminal,
+            title: "路径管理",
+            desc: "PATH 与缓存清理",
+          },
         ].map(({ page, icon: Icon, title, desc }) => (
           <Card
             key={page}
@@ -229,10 +283,12 @@ export function Dashboard() {
 
       {/* 便携模式指示 */}
       {overview?.portable && (
-        <div className={cn(
-          "mt-5 rounded-lg border border-emerald-200 dark:border-emerald-900",
-          "bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-xs text-emerald-700 dark:text-emerald-400",
-        )}>
+        <div
+          className={cn(
+            "mt-5 rounded-lg border border-emerald-200 dark:border-emerald-900",
+            "bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-xs text-emerald-700 dark:text-emerald-400",
+          )}
+        >
           便携模式运行中 — 配置存储在 exe 旁的 data 目录,可直接放入 U 盘使用
         </div>
       )}

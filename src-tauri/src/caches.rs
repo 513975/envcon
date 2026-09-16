@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use crate::fsutil::directory_size as dir_size;
 
 use serde::Serialize;
+use futures_util::StreamExt;
 
 use crate::error::{AppError, Result};
 use std::collections::HashMap;
@@ -99,7 +100,7 @@ pub async fn compute_sizes(mut caches: Vec<CacheInfo>) -> Vec<CacheInfo> {
             }
         })
         .collect();
-    let sizes = futures_util::future::join_all(futs).await;
+    let sizes: Vec<_> = futures_util::stream::iter(futs).buffered(2).collect().await;
     for (c, s) in caches.iter_mut().zip(sizes) {
         match s {
             Some((size, complete)) => {

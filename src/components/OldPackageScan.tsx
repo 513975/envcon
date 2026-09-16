@@ -13,6 +13,7 @@ import { managers, managerDefinition } from "../lib/managers";
 import { useTaskStatus } from "../lib/useTaskStatus";
 import type { PackageList } from "../lib/types";
 import { Button } from "./ui/Button";
+import { OldPackageCleanup } from "./OldPackageCleanup";
 
 export function OldPackageScan({
   onReinstall,
@@ -28,6 +29,7 @@ export function OldPackageScan({
   const [expanded, setExpanded] = useState("");
   const [details, setDetails] = useState<PackageList | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const request = useRef(0);
   const {
     task,
@@ -45,7 +47,7 @@ export function OldPackageScan({
     [],
   );
   const scan = async () => {
-    if (busy || running || initializing) return;
+    if (busy || cleaning || running || initializing) return;
     beginMutation();
     setBusy(true);
     setError("");
@@ -114,7 +116,7 @@ export function OldPackageScan({
           <select
             aria-label="扫描范围"
             value={mode}
-            disabled={busy || running}
+            disabled={busy || running || cleaning}
             onChange={(e) => setMode(e.target.value as typeof mode)}
             className="block mt-1 h-9 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm"
           >
@@ -137,7 +139,9 @@ export function OldPackageScan({
             variant="primary"
             loading={busy}
             disabled={
-              initializing || (mode === "directory" && !directory.trim())
+              initializing ||
+              cleaning ||
+              (mode === "directory" && !directory.trim())
             }
             onClick={scan}
           >
@@ -151,14 +155,14 @@ export function OldPackageScan({
           <input
             aria-label="扫描目录"
             value={directory}
-            disabled={busy || running}
+            disabled={busy || running || cleaning}
             onChange={(e) => setDirectory(e.target.value)}
             className="min-w-0 flex-1 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent p-2 font-mono text-xs"
           />
           <Button
             title="选择扫描目录"
             aria-label="选择扫描目录"
-            disabled={busy || running}
+            disabled={busy || running || cleaning}
             onClick={browse}
           >
             <FolderOpen className="size-4" />
@@ -194,6 +198,7 @@ export function OldPackageScan({
           <div className="flex flex-wrap gap-3">
             <select
               aria-label="筛选管理器"
+              disabled={cleaning}
               value={manager}
               onChange={(e) => setManager(e.target.value)}
               className="h-9 max-w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-xs"
@@ -207,6 +212,7 @@ export function OldPackageScan({
             </select>
             <input
               aria-label="搜索来源目录"
+              disabled={cleaning}
               placeholder="搜索来源目录"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -221,7 +227,7 @@ export function OldPackageScan({
                 <div key={id} className="py-3 space-y-2">
                   <div className="flex gap-2 items-start">
                     <button
-                      disabled={running}
+                      disabled={running || cleaning}
                       aria-label={`查看 ${row.tool} ${row.path}`}
                       aria-expanded={active}
                       onClick={() => inspect(row.tool, row.path)}
@@ -294,12 +300,40 @@ export function OldPackageScan({
                             </table>
                           </div>
                           <Button
-                            disabled={running || !details.packages.length}
+                            disabled={
+                              running || cleaning || !details.packages.length
+                            }
                             onClick={() => onReinstall(row.tool, row.path)}
                           >
                             <Package className="size-4" />
                             重装此目录的包
                           </Button>
+                          {!running && (
+                            <OldPackageCleanup
+                              key={id}
+                              tool={row.tool}
+                              source={row.path}
+                              destination=""
+                              onBusyChange={setCleaning}
+                              onComplete={() => {
+                                const current = ++request.current;
+                                void api
+                                  .listInstalledPackages(
+                                    row.tool,
+                                    row.path,
+                                    true,
+                                  )
+                                  .then((data) => {
+                                    if (request.current === current)
+                                      setDetails(data);
+                                  })
+                                  .catch((e) => {
+                                    if (request.current === current)
+                                      setError(String(e));
+                                  });
+                              }}
+                            />
+                          )}
                         </>
                       )}
                     </div>

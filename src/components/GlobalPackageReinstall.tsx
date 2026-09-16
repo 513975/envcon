@@ -54,6 +54,7 @@ export function GlobalPackageReinstall({
   const [busy, setBusy] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [allowUnknownRegistry, setAllowUnknownRegistry] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const running = task?.status === "running";
@@ -101,6 +102,7 @@ export function GlobalPackageReinstall({
         executable.trim(),
         source.trim(),
         destination.trim(),
+        allowUnknownRegistry,
       );
       setPlan(p);
       setSelected(p.packages.filter((x) => !x.reason).map((x) => x.name));
@@ -240,6 +242,21 @@ export function GlobalPackageReinstall({
             />
             {input("旧全局包目录", source, setSource, "source")}
             {input("目标全局目录", destination, setDestination, "destination")}
+            {tool.tool === "npm" && (
+              <label className="flex items-start gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={allowUnknownRegistry}
+                  disabled={locked}
+                  onChange={(e) => {
+                    setAllowUnknownRegistry(e.target.checked);
+                    invalidate();
+                  }}
+                />
+                对缺少来源记录的包，确认从 npm
+                公共仓库（registry.npmjs.org）下载同名固定版本；这不代表找回原始来源，私有包不适用
+              </label>
+            )}
             {plan && (
               <>
                 <p className="text-xs">

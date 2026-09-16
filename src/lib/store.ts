@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { invalidateReads } from "./readCache";
 
 export type Page =
   | "dashboard"
@@ -20,6 +21,8 @@ export const useAppStore = create<AppState>((set) => ({
   page: "dashboard",
   setPage: (page) => set({ page }),
   overviewVersion: 0,
-  refreshOverview: () =>
-    set((s) => ({ overviewVersion: s.overviewVersion + 1 })),
+  refreshOverview: () => {
+    invalidateReads();
+    set((s) => ({ overviewVersion: s.overviewVersion + 1 }));
+  },
 }));

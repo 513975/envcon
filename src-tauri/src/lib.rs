@@ -37,6 +37,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
+            commands::update_package_manager,
             commands::set_root,
             commands::scan_system,
             commands::integrate_external_env,
@@ -77,6 +78,7 @@ pub fn run() {
             commands::global_reinstall_status,
             commands::cancel_global_reinstall,
             commands::preview_old_package_cleanup,
+            commands::preview_scanned_package_cleanup,
             commands::cleanup_old_packages,
         ])
         .run(tauri::generate_context!())

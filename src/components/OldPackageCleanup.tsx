@@ -11,10 +11,14 @@ export function OldPackageCleanup({
   tool,
   destination,
   onBusyChange,
+  source,
+  onComplete,
 }: {
   tool: string;
   destination: string;
   onBusyChange: (busy: boolean) => void;
+  source?: string;
+  onComplete?: () => void;
 }) {
   const [preview, setPreview] = useState<OldPackageCleanupPreview | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -32,9 +36,13 @@ export function OldPackageCleanup({
     setConfirmed(false);
     setPreview(null);
     try {
-      const data = await api.previewOldPackageCleanup(tool, destination);
+      const data = source
+        ? await api.previewScannedPackageCleanup(tool, source)
+        : await api.previewOldPackageCleanup(tool, destination);
       setPreview(data);
-      setSelected(data.packages.filter((p) => !p.reason).map((p) => p.name));
+      setSelected(
+        source ? [] : data.packages.filter((p) => !p.reason).map((p) => p.name),
+      );
     } catch (e) {
       setError(String(e));
     } finally {
@@ -48,6 +56,7 @@ export function OldPackageCleanup({
     setResult(null);
     try {
       setResult(await api.cleanupOldPackages(tool, preview.token, selected));
+      onComplete?.();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -65,10 +74,10 @@ export function OldPackageCleanup({
         size="sm"
         onClick={inspect}
         loading={busy}
-        title="核对新旧版本并预览卸载清单"
+        title="核对来源并预览卸载清单"
       >
         <Trash2 className="size-3.5" />
-        清理已重装的旧包
+        {source ? "删除此目录的旧包" : "清理已重装的旧包"}
       </Button>
       {busy && <p role="status">正在核对或卸载旧包，请保持应用运行</p>}
       {preview && (
@@ -124,7 +133,9 @@ export function OldPackageCleanup({
                 checked={confirmed}
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
-              已验证新环境可用并切换所需路径，确认卸载所选旧包；不会放入回收站
+              {source
+                ? "确认直接删除所选来源中的包，已了解相关命令或项目可能失效；不会放入回收站"
+                : "已验证新环境可用并切换所需路径，确认卸载所选旧包；不会放入回收站"}
             </label>
           )}
           <div className="flex flex-wrap gap-2">

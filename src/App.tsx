@@ -9,6 +9,8 @@ import { Download } from "./pages/Download";
 import { Paths } from "./pages/Paths";
 import { Settings } from "./pages/Settings";
 import { PackageManagers } from "./pages/PackageManagers";
+import { api } from "./lib/api";
+import { savedProjectDirs } from "./lib/scanPreferences";
 
 const PAGES: { id: Page; Component: ComponentType }[] = [
   { id: "dashboard", Component: Dashboard },
@@ -36,13 +38,34 @@ export default function App() {
 
   useEffect(() => {
     startInstallListener();
+    const timer = window.setTimeout(() => {
+      void Promise.allSettled([
+        api.getOverview(),
+        api.getToolConfigs(),
+        api.scanSystem(savedProjectDirs()),
+      ]);
+    }, 100);
+    const cacheTimer = window.setTimeout(() => {
+      void api.getCaches().catch(() => {});
+    }, 1500);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(cacheTimer);
+    };
   }, []);
 
   // Preserve existing shortcuts; the new page uses Ctrl+6.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
-      const pages: Page[] = ["dashboard", "environments", "download", "paths", "settings", "packages"];
+      const pages: Page[] = [
+        "dashboard",
+        "environments",
+        "download",
+        "paths",
+        "settings",
+        "packages",
+      ];
       const idx = parseInt(e.key, 10) - 1;
       if (idx >= 0 && idx < pages.length) {
         e.preventDefault();

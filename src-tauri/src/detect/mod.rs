@@ -2,7 +2,7 @@ pub mod probe;
 pub mod system;
 pub(crate) mod discovery;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::os::windows::fs::MetadataExt;
 
 use futures_util::future::join_all;
@@ -48,7 +48,8 @@ async fn scan_category(root: &Path, env_type: EnvType) -> CategoryOverview {
                 path.canonicalize().ok().as_ref() == Some(target)
             }) || (junction_read.is_none() && current.as_deref() == Some(name.as_str()));
             let version = probe::probe_version(env_type, &path).await;
-            let (size_bytes, size_complete) = dir_size_blocking(path.clone()).await;
+            // 启动扫描只读取结构和版本；递归统计大小会阻塞每个环境，改为按需统计。
+            let (size_bytes, size_complete) = (None, false);
             let status = if !accessible { "inaccessible" } else if structural && version.is_some() { "available" } else { "broken" };
             let status_detail = if !accessible { Some("链接目标不存在或目录不可访问".into()) }
             else if structural && version.is_some() { None } else if !structural {
@@ -84,20 +85,6 @@ async fn scan_category(root: &Path, env_type: EnvType) -> CategoryOverview {
         junction_path: junction_path.to_string_lossy().to_string(),
         scan_warning,
         current_error,
-    }
-}
-
-/// 后台线程递归计算目录大小
-async fn dir_size_blocking(path: PathBuf) -> (Option<u64>, bool) {
-    tokio::task::spawn_blocking(move || dir_size(&path))
-        .await
-        .unwrap_or((None, false))
-}
-
-fn dir_size(path: &Path) -> (Option<u64>, bool) {
-    match crate::fsutil::directory_size(path) {
-        Some((bytes, complete)) => (Some(bytes), complete),
-        None => (None, false),
     }
 }
 

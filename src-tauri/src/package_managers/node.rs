@@ -9,6 +9,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub(crate) const UNKNOWN_ORIGIN: &str = "缺少可确认的仓库来源元数据，不能仅凭包名替换为仓库包";
+
 pub(crate) fn valid_name(name: &str) -> bool {
     let part = |s: &str| {
         !s.is_empty()
@@ -161,7 +163,12 @@ pub(crate) fn installed_packages(
 fn inventory_project(tool: &str, source: &Path) -> Result<Vec<Package>> {
     let modules = modules_dir(source)?;
     let manifest = modules.parent().unwrap().join("package.json");
-    let lock_path = modules.join(".package-lock.json");
+    let hidden_lock = modules.join(".package-lock.json");
+    let lock_path = if hidden_lock.exists() {
+        hidden_lock
+    } else {
+        modules.parent().unwrap().join("package-lock.json")
+    };
     let lock = if tool == "npm" && lock_path.exists() {
         Some(read_json(&lock_path)?)
     } else {
@@ -268,8 +275,13 @@ fn inventory_project(tool: &str, source: &Path) -> Result<Vec<Package>> {
             || from.contains("https:")
         {
             Some("本地、Git、URL、链接或别名来源需要原始安装材料")
+        } else if tool == "npm"
+            && !registry_origin
+            && (!locked.is_empty() || !resolved.is_empty() || !from.is_empty())
+        {
+            Some("已记录非标准仓库或直接来源，请按原始安装来源恢复")
         } else if tool == "npm" && !registry_origin {
-            Some("缺少可确认的仓库来源元数据，不能仅凭包名替换为仓库包")
+            Some(UNKNOWN_ORIGIN)
         } else {
             None
         };

@@ -31,6 +31,7 @@ export function PackageManagers() {
   // 包管理器路径配置
   const [toolConfigs, setToolConfigs] = useState<ToolConfig[] | null>(null);
   const [toolBusy, setToolBusy] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [configError, setConfigError] = useState("");
   const [configLoading, setConfigLoading] = useState(false);
   const configRequest = useRef(0);
@@ -69,12 +70,12 @@ export function PackageManagers() {
   const [confirmClean, setConfirmClean] = useState<CacheInfo | null>(null);
   const [cleaning, setCleaning] = useState(false);
 
-  const loadToolConfigs = async () => {
+  const loadToolConfigs = async (force = false) => {
     const request = ++configRequest.current;
     setConfigLoading(true);
     setConfigError("");
     try {
-      const configs = await api.getToolConfigs();
+      const configs = await api.getToolConfigs(force);
       if (request === configRequest.current) setToolConfigs(configs);
     } catch (e) {
       if (request === configRequest.current) {
@@ -86,10 +87,10 @@ export function PackageManagers() {
     }
   };
 
-  const loadCaches = async () => {
+  const loadCaches = async (force = false) => {
     setCacheLoading(true);
     try {
-      setCaches(await api.getCaches());
+      setCaches(await api.getCaches(force));
     } catch (e) {
       toast.error("缓存检测失败", String(e));
     } finally {
@@ -160,6 +161,23 @@ export function PackageManagers() {
     if (caches) void loadCaches();
   };
 
+  const updateSelected = async () => {
+    if (!selectedTool || updating) return;
+    setUpdating(true);
+    try {
+      const output = await api.updatePackageManager(selectedTool);
+      toast.success(
+        `${managerDefinition(selectedTool).name} 更新命令已完成`,
+        output || undefined,
+      );
+      await loadToolConfigs();
+    } catch (e) {
+      toast.error("包管理器更新失败", String(e));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const doClean = async () => {
     if (!confirmClean) return;
     setCleaning(true);
@@ -179,17 +197,33 @@ export function PackageManagers() {
     <PageShell
       title="包管理器"
       actions={
-        <Button
-          size="sm"
-          title="刷新包管理器配置"
-          aria-label="刷新包管理器配置"
-          onClick={loadToolConfigs}
-          loading={configLoading}
-          disabled={toolBusy !== null}
-        >
-          <RefreshCw className="size-3.5" />
-          刷新
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            title="刷新包管理器配置"
+            aria-label="刷新包管理器配置"
+            onClick={() => loadToolConfigs(true)}
+            loading={configLoading}
+            disabled={toolBusy !== null}
+          >
+            <RefreshCw className="size-3.5" />
+            刷新
+          </Button>
+          <Button
+            size="sm"
+            onClick={updateSelected}
+            loading={updating}
+            disabled={
+              toolBusy !== null ||
+              configLoading ||
+              !toolConfigs?.find((t) => t.tool === selectedTool)?.available
+            }
+            title="更新当前包管理器"
+          >
+            <RefreshCw className="size-3.5" />
+            更新当前工具
+          </Button>
+        </div>
       }
     >
       <div
@@ -272,7 +306,9 @@ export function PackageManagers() {
           onReinstall={(source) => openReinstall(selectedTool, source)}
         />
       )}
-      {view === "scan" && <OldPackageScan onReinstall={openReinstall} />}
+      <div className={view === "scan" ? "" : "hidden"}>
+        <OldPackageScan onReinstall={openReinstall} />
+      </div>
       {globalReinstallTool && (
         <GlobalPackageReinstall
           tool={globalReinstallTool}
@@ -430,7 +466,11 @@ export function PackageManagers() {
           <CardHeader
             title="开发缓存"
             actions={
-              <Button size="sm" onClick={loadCaches} loading={cacheLoading}>
+              <Button
+                size="sm"
+                onClick={() => loadCaches(true)}
+                loading={cacheLoading}
+              >
                 <RefreshCw className="size-3.5" />
                 重新统计
               </Button>
