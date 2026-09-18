@@ -1,0 +1,601 @@
+{
+  "baseline": {
+    "label": "baseline-final",
+    "exeSha256": "64dba5931a8eb976abd3736e4c772b043288ad5916d8314664ba393d8cd6e950",
+    "platform": "Windows_NT 10.0.26200 x64",
+    "cpu": "Intel(R) Core(TM) Ultra 5 338H",
+    "logicalCpus": 12,
+    "memoryBytes": 33873752064,
+    "fixture": {
+      "jdks": 3,
+      "extraFiles": 3000,
+      "fileBytes": 1024
+    },
+    "records": [
+      {
+        "sample": 1,
+        "cache": "cold",
+        "firstInteractiveMs": 1378,
+        "commonScansMs": 8258,
+        "manualRescanMs": 12302,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 3414,
+          "type": "sample",
+          "readBytes": 19099114,
+          "activeProcesses": 21,
+          "readOperations": 2456,
+          "elapsedMs": 1382,
+          "cpuMs": 3625,
+          "writeBytes": 4056892,
+          "peakCommitBytes": 916926464,
+          "processes": 35
+        },
+        "commonScans": {
+          "writeOperations": 8102,
+          "type": "sample",
+          "readBytes": 205272050,
+          "activeProcesses": 7,
+          "readOperations": 23913,
+          "elapsedMs": 8258,
+          "cpuMs": 21843.75,
+          "writeBytes": 20449740,
+          "peakCommitBytes": 948346880,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 16153,
+          "type": "sample",
+          "readBytes": 499264626,
+          "activeProcesses": 7,
+          "readOperations": 51836,
+          "elapsedMs": 20666,
+          "cpuMs": 46546.875,
+          "writeBytes": 53262794,
+          "peakCommitBytes": 996110336,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 1,
+        "cache": "warm",
+        "firstInteractiveMs": 800,
+        "commonScansMs": 7850,
+        "manualRescanMs": 11944,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2220,
+          "type": "sample",
+          "readBytes": 6130730,
+          "activeProcesses": 7,
+          "readOperations": 2215,
+          "elapsedMs": 806,
+          "cpuMs": 1562.5,
+          "writeBytes": 1939190,
+          "peakCommitBytes": 244785152,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 7101,
+          "type": "sample",
+          "readBytes": 205551341,
+          "activeProcesses": 7,
+          "readOperations": 24170,
+          "elapsedMs": 7851,
+          "cpuMs": 21093.75,
+          "writeBytes": 18035800,
+          "peakCommitBytes": 950099968,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 14968,
+          "type": "sample",
+          "readBytes": 498743468,
+          "activeProcesses": 7,
+          "readOperations": 51944,
+          "elapsedMs": 19902,
+          "cpuMs": 45328.125,
+          "writeBytes": 50210768,
+          "peakCommitBytes": 986255360,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 2,
+        "cache": "cold",
+        "firstInteractiveMs": 1314,
+        "commonScansMs": 7944,
+        "manualRescanMs": 11594,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2206,
+          "type": "sample",
+          "readBytes": 6308439,
+          "activeProcesses": 7,
+          "readOperations": 2228,
+          "elapsedMs": 1319,
+          "cpuMs": 1781.25,
+          "writeBytes": 1777185,
+          "peakCommitBytes": 259252224,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 6881,
+          "type": "sample",
+          "readBytes": 205295174,
+          "activeProcesses": 7,
+          "readOperations": 23989,
+          "elapsedMs": 7945,
+          "cpuMs": 20328.125,
+          "writeBytes": 17433139,
+          "peakCommitBytes": 956006400,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 14590,
+          "type": "sample",
+          "readBytes": 498096389,
+          "activeProcesses": 7,
+          "readOperations": 51577,
+          "elapsedMs": 19644,
+          "cpuMs": 43718.75,
+          "writeBytes": 49219570,
+          "peakCommitBytes": 982949888,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 2,
+        "cache": "warm",
+        "firstInteractiveMs": 1229,
+        "commonScansMs": 8570,
+        "manualRescanMs": 11957,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2193,
+          "type": "sample",
+          "readBytes": 6304503,
+          "activeProcesses": 7,
+          "readOperations": 2231,
+          "elapsedMs": 1234,
+          "cpuMs": 1828.125,
+          "writeBytes": 1771686,
+          "peakCommitBytes": 263299072,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 7081,
+          "type": "sample",
+          "readBytes": 205661261,
+          "activeProcesses": 7,
+          "readOperations": 24214,
+          "elapsedMs": 8571,
+          "cpuMs": 21609.375,
+          "writeBytes": 17835674,
+          "peakCommitBytes": 968863744,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 15013,
+          "type": "sample",
+          "readBytes": 498945444,
+          "activeProcesses": 7,
+          "readOperations": 52017,
+          "elapsedMs": 20633,
+          "cpuMs": 45765.625,
+          "writeBytes": 50103346,
+          "peakCommitBytes": 985542656,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 3,
+        "cache": "cold",
+        "firstInteractiveMs": 779,
+        "commonScansMs": 7674,
+        "manualRescanMs": 12110,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2180,
+          "type": "sample",
+          "readBytes": 6286311,
+          "activeProcesses": 7,
+          "readOperations": 2192,
+          "elapsedMs": 783,
+          "cpuMs": 1640.625,
+          "writeBytes": 1753745,
+          "peakCommitBytes": 234754048,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 6981,
+          "type": "sample",
+          "readBytes": 205491101,
+          "activeProcesses": 7,
+          "readOperations": 24070,
+          "elapsedMs": 7675,
+          "cpuMs": 20734.375,
+          "writeBytes": 17661484,
+          "peakCommitBytes": 945074176,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 14976,
+          "type": "sample",
+          "readBytes": 499096945,
+          "activeProcesses": 7,
+          "readOperations": 51925,
+          "elapsedMs": 19895,
+          "cpuMs": 44875,
+          "writeBytes": 50115873,
+          "peakCommitBytes": 986599424,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 3,
+        "cache": "warm",
+        "firstInteractiveMs": 1121,
+        "commonScansMs": 8168,
+        "manualRescanMs": 11917,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2193,
+          "type": "sample",
+          "readBytes": 6309571,
+          "activeProcesses": 7,
+          "readOperations": 2217,
+          "elapsedMs": 1125,
+          "cpuMs": 1765.625,
+          "writeBytes": 1776996,
+          "peakCommitBytes": 264118272,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 7004,
+          "type": "sample",
+          "readBytes": 205438061,
+          "activeProcesses": 7,
+          "readOperations": 24079,
+          "elapsedMs": 8168,
+          "cpuMs": 21890.625,
+          "writeBytes": 17533816,
+          "peakCommitBytes": 974254080,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 14911,
+          "type": "sample",
+          "readBytes": 498666780,
+          "activeProcesses": 7,
+          "readOperations": 51847,
+          "elapsedMs": 20192,
+          "cpuMs": 45625,
+          "writeBytes": 49747454,
+          "peakCommitBytes": 988651520,
+          "processes": 402
+        }
+      }
+    ]
+  },
+  "candidate": {
+    "label": "candidate-final",
+    "exeSha256": "ff5a5a42845d8cbf62d0bd1d6764cd56a268d88d7f56d8479a2bfc3b9ac0c0f5",
+    "platform": "Windows_NT 10.0.26200 x64",
+    "cpu": "Intel(R) Core(TM) Ultra 5 338H",
+    "logicalCpus": 12,
+    "memoryBytes": 33873752064,
+    "fixture": {
+      "jdks": 3,
+      "extraFiles": 3000,
+      "fileBytes": 1024
+    },
+    "records": [
+      {
+        "sample": 1,
+        "cache": "cold",
+        "firstInteractiveMs": 1030,
+        "commonScansMs": 7134,
+        "manualRescanMs": 8166,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 3675,
+          "type": "sample",
+          "readBytes": 5953272,
+          "activeProcesses": 10,
+          "readOperations": 2559,
+          "elapsedMs": 1034,
+          "cpuMs": 2343.75,
+          "writeBytes": 4728864,
+          "peakCommitBytes": 275431424,
+          "processes": 10
+        },
+        "commonScans": {
+          "writeOperations": 9286,
+          "type": "sample",
+          "readBytes": 203326605,
+          "activeProcesses": 9,
+          "readOperations": 21996,
+          "elapsedMs": 7134,
+          "cpuMs": 14937.5,
+          "writeBytes": 23457550,
+          "peakCommitBytes": 975925248,
+          "processes": 164
+        },
+        "manualRescan": {
+          "writeOperations": 16388,
+          "type": "sample",
+          "readBytes": 497835640,
+          "activeProcesses": 7,
+          "readOperations": 52056,
+          "elapsedMs": 15442,
+          "cpuMs": 34531.25,
+          "writeBytes": 52764146,
+          "peakCommitBytes": 1028288512,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 1,
+        "cache": "warm",
+        "firstInteractiveMs": 829,
+        "commonScansMs": 982,
+        "manualRescanMs": 8274,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2516,
+          "type": "sample",
+          "readBytes": 6372203,
+          "activeProcesses": 7,
+          "readOperations": 2584,
+          "elapsedMs": 835,
+          "cpuMs": 1640.625,
+          "writeBytes": 2091138,
+          "peakCommitBytes": 285933568,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 3084,
+          "type": "sample",
+          "readBytes": 6945917,
+          "activeProcesses": 9,
+          "readOperations": 3134,
+          "elapsedMs": 982,
+          "cpuMs": 1906.25,
+          "writeBytes": 2674488,
+          "peakCommitBytes": 307777536,
+          "processes": 9
+        },
+        "manualRescan": {
+          "writeOperations": 10334,
+          "type": "sample",
+          "readBytes": 302067998,
+          "activeProcesses": 7,
+          "readOperations": 33452,
+          "elapsedMs": 9387,
+          "cpuMs": 21046.875,
+          "writeBytes": 32085201,
+          "peakCommitBytes": 1035341824,
+          "processes": 247
+        }
+      },
+      {
+        "sample": 2,
+        "cache": "cold",
+        "firstInteractiveMs": 875,
+        "commonScansMs": 6738,
+        "manualRescanMs": 8488,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2431,
+          "type": "sample",
+          "readBytes": 6379481,
+          "activeProcesses": 7,
+          "readOperations": 2470,
+          "elapsedMs": 879,
+          "cpuMs": 1687.5,
+          "writeBytes": 1877355,
+          "peakCommitBytes": 270778368,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 7105,
+          "type": "sample",
+          "readBytes": 207973169,
+          "activeProcesses": 7,
+          "readOperations": 24180,
+          "elapsedMs": 6738,
+          "cpuMs": 15984.375,
+          "writeBytes": 20280412,
+          "peakCommitBytes": 961683456,
+          "processes": 167
+        },
+        "manualRescan": {
+          "writeOperations": 14221,
+          "type": "sample",
+          "readBytes": 498566147,
+          "activeProcesses": 7,
+          "readOperations": 51144,
+          "elapsedMs": 15326,
+          "cpuMs": 34828.125,
+          "writeBytes": 49852173,
+          "peakCommitBytes": 1016434688,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 2,
+        "cache": "warm",
+        "firstInteractiveMs": 879,
+        "commonScansMs": 1032,
+        "manualRescanMs": 8069,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2497,
+          "type": "sample",
+          "readBytes": 6574772,
+          "activeProcesses": 7,
+          "readOperations": 2601,
+          "elapsedMs": 885,
+          "cpuMs": 2062.5,
+          "writeBytes": 1951768,
+          "peakCommitBytes": 294821888,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 3127,
+          "type": "sample",
+          "readBytes": 7184617,
+          "activeProcesses": 9,
+          "readOperations": 3179,
+          "elapsedMs": 1033,
+          "cpuMs": 2312.5,
+          "writeBytes": 2596664,
+          "peakCommitBytes": 323817472,
+          "processes": 9
+        },
+        "manualRescan": {
+          "writeOperations": 10268,
+          "type": "sample",
+          "readBytes": 302011905,
+          "activeProcesses": 7,
+          "readOperations": 33355,
+          "elapsedMs": 9234,
+          "cpuMs": 22671.875,
+          "writeBytes": 31674406,
+          "peakCommitBytes": 1053900800,
+          "processes": 247
+        }
+      },
+      {
+        "sample": 3,
+        "cache": "cold",
+        "firstInteractiveMs": 1351,
+        "commonScansMs": 11141,
+        "manualRescanMs": 13482,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2552,
+          "type": "sample",
+          "readBytes": 6517307,
+          "activeProcesses": 11,
+          "readOperations": 2562,
+          "elapsedMs": 1366,
+          "cpuMs": 2515.625,
+          "writeBytes": 1952309,
+          "peakCommitBytes": 284880896,
+          "processes": 11
+        },
+        "commonScans": {
+          "writeOperations": 8537,
+          "type": "sample",
+          "readBytes": 208946083,
+          "activeProcesses": 9,
+          "readOperations": 22920,
+          "elapsedMs": 11142,
+          "cpuMs": 18250,
+          "writeBytes": 25558930,
+          "peakCommitBytes": 988565504,
+          "processes": 164
+        },
+        "manualRescan": {
+          "writeOperations": 18021,
+          "type": "sample",
+          "readBytes": 511210694,
+          "activeProcesses": 7,
+          "readOperations": 55846,
+          "elapsedMs": 24756,
+          "cpuMs": 45265.625,
+          "writeBytes": 62482593,
+          "peakCommitBytes": 1016885248,
+          "processes": 402
+        }
+      },
+      {
+        "sample": 3,
+        "cache": "warm",
+        "firstInteractiveMs": 1344,
+        "commonScansMs": 1683,
+        "manualRescanMs": 13814,
+        "discoveryCounts": {
+          "availableManagers": 6,
+          "cacheRows": 10
+        },
+        "firstInteractive": {
+          "writeOperations": 2606,
+          "type": "sample",
+          "readBytes": 6597065,
+          "activeProcesses": 7,
+          "readOperations": 2704,
+          "elapsedMs": 1351,
+          "cpuMs": 2500,
+          "writeBytes": 1972262,
+          "peakCommitBytes": 286691328,
+          "processes": 7
+        },
+        "commonScans": {
+          "writeOperations": 3257,
+          "type": "sample",
+          "readBytes": 7310328,
+          "activeProcesses": 9,
+          "readOperations": 3334,
+          "elapsedMs": 1683,
+          "cpuMs": 2921.875,
+          "writeBytes": 2697590,
+          "peakCommitBytes": 304844800,
+          "processes": 9
+        },
+        "manualRescan": {
+          "writeOperations": 12824,
+          "type": "sample",
+          "readBytes": 310363753,
+          "activeProcesses": 7,
+          "readOperations": 36430,
+          "elapsedMs": 15618,
+          "cpuMs": 30328.125,
+          "writeBytes": 40099245,
+          "peakCommitBytes": 1006116864,
+          "processes": 247
+        },
+        "validation": {
+          "periodicVersionChangeMs": 30679,
+          "externalRemovalAndRestore": true,
+          "nativeSizeScanFiles": 1003
+        }
+      }
+    ]
+  }
+}

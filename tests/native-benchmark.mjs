@@ -32,11 +32,13 @@ for (let version = 21; version <= 23; version++) {
 }
 await fs.writeFile(path.join(data, "config.json"), JSON.stringify({ schema_version: 1, root: fixture, downloads_dir: path.join(fixture, "downloads") }));
 const records = [];
+// Keep the launcher environment identical between cold and warm processes.
+// A changing CDP port would itself change the cache's environment fingerprint.
+const probe = net.createServer().listen(0, "127.0.0.1");
+await once(probe, "listening"); const port = probe.address().port;
+await new Promise(resolve => probe.close(resolve));
 async function run(sample, cache) {
   if (cache === "cold") await fs.rm(path.join(data, "scan-cache-v1.json"), { force: true });
-  const probe = net.createServer().listen(0, "127.0.0.1");
-  await once(probe, "listening"); const port = probe.address().port;
-  await new Promise(resolve => probe.close(resolve));
   const profile = path.join(runRoot, "webview-profile");
   const worker = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.resolve("tests/benchmark-process.ps1"), "-Exe", exe], {
     windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
