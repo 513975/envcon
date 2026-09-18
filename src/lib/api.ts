@@ -13,6 +13,10 @@ import type {
 
 /** 后端 API 封装 */
 export const api = {
+  startSizeScan: (envType: EnvType | null, name: string | null, cacheTool: string | null) =>
+    cmd<number>("start_size_scan", { envType, name, cacheTool }),
+  sizeScanStatus: () => cmd<import("./types").SizeSnapshot[]>("size_scan_status"),
+  cancelSizeScan: (id: number) => cmd<void>("cancel_size_scan", { id }),
   getOverview: (force = false) =>
     scanRead<Overview>("overview", [], force),
   updatePackageManager: (tool: string) =>

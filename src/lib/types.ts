@@ -110,6 +110,22 @@ export interface CacheInfo {
   sizeDetail: string | null;
 }
 
+export interface SizeSnapshot {
+  id: number;
+  key: string;
+  path: string;
+  status: "running" | "done" | "partial" | "canceled";
+  bytes: number;
+  files: number;
+  directories: number;
+  skippedLinks: number;
+  issues: number;
+  detail: string | null;
+  currentPath: string;
+  complete: boolean;
+  elapsedMs: number;
+}
+
 export interface VersionInfo {
   version: string;
   date: string | null;

@@ -21,10 +21,10 @@ import { SelectionButton } from "../components/ui/SelectionButton";
 import { api } from "../lib/api";
 import { useScanResult } from "../lib/scanClient";
 import { ScanStatus } from "../components/ScanStatus";
+import { DirectorySize } from "../components/DirectorySize";
 import { savedProjectDirs } from "../lib/scanPreferences";
 import { toast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
-import { formatBytes } from "../lib/format";
 import {
   ALL_ENV_TYPES,
   ENV_TYPE_META,
@@ -253,12 +253,6 @@ export function Environments() {
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
                     <span>{env.version ?? "未知版本"}</span>
-                    <span>{formatBytes(env.sizeBytes)}</span>
-                    {!env.sizeComplete && (
-                      <span className="text-amber-600 dark:text-amber-400">
-                        {env.sizeBytes === null ? "尚未统计大小" : "大小统计不完整"}
-                      </span>
-                    )}
                     <span
                       className="truncate max-w-64 selectable"
                       title={env.path}
@@ -266,6 +260,7 @@ export function Environments() {
                       {env.path}
                     </span>
                   </div>
+                  <DirectorySize path={env.path} envType={env.envType} name={env.name} />
                   {env.statusDetail && (
                     <div className="mt-1 text-xs text-red-600 dark:text-red-400">
                       {env.statusDetail}

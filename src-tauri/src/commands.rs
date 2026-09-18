@@ -18,6 +18,7 @@ pub struct AppState {
     pub tasks: TaskManager,
     pub tool_queries: crate::singleflight::SingleFlight<Option<PathBuf>, Vec<crate::pkgtools::ToolConfig>>,
     pub scans: std::sync::Arc<crate::scan_cache::ScanCache>,
+    pub sizes: crate::size_tasks::SizeTasks,
 }
 
 impl AppState {
@@ -42,7 +43,36 @@ impl AppState {
 #[tauri::command]
 pub fn invalidate_scans(state: State<'_, AppState>) {
     state.scans.invalidate();
+    state.sizes.invalidate();
 }
+
+#[tauri::command]
+pub async fn start_size_scan(state: State<'_, AppState>, env_type: Option<EnvType>, name: Option<String>, cache_tool: Option<String>) -> Result<u64> {
+    if let (Some(kind), Some(name), None) = (env_type, name.as_deref(), cache_tool.as_ref()) {
+        switcher::validate_name(name)?;
+        let root = require_root(&state)?;
+        validate_environment_parent(&root, kind)?;
+        reject_active_install(&state, kind, name)?;
+        let path = root.join("envs").join(kind.folder()).join(name);
+        return state.sizes.start(path.to_string_lossy().into(), path);
+    }
+    if let (None, None, Some(tool)) = (env_type, name, cache_tool) {
+        let cfg = state.with_cfg(Clone::clone);
+        let root = cfg.resolve_root();
+        let environment = crate::detect::discovery::effective_environment();
+        let configured = crate::pkgtools::effective_cache_paths(root.as_deref()).await;
+        let cache = crate::caches::detect_caches(root.as_deref(), cfg.settings.downloads_dir.as_deref().map(Path::new), &environment, &configured)
+            .into_iter().find(|c| c.tool == tool).ok_or_else(|| AppError::msg("未知缓存目录"))?;
+        return state.sizes.start(format!("cache:{tool}"), PathBuf::from(cache.path));
+    }
+    Err(AppError::msg("请选择一个环境或缓存目录"))
+}
+
+#[tauri::command]
+pub fn size_scan_status(state: State<'_, AppState>) -> Vec<crate::size_tasks::SizeSnapshot> { state.sizes.snapshots() }
+
+#[tauri::command]
+pub fn cancel_size_scan(state: State<'_, AppState>, id: u64) -> Result<()> { state.sizes.cancel(id) }
 
 #[tauri::command]
 pub async fn query_scan(

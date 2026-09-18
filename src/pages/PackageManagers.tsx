@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../components/ui/Modal";
 import { api } from "../lib/api";
 import { useScanResult } from "../lib/scanClient";
 import { ScanStatus } from "../components/ScanStatus";
+import { DirectorySize } from "../components/DirectorySize";
 import { ToolMigration } from "../components/ToolMigration";
 import { PipReinstall } from "../components/PipReinstall";
 import { GlobalPackageReinstall } from "../components/GlobalPackageReinstall";
@@ -477,7 +478,7 @@ export function PackageManagers() {
                 loading={cacheLoading}
               >
                 <RefreshCw className="size-3.5" />
-                重新统计
+                刷新缓存路径
               </Button>
             }
           />
@@ -498,25 +499,8 @@ export function PackageManagers() {
                     >
                       {c.path}
                     </div>
+                    {c.exists && <DirectorySize path={c.path} cacheTool={c.tool} />}
                   </div>
-                  <span
-                    className={cn(
-                      "text-sm font-semibold tabular-nums",
-                      c.exists
-                        ? "text-zinc-700 dark:text-zinc-200"
-                        : "text-zinc-400",
-                    )}
-                  >
-                    {c.exists ? formatBytes(c.sizeBytes) : "—"}
-                    {c.exists && !c.sizeComplete && (
-                      <span
-                        className="ml-1 text-amber-600"
-                        title={c.sizeDetail ?? "统计不完整"}
-                      >
-                        约
-                      </span>
-                    )}
-                  </span>
                   <div className="flex items-center gap-1.5">
                     <Button
                       size="sm"
@@ -559,8 +543,7 @@ export function PackageManagers() {
             <>
               <p>
                 将删除 <b className="selectable">{confirmClean?.path}</b>{" "}
-                下的全部内容 (释放约{" "}
-                {formatBytes(confirmClean?.sizeBytes ?? null)})。
+                下的全部内容。实际释放空间将在清理完成后显示。
               </p>
               <p className="mt-1.5 text-xs text-zinc-400">
                 缓存清理是安全的,下次安装依赖时会自动重新下载。

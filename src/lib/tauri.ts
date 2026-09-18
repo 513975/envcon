@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { invalidateReads } from "./readCache";
 import { invalidateScanReads } from "./scanClient";
+import { pollSizes } from "./sizeStore";
 
 /** 类型化 invoke 封装 */
 export async function cmd<T>(
@@ -21,6 +22,7 @@ export async function cmd<T>(
     if (mutation) {
       invalidateReads();
       await invalidateScanReads(false);
+      void pollSizes();
     }
   }
 }

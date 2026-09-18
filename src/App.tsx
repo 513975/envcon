@@ -12,6 +12,7 @@ import { PackageManagers } from "./pages/PackageManagers";
 import { api } from "./lib/api";
 import { savedProjectDirs } from "./lib/scanPreferences";
 import { startScanRevalidation } from "./lib/scanClient";
+import { pollSizes } from "./lib/sizeStore";
 
 const PAGES: { id: Page; Component: ComponentType }[] = [
   { id: "dashboard", Component: Dashboard },
@@ -51,6 +52,7 @@ export default function App() {
 
   useEffect(() => {
     startInstallListener();
+    void pollSizes();
     const stopRevalidation = startScanRevalidation({ overview: api.getOverview, tools: api.getToolConfigs, caches: api.getCaches, system: (force) => api.scanSystem(savedProjectDirs(), force) });
     const timer = window.setTimeout(() => {
       void Promise.allSettled([

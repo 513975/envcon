@@ -2,6 +2,7 @@ pub mod caches;
 mod fsutil;
 mod singleflight;
 mod scan_cache;
+mod size_tasks;
 pub mod commands;
 pub mod config;
 pub mod detect;
@@ -40,11 +41,15 @@ pub fn run() {
             tasks: install::TaskManager::new(),
             tool_queries: Default::default(),
             scans,
+            sizes: Default::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
             commands::query_scan,
             commands::invalidate_scans,
+            commands::start_size_scan,
+            commands::size_scan_status,
+            commands::cancel_size_scan,
             commands::update_package_manager,
             commands::set_root,
             commands::scan_system,

@@ -20,6 +20,6 @@ if (flags.includes("--skip-ui")) {
   console.log("SKIPPED: browser UI tests (--skip-ui)");
 } else {
   run(process.execPath, ["tests/run-ui.mjs", process.env.ENVCON_PLAYWRIGHT_MODULE || "playwright",
-    "tests/settings-ui.mjs", "tests/startup-ui.mjs", "tests/release-052-ui.mjs", "tests/download-ui.mjs"]);
+    "tests/settings-ui.mjs", "tests/startup-ui.mjs", "tests/release-052-ui.mjs", "tests/download-ui.mjs", "tests/scans-ui.mjs", "tests/sizes-ui.mjs"]);
 }
 console.log("Verification completed. Ignored Rust integration tests and host benchmarks require an explicit separate run.");
