@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invalidateReads } from "./readCache";
+import { clearScanReads } from "./scanClient";
 
 export type Page =
   | "dashboard"
@@ -23,6 +24,7 @@ export const useAppStore = create<AppState>((set) => ({
   overviewVersion: 0,
   refreshOverview: () => {
     invalidateReads();
+    clearScanReads();
     set((s) => ({ overviewVersion: s.overviewVersion + 1 }));
   },
 }));

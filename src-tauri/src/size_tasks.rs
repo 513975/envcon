@@ -79,7 +79,14 @@ impl SizeTasks {
                 result.status = "partial".into();
                 result.detail = Some("统计期间目标目录或链接发生变化，请重新统计".into());
             }
-            if let Some(task) = state.lock().unwrap().get_mut(&id) { task.snapshot = result; }
+            if let Some(task) = state.lock().unwrap().get_mut(&id) {
+                if task.cancel.load(Ordering::Relaxed) {
+                    result.complete = false;
+                    result.status = "canceled".into();
+                    result.detail = Some("已取消或环境已变更，请重新统计；当前仅为部分结果".into());
+                }
+                task.snapshot = result;
+            }
         });
         Ok(id)
     }

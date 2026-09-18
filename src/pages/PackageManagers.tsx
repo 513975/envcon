@@ -482,6 +482,7 @@ export function PackageManagers() {
               </Button>
             }
           />
+          <ScanStatus kind="caches" />
           {cacheLoading && !caches ? (
             <Spinner />
           ) : (

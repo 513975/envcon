@@ -1,0 +1,62 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import ts from "typescript";
+const source = (await fs.readFile(new URL("../src/lib/scanClient.ts", import.meta.url), "utf8"))
+  .replace('import { invoke } from "@tauri-apps/api/core";', 'const invoke = (...args) => globalThis.testInvoke(...args);')
+  .replace('import { useEffect, useSyncExternalStore } from "react";', 'const useEffect = () => {}; const useSyncExternalStore = () => {};');
+const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
+const { scanRead, clearScanReads, scanState, startScanRevalidation } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+const result = value => ({ value, updatedAt: 0, durationMs: 1, warning: null });
+let peek = deferred();
+let read = deferred();
+let calls = [];
+globalThis.testInvoke = async (_, args) => { calls.push(args); return args.cachedOnly ? peek.promise : read.promise; };
+const forced = scanRead("overview", [], true);
+const concurrent = scanRead("overview", [], true);
+peek.resolve(result("old"));
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls.filter(c => !c.cachedOnly).length, 1);
+assert.equal(calls.find(c => !c.cachedOnly).force, true);
+read.resolve(result("new"));
+assert.deepEqual(await Promise.all([forced, concurrent]), ["new", "new"]);
+clearScanReads();
+const normalResult = deferred();
+const forcedResult = deferred();
+calls = [];
+globalThis.testInvoke = async (_, args) => { calls.push(args); return args.force ? forcedResult.promise : normalResult.promise; };
+const normal = scanRead("overview", [], false);
+const forceAfterNormal = scanRead("overview", [], true);
+const anotherForce = scanRead("overview", [], true);
+normalResult.resolve(result("ttl-hit"));
+assert.equal(await normal, "ttl-hit");
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(calls.filter(c => c.force).length, 1);
+forcedResult.resolve(result("forced-latest"));
+assert.deepEqual(await Promise.all([forceAfterNormal, anotherForce]), ["forced-latest", "forced-latest"]);
+clearScanReads();
+read = deferred();
+globalThis.testInvoke = async () => read.promise;
+const stale = scanRead("overview", [], true);
+clearScanReads();
+read.resolve(result("stale"));
+await assert.rejects(stale, /变更/);
+assert.equal(scanState("overview").snapshot, undefined);
+
+let tick;
+globalThis.document = { hidden: false };
+globalThis.window = { setInterval: callback => { tick = callback; }, clearInterval: () => {}, addEventListener: () => {}, removeEventListener: () => {} };
+globalThis.testInvoke = async (_, args) => {
+  if (args.cachedOnly) return null;
+  if (args.kind === "overview") throw new Error("unavailable");
+  return result(args.kind);
+};
+await scanRead("tools", [], true);
+const scheduled = [];
+const stop = startScanRevalidation(Object.fromEntries(["overview", "tools", "caches", "system"].map(kind => [kind, force => { scheduled.push(kind); return scanRead(kind, [], force); }])));
+for (let i = 0; i < 3; i++) { tick(); await new Promise(resolve => setTimeout(resolve, 5)); }
+assert.ok(scheduled.includes("tools"), "failing overview must not starve tools");
+document.hidden = true;
+const before = scheduled.length; tick(); assert.equal(scheduled.length, before);
+stop();
+console.log("PASS: forced startup coalesces fresh reads, invalidation rejects stale results, fair retry scheduling and hidden pause");

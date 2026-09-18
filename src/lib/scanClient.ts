@@ -19,6 +19,9 @@ interface Entry {
   projects: string[];
   state: ScanState;
   pending?: Promise<unknown>;
+  pendingForce?: boolean;
+  initial?: Promise<void>;
+  lastAttempt: number;
   epoch: number;
 }
 const entries = new Map<string, Entry>();
@@ -44,8 +47,17 @@ export function useScanResult<T>(kind: Kind, projects: string[], apply: (value: 
 }
 
 async function refresh<T>(entry: Entry, force: boolean): Promise<T> {
-  if (entry.pending) return entry.pending as Promise<T>;
+  if (entry.pending) {
+    if (!force || entry.pendingForce) return entry.pending as Promise<T>;
+    // A normal validation may only be a backend TTL hit. A manual refresh must
+    // still perform a forced query after it; simultaneous manual requests coalesce.
+    const epoch = entry.epoch;
+    try { await entry.pending; } catch { /* Forced retry can recover a failed read. */ }
+    if (entry.epoch !== epoch) throw new Error("扫描期间环境发生变更，请刷新");
+    return refresh(entry, true);
+  }
   const epoch = entry.epoch;
+  entry.lastAttempt = Date.now();
   entry.state = { ...entry.state, refreshing: true, error: undefined };
   notify();
   const promise = (async () => {
@@ -59,6 +71,7 @@ async function refresh<T>(entry: Entry, force: boolean): Promise<T> {
     return result.value;
   })();
   entry.pending = promise;
+  entry.pendingForce = force;
   try { return await promise; }
   catch (error) {
     if (epoch === entry.epoch) entry.state = { ...entry.state, error: String(error), refreshing: false };
@@ -78,39 +91,47 @@ export async function scanRead<T>(kind: Kind, projects: string[], force: boolean
   }
   let entry = entries.get(key);
   if (!entry) {
-    entry = { kind, projects, state: { refreshing: false, revision: 0 }, epoch: 0 };
+    entry = { kind, projects, state: { refreshing: false, revision: 0 }, epoch: 0, lastAttempt: 0 };
     entries.set(key, entry);
     // Coalesce disk peeks as well as active scans.
     const target = entry;
     const epoch = target.epoch;
-    const peek = invoke<ScanSnapshot<T> | null>("query_scan", { kind, projectDirs: projects, cachedOnly: true, force: false });
-    target.pending = peek.then(value => value?.value);
-    let snapshot: ScanSnapshot<T> | null;
-    try { snapshot = await peek; } catch { snapshot = null; }
-    target.pending = undefined;
-    if (epoch !== target.epoch) throw new Error("扫描输入已改变，请重试");
-    if (snapshot && !force) {
-      target.state = { snapshot, refreshing: false, revision: 1 };
-      notify();
-      void refresh(target, false).catch(() => {});
-      return snapshot.value;
+    target.initial = invoke<ScanSnapshot<T> | null>("query_scan", { kind, projectDirs: projects, cachedOnly: true, force: false })
+      .then(snapshot => {
+        if (epoch === target.epoch && snapshot) {
+          target.state = { snapshot, refreshing: false, revision: 1 };
+          notify();
+        }
+      }).catch(() => {});
+  }
+  if (entry.initial) {
+    const initial = entry.initial;
+    const epoch = entry.epoch;
+    await initial;
+    if (entry.epoch !== epoch) throw new Error("扫描输入已改变，请重试");
+    if (entry.initial === initial) {
+      entry.initial = undefined;
+      // Force readers must never resolve from the disk peek alone.
+      if (!force && entry.state.snapshot) void refresh(entry, false).catch(() => {});
     }
-  } else if (entry.pending) {
-    const result = await entry.pending;
-    if (result !== undefined) return result as T;
   }
   if (!force && entry.state.snapshot) return entry.state.snapshot.value as T;
   return refresh(entry, force);
 }
 
-export async function invalidateScanReads(start: boolean) {
-  mutationCount += start ? 1 : -1;
+export function clearScanReads() {
   for (const entry of entries.values()) {
     entry.epoch++;
     entry.pending = undefined;
+    entry.initial = undefined;
     entry.state = { refreshing: false, revision: entry.state.revision + 1 };
   }
   notify();
+}
+
+export async function invalidateScanReads(start: boolean) {
+  mutationCount += start ? 1 : -1;
+  clearScanReads();
   try { await invoke("invalidate_scans"); }
   catch (error) {
     if (start) mutationCount--;
@@ -122,7 +143,10 @@ export function startScanRevalidation(readers: Record<Kind, (force?: boolean) =>
   const tick = () => {
     if (mutationCount > 0 || document.hidden) return;
     // Stagger groups so background validation cannot flood version processes.
-    const next = [...entries.values()].find(e => !e.pending && (!e.state.snapshot || Date.now() - e.state.snapshot.updatedAt >= 30_000));
+    const active = [...entries.values()];
+    if (active.some(e => e.pending || e.initial)) return;
+    const next = active.filter(e => !e.state.snapshot || Date.now() - e.state.snapshot.updatedAt >= 30_000)
+      .sort((a, b) => a.lastAttempt - b.lastAttempt)[0];
     if (!next) return;
     if (next.kind === "system") {
       void refresh(next, true).catch(() => {});

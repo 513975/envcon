@@ -275,6 +275,7 @@ pub async fn integrate_external_env(
     path: String,
     version: Option<String>,
 ) -> Result<String> {
+    let _scan_guard = state.scans.mutation();
     let _guard = crate::migration::LOCK.try_lock()
         .map_err(|_| AppError::msg("正在执行包管理器任务，请稍后纳入管理"))?;
     let root = require_root(&state)?;

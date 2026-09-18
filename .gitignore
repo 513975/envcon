@@ -37,6 +37,9 @@ src-tauri/target-*/
 !/tests/scan-mock.mjs
 !/tests/scans-ui.mjs
 !/tests/sizes-ui.mjs
+!/tests/scan-client.mjs
+!/tests/native-benchmark.mjs
+!/tests/benchmark-process.ps1
 !/docs/imp01.md
 /src-tauri/tests/
 

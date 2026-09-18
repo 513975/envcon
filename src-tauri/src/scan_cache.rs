@@ -123,7 +123,7 @@ impl ScanCache {
 
     pub fn update_fingerprint(&self, key: &str, updated_at: u64, fingerprint: String) {
         let mut state = self.state.lock().unwrap();
-        if let Some(snapshot) = state.entries.get_mut(key).filter(|s| s.updated_at == updated_at) {
+        if let Some(snapshot) = state.entries.get_mut(key).filter(|s| s.updated_at == updated_at && s.fingerprint != fingerprint) {
             snapshot.fingerprint = fingerprint;
             let _ = self.persist(&state);
         }
@@ -150,7 +150,8 @@ pub fn fingerprint(root: Option<&Path>, projects: &[PathBuf], config: &crate::co
     let environment: BTreeMap<_, _> = crate::detect::discovery::effective_environment().into_iter().collect();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     environment.hash(&mut hasher);
-    serde_json::to_vec(config).unwrap_or_default().hash(&mut hasher);
+    // Value sorts object keys, including Settings HashMaps, across process restarts.
+    serde_json::to_vec(&serde_json::to_value(config).unwrap_or_default()).unwrap_or_default().hash(&mut hasher);
     let mut paths = Vec::new();
     if let Some(root) = root {
         paths.push(root.to_path_buf());
@@ -245,5 +246,17 @@ mod tests {
         assert_ne!(before, after);
         std::fs::write(dir.path().join("node.exe"), b"v222").unwrap();
         assert_ne!(after, fingerprint(None, &[], &settings, Some(&value)));
+        std::fs::remove_file(dir.path().join("node.exe")).unwrap();
+        assert_ne!(after, fingerprint(None, &[], &settings, Some(&value)));
+        let other = dir.path().join("project");
+        assert_ne!(before, fingerprint(None, &[other], &settings, Some(&value)));
+        let mut first = settings.clone();
+        first.mirrors.insert("node".into(), "official".into());
+        first.mirrors.insert("jdk".into(), "mirror".into());
+        let mut second = settings.clone();
+        second.mirrors.insert("jdk".into(), "mirror".into());
+        second.mirrors.insert("node".into(), "official".into());
+        assert_eq!(fingerprint(None, &[], &first, None), fingerprint(None, &[], &second, None));
+        assert_ne!(fingerprint(None, &[], &settings, None), fingerprint(None, &[], &first, None));
     }
 }

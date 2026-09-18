@@ -16,6 +16,7 @@ run(process.execPath, ["node_modules/typescript/bin/tsc"]);
 run(process.execPath, ["node_modules/vite/bin/vite.js", "build"]);
 run("cargo", ["test", "--offline", "--lib", "--", "--test-threads=1"], path.join(root, "src-tauri"));
 run(process.execPath, ["tests/read-cache.mjs"]);
+run(process.execPath, ["tests/scan-client.mjs"]);
 if (flags.includes("--skip-ui")) {
   console.log("SKIPPED: browser UI tests (--skip-ui)");
 } else {

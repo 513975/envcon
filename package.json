@@ -1,7 +1,7 @@
 {
   "name": "envcon",
   "private": true,
-  "version": "0.5.3",
+  "version": "0.5.4",
   "type": "module",
   "scripts": {
     "verify": "node tests/verify.mjs",
