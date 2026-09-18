@@ -1,5 +1,6 @@
 pub mod caches;
 mod fsutil;
+mod singleflight;
 pub mod commands;
 pub mod config;
 pub mod detect;
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(AppState {
             cfg: Mutex::new(config::AppConfig::load()),
             tasks: install::TaskManager::new(),
+            tool_queries: Default::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
@@ -55,6 +57,8 @@ pub fn run() {
             commands::get_caches,
             commands::clean_cache,
             commands::get_settings,
+            commands::reload_settings,
+            commands::restore_settings_backup,
             commands::set_downloads_dir,
             commands::list_path_backups,
             commands::restore_path_backup,

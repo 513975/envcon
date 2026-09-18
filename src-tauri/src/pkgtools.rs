@@ -5,6 +5,9 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::process::Command;
 
+#[cfg(test)]
+pub(crate) static QUERY_COMMAND_ATTEMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolConfig {
@@ -87,6 +90,8 @@ fn effective_path(root: Option<&Path>) -> std::ffi::OsString {
 }
 
 async fn where_exe(root: Option<&Path>, name: &str) -> Option<String> {
+    #[cfg(test)]
+    QUERY_COMMAND_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let out = tokio::time::timeout(
         Duration::from_secs(5),
         Command::new("where.exe")
@@ -169,6 +174,8 @@ pub(crate) async fn output(
     cwd: Option<&Path>,
     timeout_secs: u64,
 ) -> std::result::Result<std::process::Output, String> {
+    #[cfg(test)]
+    QUERY_COMMAND_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut command = Command::new(&inv.program);
     if let Ok(environment) = crate::pathman::get_user_env_vars() {
         for (name, value) in environment {

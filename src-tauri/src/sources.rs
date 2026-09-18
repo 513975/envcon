@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use futures_util::{stream, StreamExt};
 
 use crate::error::{AppError, Result};
 use crate::types::EnvType;
@@ -47,7 +48,7 @@ pub struct DownloadSpec {
 
 fn http() -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) EnvCon/0.1")
+        .user_agent(concat!("EnvCon/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(AppError::Net)
@@ -117,9 +118,15 @@ pub async fn list_versions(
         (EnvType::Mingw, _) => mingw_releases().await,
     };
 
+    let result = result.and_then(|v| if v.is_empty() {
+        Err(AppError::msg("在线版本列表为空，请检查源或切换官方源"))
+    } else { Ok(v) });
     match result {
         Ok(mut versions) => {
-            versions.truncate(100);
+            if env_type != EnvType::Rust {
+                versions.sort_by(|a, b| prerelease_last(&a.version, &b.version));
+            }
+            versions.dedup_by(|a, b| a.version == b.version);
             save_cache(env_type, source, &versions, cache_path);
             Ok(versions)
         }
@@ -127,7 +134,7 @@ pub async fn list_versions(
             Some(mut v) => {
                 for version in &mut v {
                     let previous = version.note.take().unwrap_or_default();
-                    version.note = Some(format!("离线缓存（在线查询失败）{}", if previous.is_empty() { String::new() } else { format!("；{previous}") }));
+                    version.note = Some(format!("离线缓存（在线查询失败，非最新保证；请刷新或切换源）{}", if previous.is_empty() { String::new() } else { format!("；{previous}") }));
                 }
                 Ok(v)
             },
@@ -351,6 +358,11 @@ pub fn download_spec(
 
 /// Node 系 index.json(npmmirror / nodejs.org 结构相同)
 async fn node_index(base: &str) -> Result<Vec<VersionInfo>> {
+    let json = http()?.get(base).send().await?.error_for_status()?.text().await?;
+    parse_node_index(&json)
+}
+
+fn parse_node_index(json: &str) -> Result<Vec<VersionInfo>> {
     #[derive(Deserialize)]
     struct Entry {
         version: String,
@@ -358,16 +370,13 @@ async fn node_index(base: &str) -> Result<Vec<VersionInfo>> {
         /// LTS 版本为代号字符串(如 "Jod"),非 LTS 为 false
         lts: Option<serde_json::Value>,
         security: Option<bool>,
+        #[serde(default)]
+        files: Vec<String>,
     }
-    let list: Vec<Entry> = http()?
-        .get(base)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    Ok(list
+    let list: Vec<Entry> = serde_json::from_str(json)?;
+    let mut versions: Vec<_> = list
         .into_iter()
+        .filter(|e| e.files.iter().any(|f| f == "win-x64-zip"))
         .map(|e| VersionInfo {
             version: e.version.trim_start_matches('v').to_string(),
             date: e.date,
@@ -379,7 +388,11 @@ async fn node_index(base: &str) -> Result<Vec<VersionInfo>> {
             },
             url: None,
         })
-        .collect())
+        .collect();
+    versions.sort_by(|a, b| version_cmp(&b.version, &a.version));
+    versions.dedup_by(|a,b| a.version == b.version);
+    if versions.is_empty() { return Err(AppError::msg("源未返回可安装的 Node Windows x64 ZIP 版本")); }
+    Ok(versions)
 }
 
 /// Go 官方 JSON(golang.google.cn / go.dev 结构相同)
@@ -406,19 +419,19 @@ async fn go_index(base: &str) -> Result<Vec<VersionInfo>> {
         .await?;
     Ok(list
         .into_iter()
-        .map(|r| {
+        .filter_map(|r| {
             let win = r.files.iter().find(|f| {
                 f.os.as_deref() == Some("windows")
                     && f.arch.as_deref() == Some("amd64")
                     && f.kind.as_deref() == Some("archive")
-            });
-            VersionInfo {
+            })?;
+            Some(VersionInfo {
                 version: r.version.trim_start_matches("go").to_string(),
                 date: None,
-                size_bytes: win.map(|f| f.size as u64),
+                size_bytes: u64::try_from(win.size).ok(),
                 note: None,
                 url: None,
-            }
+            })
         })
         .collect())
 }
@@ -502,7 +515,7 @@ async fn jdk_tuna() -> Result<Vec<VersionInfo>> {
                     None => true,
                 };
                 if better {
-                    best = Some((v, format!("OpenJDK{name}.zip")));
+                    best = Some((v, format!("OpenJDK{name}")));
                 }
             }
         }
@@ -543,23 +556,31 @@ async fn jdk_adoptium() -> Result<Vec<VersionInfo>> {
     }
 
     let mut out: Vec<VersionInfo> = Vec::new();
-    for major in [25u32, 21, 17, 11, 8] {
+    #[derive(Deserialize)]
+    struct Releases { available_releases: Vec<u32> }
+    let releases: Releases = http()?.get("https://api.adoptium.net/v3/info/available_releases")
+        .send().await?.error_for_status()?.json().await?;
+    let client = http()?;
+    let results = stream::iter(releases.available_releases.into_iter().filter(|v| *v >= 8))
+        .map(|major| {
+            let client = client.clone();
+            async move {
         let url = format!(
             "https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture=x64&image_type=jdk&os=windows"
         );
-        let assets: Vec<Asset> = match http()?
+        let result = client
             .get(&url)
             .send()
             .await
-            .and_then(|r| r.error_for_status())
-        {
-            Ok(r) => match r.json().await {
-                Ok(v) => v,
-                Err(_) => continue,
-            },
-            Err(_) => continue,
-        };
-        let Some(a) = assets.first() else { continue };
+            .and_then(|r| r.error_for_status());
+        let assets = match result { Ok(r) => r.json::<Vec<Asset>>().await, Err(e) => Err(e) };
+        (major, assets)
+            }
+        }).buffer_unordered(4).collect::<Vec<_>>().await;
+    let mut failures = Vec::new();
+    for (major, assets) in results {
+        let assets = match assets { Ok(v) => v, Err(_) => { failures.push(major); continue; } };
+        let Some(a) = assets.iter().find(|a| a.binary.package.link.ends_with(".zip")) else { failures.push(major); continue; };
         // release_name: "jdk-21.0.5+11" / "jdk8u402-b06"
         let version = adoptium_version(&a.release_name, major);
         out.push(VersionInfo {
@@ -572,6 +593,11 @@ async fn jdk_adoptium() -> Result<Vec<VersionInfo>> {
     }
     if out.is_empty() {
         return Err(AppError::msg("未能从 Adoptium API 获取版本列表"));
+    }
+    if !failures.is_empty() {
+        for item in &mut out {
+            item.note = Some(format!("{}；部分主版本查询失败：{failures:?}", item.note.take().unwrap_or_default()));
+        }
     }
     Ok(out)
 }
@@ -1104,4 +1130,43 @@ fn load_cache(env_type: EnvType, source: &str, cache_path: &PathBuf) -> Option<V
     let cache: VersionCache =
         serde_json::from_str(&std::fs::read_to_string(cache_path).ok()?).ok()?;
     cache.map.get(&cache_key(env_type, source)).cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_inventory_filters_windows_zip_sorts_and_keeps_history() {
+        let mut input: Vec<_> = (0..150).map(|v| serde_json::json!({
+            "version": format!("v22.{v}.0"), "date": "2026-09-01", "files": ["win-x64-zip"], "lts": "Jod"
+        })).collect();
+        input.push(input[100].clone());
+        input.push(serde_json::json!({"version":"v99.0.0", "files":["linux-x64"]}));
+        let rows = parse_node_index(&serde_json::to_string(&input).unwrap()).unwrap();
+        assert_eq!(rows.len(), 150);
+        assert_eq!(rows[0].version, "22.149.0");
+        assert_eq!(rows.last().unwrap().version, "22.0.0");
+        assert_eq!(rows[0].note.as_deref(), Some("LTS"));
+        assert!(parse_node_index("[]").is_err());
+        assert!(parse_node_index("not json").is_err());
+    }
+
+    #[test]
+    fn mirror_jdk_asset_retains_single_zip_suffix() {
+        let html = "<a href=\"OpenJDK25U-jdk_x64_windows_hotspot_25.0.1_8.zip\">jdk</a>";
+        let names = extract_all_between(html, "href=\"OpenJDK", "\"");
+        assert_eq!(jdk_version_from_filename(&names[0], 25).as_deref(), Some("25.0.1+8"));
+        assert_eq!(format!("OpenJDK{}", names[0]), "OpenJDK25U-jdk_x64_windows_hotspot_25.0.1_8.zip");
+    }
+
+    #[tokio::test]
+    #[ignore = "read-only network verification against live Node indexes"]
+    async fn live_node_indexes() {
+        for url in ["https://nodejs.org/dist/index.json", "https://npmmirror.com/mirrors/node/index.json"] {
+            let rows = node_index(url).await.unwrap();
+            assert!(rows.len() > 100);
+            println!("{url}: {} versions; newest={} date={:?}", rows.len(), rows[0].version, rows[0].date);
+        }
+    }
 }

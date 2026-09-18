@@ -150,8 +150,11 @@ async fn probe_go(dir: &Path) -> Option<String> {
     None
 }
 
-/// Rust:rustup 结构 → cargo.exe --version;否则文件夹名
+/// Concrete external toolchains and EnvCon-isolated rustup homes.
 async fn probe_rust(dir: &Path) -> Option<String> {
+    if super::system::is_rust_toolchain(dir) {
+        return probe_cmd(&dir.join("bin/rustc.exe"), &["--version"]).await;
+    }
     let cargo_home = dir.join("cargo-home");
     let rustup_home = dir.join("rustup-home");
     let envs = [("CARGO_HOME", cargo_home.as_path()), ("RUSTUP_HOME", rustup_home.as_path())];

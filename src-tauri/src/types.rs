@@ -93,7 +93,8 @@ impl EnvType {
             EnvType::Maven => vec![cur.join("bin")],
             EnvType::Gradle => vec![cur.join("bin")],
             // Rust 环境目录结构:rustup-home/ + cargo-home/(经由 current\rust 链接)
-            EnvType::Rust => vec![cur.join("cargo-home").join("bin")],
+            // Include both stable paths so switching layouts never requires editing PATH again.
+            EnvType::Rust => vec![cur.join("bin"), cur.join("cargo-home").join("bin")],
             EnvType::Php => vec![cur],
             EnvType::Llvm => vec![cur.join("bin")],
             EnvType::Zig => vec![cur],

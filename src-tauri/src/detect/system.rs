@@ -49,6 +49,7 @@ fn integrable_type(tool: &str) -> Option<EnvType> {
         "Python" => Some(EnvType::Python),
         "Node.js" => Some(EnvType::Node),
         "Go" => Some(EnvType::Go),
+        "Rust" => Some(EnvType::Rust),
         "PHP" => Some(EnvType::Php),
         "Zig" => Some(EnvType::Zig),
         "LLVM" => Some(EnvType::Llvm),
@@ -82,13 +83,21 @@ fn looks_like(env_type: EnvType, root: &Path) -> bool {
         EnvType::Git => has(root.join("cmd").join("git.exe")),
         EnvType::Gh => has(root.join("bin").join("gh.exe")),
         EnvType::Mingw => has(root.join("bin").join("gcc.exe")),
-        // rustup 代理结构(cargo\bin\rustc.exe)与受管结构不兼容
-        EnvType::Rust => false,
+        EnvType::Rust => is_rust_toolchain(root),
     }
 }
 
 /// 从 where.exe 定位到的可执行文件推导安装根目录
 pub fn install_root_for(env_type: EnvType, exe: &Path) -> Option<PathBuf> {
+    if env_type == EnvType::Git {
+        // Git for Windows includes wrappers and internal copies under the same root.
+        for root in exe.ancestors().skip(2).take(4) {
+            let relative_parent = exe.strip_prefix(root).ok()?.parent()?;
+            if matches!(path_key(relative_parent).as_str(), "cmd" | "bin" | "mingw64\\bin" | "mingw32\\bin" | "mingw64\\libexec\\git-core" | "mingw32\\libexec\\git-core")
+                && looks_like(env_type, root) { return Some(root.to_path_buf()); }
+        }
+        return None;
+    }
     let dir = exe.parent()?;
     let dir_name = dir.file_name().map(|n| n.to_string_lossy().to_lowercase());
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -105,6 +114,44 @@ pub fn install_root_for(env_type: EnvType, exe: &Path) -> Option<PathBuf> {
     }
     candidates.push(dir.to_path_buf());
     candidates.into_iter().find(|c| looks_like(env_type, c))
+}
+
+/// A rustup proxy is not a toolchain. Only link a complete, concrete installation.
+pub(crate) fn is_rust_toolchain(root: &Path) -> bool {
+    root.join("bin/rustc.exe").is_file()
+        && root.join("bin/cargo.exe").is_file()
+        && root.join("lib/rustlib").is_dir()
+}
+
+async fn rust_toolchain_executable(exe: &Path, discovery: &Discovery) -> Option<PathBuf> {
+    if install_root_for(EnvType::Rust, exe).is_some() { return Some(exe.to_path_buf()); }
+    let rustup = exe.parent()?.join("rustup.exe");
+    if !rustup.is_file() { return None; }
+    let mut command = Command::new(rustup);
+    command.args(["which", "rustc"]).envs(&discovery.environment)
+        .current_dir(std::env::temp_dir()).creation_flags(0x08000000);
+    if let Some(home) = exe.parent().and_then(Path::parent)
+        .filter(|home| home.file_name().is_some_and(|n| n == "cargo-home")) {
+        command.env("CARGO_HOME", home);
+        command.env("RUSTUP_HOME", home.parent()?.join("rustup-home"));
+    }
+    let output = crate::reinstall_process::output(command, Duration::from_secs(8)).await.ok()?;
+    if !output.status.success() { return None; }
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if !path.is_absolute() { return None; }
+    install_root_for(EnvType::Rust, &path)?;
+    Some(path)
+}
+
+fn scan_identity(tool: &str, path: &Path) -> PathBuf {
+    // Git for Windows exposes cmd/git.exe and bin/git.exe for the same installation.
+    let identity = if tool == "Git" {
+        install_root_for(EnvType::Git, path).unwrap_or_else(|| path.to_path_buf())
+    } else if tool == "Python" {
+        return path.parent().and_then(|p| p.canonicalize().ok())
+            .map(|p| p.join(path.file_name().unwrap())).unwrap_or_else(|| path.to_path_buf());
+    } else { path.to_path_buf() };
+    identity.canonicalize().unwrap_or(identity)
 }
 
 /// 路径等价比较(不区分大小写与分隔符方向)
@@ -167,11 +214,13 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                 let mut seen: Vec<PathBuf> = Vec::new();
                 let mut rows: Vec<(String, Result<String, String>, PathBuf, String, bool)> = Vec::new();
                 for (path, source, preferred) in paths {
-                    let resolved = if tool == "Python" {
-                        path.parent().and_then(|p| p.canonicalize().ok())
-                            .map(|p| p.join(path.file_name().unwrap())).unwrap_or_else(|| path.clone())
-                    } else { path.canonicalize().unwrap_or_else(|_| path.clone()) };
-                    if let Some(existing) = seen.iter().position(|p| paths_eq(p, &resolved)) {
+                    let path = if tool == "Rust" {
+                        rust_toolchain_executable(&path, discovery).await.unwrap_or(path)
+                    } else { path };
+                    let resolved = scan_identity(tool, &path);
+                    let git_result = if tool == "Git" { Some(probe(tool, &path, &ver_args, timeout, discovery).await) } else { None };
+                    if let Some(existing) = seen.iter().enumerate().position(|(i, p)| paths_eq(p, &resolved)
+                        && git_result.as_ref().is_none_or(|result| rows.get(i).is_some_and(|r| &r.1 == result))) {
                         // 同一文件从项目目录和 PATH 同时发现时，项目来源优先，
                         // 防止纳入管理资格依赖遍历顺序。
                         if source == "项目目录" {
@@ -183,7 +232,7 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                         continue;
                     }
                     seen.push(resolved);
-                    let result = probe(tool, &path, &ver_args, timeout, discovery).await;
+                    let result = match git_result { Some(result) => result, None => probe(tool, &path, &ver_args, timeout, discovery).await };
                     rows.push((tool.to_string(), result, path, source, preferred));
                 }
                 rows
@@ -198,7 +247,7 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                 if !healthy { return false; }
                 install.as_ref().is_some_and(|install| {
                     !managed_root.is_some_and(|root| path_within(root, install))
-                        && !integrated.iter().any(|i| paths_eq(i, &install))
+                        && !integrated.iter().any(|i| paths_eq(i, &install.canonicalize().unwrap_or_else(|_| install.clone())))
                         && source != "项目目录"
                         && !install.join("pyvenv.cfg").exists()
                         && !install.join("conda-meta").is_dir()
@@ -347,6 +396,48 @@ mod tests {
         assert_eq!(find_executable(dir.path(), "npm", &discovery), Some(dir.path().join("npm.cmd")));
     }
 
+    #[test]
+    fn rust_proxies_are_rejected_but_full_toolchains_can_be_integrated() {
+        let d = crate::test_support::TestDir::new();
+        std::fs::create_dir_all(d.path().join("bin")).unwrap();
+        for exe in ["rustc.exe", "cargo.exe"] { std::fs::write(d.path().join("bin").join(exe), b"").unwrap(); }
+        assert!(install_root_for(EnvType::Rust, &d.path().join("bin/rustc.exe")).is_none());
+        std::fs::create_dir_all(d.path().join("lib/rustlib")).unwrap();
+        assert!(install_root_for(EnvType::Rust, &d.path().join("bin/rustc.exe")).is_some());
+        assert_eq!(integrable_type("Rust"), Some(EnvType::Rust));
+    }
+
+    #[tokio::test]
+    async fn git_entrypoints_merge_but_distinct_installs_and_failures_remain() {
+        let d = crate::test_support::TestDir::new();
+        let first = d.path().join("git-one");
+        let second = d.path().join("git-two");
+        for root in [&first, &second] {
+            for folder in ["cmd", "bin", "mingw64/bin", "mingw64/libexec/git-core"] {
+                std::fs::create_dir_all(root.join(folder)).unwrap();
+                std::fs::write(root.join(folder).join("git.cmd"), "@echo off\r\necho git version 2.50.0\r\n").unwrap();
+            }
+            std::fs::write(root.join("cmd/git.exe"), b"structural fixture").unwrap();
+        }
+        let mut discovery = fixture();
+        discovery.environment.insert("PATHEXT".into(), ".CMD;.EXE".into());
+        discovery.path = vec![first.join("cmd"), first.join("bin"), first.join("mingw64/bin"), first.join("mingw64/libexec/git-core"), second.join("cmd")];
+        discovery.directories = vec![(first.join("cmd"), "常见安装".into())];
+        let report = scan_discovered(None, &[], discovery).await;
+        let git: Vec<_> = report.tools.iter().filter(|r| r.tool == "Git").collect();
+        assert_eq!(git.len(), 2);
+        assert!(git[0].is_preferred);
+        std::fs::write(first.join("cmd/git.cmd"), "@echo off\r\necho unavailable 1>&2\r\nexit /b 3\r\n").unwrap();
+        let mut discovery = fixture();
+        discovery.environment.insert("PATHEXT".into(), ".CMD;.EXE".into());
+        discovery.path = vec![first.join("cmd"), first.join("bin")];
+        let report = scan_discovered(None, &[], discovery).await;
+        let git: Vec<_> = report.tools.iter().filter(|r| r.tool == "Git").collect();
+        assert_eq!(git.len(), 2);
+        assert!(git[0].error.is_some());
+        assert!(git[1].error.is_none());
+    }
+
     #[tokio::test]
     async fn probes_exact_batch_path_and_rejects_error_output() {
         let dir = crate::test_support::TestDir::new();
@@ -456,8 +547,25 @@ mod tests {
     async fn host_scan() {
         let results = scan_system(None, &[], &[]).await;
         println!("warnings: {:?}", results.warnings);
-        for row in results.tools.iter().filter(|row| matches!(row.tool.as_str(), "npm" | "pip" | "pip (Python 模块)" | "Conda")) {
+        for row in results.tools.iter().filter(|row| matches!(row.tool.as_str(), "Rust" | "Git" | "Cargo")) {
             println!("{} | {:?} | {:?} | preferred={} | error={:?}", row.tool, row.version, row.path, row.is_preferred, row.error);
+            println!("integrable={:?} root={:?}", row.env_type, row.install_root);
+        }
+        if let Some(rust) = results.tools.iter().find(|row| row.env_type == Some(EnvType::Rust)) {
+            let dir = crate::test_support::TestDir::new();
+            let link = dir.path().join("envs/rusts/external");
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            junction::create(rust.install_root.as_ref().unwrap(), &link).unwrap();
+            crate::switcher::switch(dir.path(), EnvType::Rust, "external").unwrap();
+            let overview = crate::detect::scan_root(dir.path()).await;
+            let row = &overview.iter().find(|c| c.env_type == EnvType::Rust).unwrap().envs[0];
+            assert_eq!(row.status, "available");
+            assert_eq!(row.version, rust.version);
+            assert!(row.is_external_link && row.is_current);
+            crate::switcher::remove_junction_for(dir.path(), EnvType::Rust).unwrap();
+            std::fs::remove_dir(link).unwrap();
+            assert!(Path::new(rust.install_root.as_ref().unwrap()).join("bin/rustc.exe").is_file());
+            println!("host Rust temporary link / overview / switch / unlink verified");
         }
     }
 }

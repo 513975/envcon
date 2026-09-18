@@ -83,6 +83,8 @@ export function Download() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(60);
+  useEffect(() => { setVisibleCount(60); }, [envType, source, search]);
   const [editing, setEditing] = useState<string | null>(null); // 正在编辑目标名的 version
   const [targetNames, setTargetNames] = useState<Record<string, string>>({});
   const tasks = useInstallStore((s) => s.tasks);
@@ -112,7 +114,7 @@ export function Download() {
         const list = await api.getSources(envType);
         if (canceled) return;
         setSourceList({ envType, items: list });
-        const def = list.find((s) => s.id === "mirror") ?? list[0];
+        const def = list.find((s) => s.id === "official") ?? list[0];
         setSource(def?.id ?? "mirror");
       } catch {
         if (canceled) return;
@@ -284,7 +286,7 @@ export function Download() {
                       ? "bg-white dark:bg-zinc-900 shadow-sm text-zinc-800 dark:text-zinc-100"
                       : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300",
                   )}
-                  title={s.id === "mirror" ? "国内镜像,下载速度快" : "官方源,版本最全"}
+                  title={s.id === "mirror" ? "镜像可能存在同步延迟，可切换官方源核对" : "查询上游发布列表（仅展示受支持的 Windows 构建）"}
                 >
                   {s.id === "mirror" ? (
                     <Server className="size-3" />
@@ -298,6 +300,15 @@ export function Download() {
           )}
         </div>
 
+        <div className="px-4 py-2 text-xs text-zinc-500 space-y-1" role="status">
+          <p>仅列出当前适配器支持的 Windows x64 版本。镜像可能滞后；刷新会重新联网查询。</p>
+          {envType === "jdk" && <p>{source === "mirror" ? "镜像列出常用 LTS 主版本的最新构建；更多主版本请切换官方源。" : "官方列出可用主版本的最新构建，不包含每个历史补丁。"}</p>}
+          {envType === "rust" && <p>Rust 按 stable / beta / nightly 渠道安装，由 rustup 获取对应最新版本。</p>}
+          {["llvm", "deno", "bun", "git", "gh", "mingw"].includes(envType) && <p>GitHub 源查询最近 100 个发布记录后筛选兼容安装包，不代表完整历史归档。</p>}
+          {envType === "python" && <p>Python 列表来自版本目录；仅源码发布的安全维护版本可能没有 Windows 安装器。</p>}
+          {envType === "maven" && <p>Maven 仅适配 3.x；官方当前分发目录不包含全部历史版本。</p>}
+          {versions?.some(v => v.note?.includes("离线缓存")) && <p role="alert" className="text-amber-700 dark:text-amber-400">在线查询失败，正在展示离线缓存，版本可能过期。请检查网络后刷新或切换源。</p>}
+        </div>
         {loading || !sourcesReady ? (
           <Spinner />
         ) : error ? (
@@ -314,7 +325,7 @@ export function Download() {
           <Empty title="没有匹配的版本" />
         ) : (
           <div className="max-h-[420px] overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
-            {filtered.slice(0, 60).map((v) => {
+            {filtered.slice(0, visibleCount).map((v) => {
               const name = targetNames[v.version] ?? defaultTargetName(envType, v.version);
               return (
                 <div
@@ -366,6 +377,7 @@ export function Download() {
                 </div>
               );
             })}
+            {visibleCount < filtered.length && <div className="p-3 text-center"><Button onClick={() => setVisibleCount(n => n + 60)}>显示更多（已显示 {Math.min(visibleCount, filtered.length)} / {filtered.length}）</Button></div>}
           </div>
         )}
       </Card>

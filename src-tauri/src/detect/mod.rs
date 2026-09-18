@@ -101,7 +101,7 @@ fn looks_like(env_type: EnvType, root: &Path) -> bool {
         EnvType::Python => file("python.exe"),
         EnvType::Node => file("node.exe"),
         EnvType::Go => file("bin/go.exe"),
-        EnvType::Rust => file("cargo-home/bin/rustc.exe") || file("cargo-home/bin/cargo.exe"),
+        EnvType::Rust => file("cargo-home/bin/rustc.exe") || system::is_rust_toolchain(root),
         EnvType::Maven => file("bin/mvn.cmd") || file("bin/mvn.bat"),
         EnvType::Gradle => file("bin/gradle.bat") || file("bin/gradle.cmd"),
         EnvType::Php => file("php.exe"),

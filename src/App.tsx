@@ -24,6 +24,18 @@ const PAGES: { id: Page; Component: ComponentType }[] = [
 export default function App() {
   const page = useAppStore((s) => s.page);
   const setPage = useAppStore((s) => s.setPage);
+  const overviewVersion = useAppStore((s) => s.overviewVersion);
+  const [configWarning, setConfigWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    let canceled = false;
+    void api.getSettings().then((settings) => {
+      if (!canceled) setConfigWarning(settings?.configWarning ?? null);
+    }).catch(() => {
+      if (!canceled) setConfigWarning("读取应用配置失败，请进入设置检查并重试。");
+    });
+    return () => { canceled = true; };
+  }, [overviewVersion]);
 
   // keep-alive:页面首次访问后保持挂载,切换仅显隐不卸载(避免重复加载)
   const [mounted, setMounted] = useState<Set<Page>>(() => new Set([page]));
@@ -80,6 +92,12 @@ export default function App() {
     <div className="h-full flex">
       <Sidebar />
       <main className="flex-1 min-w-0 overflow-y-auto bg-zinc-50 dark:bg-zinc-950">
+        {configWarning && (
+          <div role="alert" className="m-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <p className="break-words">{configWarning}</p>
+            <button className="mt-2 underline cursor-pointer" onClick={() => setPage("settings")}>前往设置修复</button>
+          </div>
+        )}
         {PAGES.map(({ id, Component }) =>
           mounted.has(id) ? (
             <div key={id} className={page === id ? "contents" : "hidden"}>

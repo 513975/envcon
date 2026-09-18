@@ -24,7 +24,7 @@ const PERSISTED_ROOT_VARS: &[&str] = &[
 
 /// 获取注册表合并后的当前有效环境，用于缓存和工具配置读取。
 pub fn effective_environment() -> HashMap<String, String> {
-    discover(None, &[]).environment
+    environment_snapshot().0
 }
 
 pub fn expand(value: &str, vars: &HashMap<String, String>) -> String {
@@ -82,7 +82,7 @@ fn registry_path(vars: &HashMap<String, RegistryVar>, environment: &HashMap<Stri
     }).unwrap_or_default()
 }
 
-pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
+fn environment_snapshot() -> (HashMap<String, String>, Vec<String>) {
     let mut environment: HashMap<String, String> = std::env::vars()
         .map(|(key, value)| (key.to_uppercase(), value)).collect();
     let mut warnings = Vec::new();
@@ -107,6 +107,12 @@ pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
         }
     };
     environment.insert("PATH".into(), path.clone());
+    (environment, warnings)
+}
+
+pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
+    let (environment, warnings) = environment_snapshot();
+    let path = environment.get("PATH").cloned().unwrap_or_default();
     let mut result = Discovery { environment, path: Vec::new(), directories: Vec::new(), warnings };
     // Retain discoverability of tools inherited from the launcher without calling them PATH defaults.
     for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
@@ -134,7 +140,7 @@ pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
             roots.extend(children.into_iter().map(|child| (PathBuf::from(base).join(child), 3)));
         }
     }
-    for child in [".cargo/bin", ".local/bin", ".bun/bin", ".deno/bin", ".volta/bin", "scoop/shims", "scoop/apps", ".virtualenvs", ".conda/envs", "miniconda3", "anaconda3", "miniforge3", "mambaforge"] {
+    for child in [".cargo/bin", ".rustup/toolchains", ".local/bin", ".bun/bin", ".deno/bin", ".volta/bin", "scoop/shims", "scoop/apps", ".virtualenvs", ".conda/envs", "miniconda3", "anaconda3", "miniforge3", "mambaforge"] {
         roots.push((home.join(child), if child == "scoop/apps" { 4 } else { 3 }));
     }
     for var in ["JAVA_HOME", "GOROOT", "MAVEN_HOME", "GRADLE_HOME", "CARGO_HOME", "RUSTUP_HOME", "VIRTUAL_ENV", "CONDA_PREFIX", "PYTHON_HOME", "PNPM_HOME", "NVM_HOME", "NVM_SYMLINK", "SCOOP", "PHP_HOME", "ZIG_HOME", "LLVM_HOME"] {

@@ -39,6 +39,7 @@ export function ToastContainer() {
               )}
             </div>
             <button
+              aria-label="关闭通知"
               onClick={() => dismiss(t.id)}
               className="p-0.5 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
             >

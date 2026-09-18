@@ -13,18 +13,14 @@ import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Empty } from "../components/ui/Empty";
+import { ConfirmDialog } from "../components/ui/Modal";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { APP_VERSION } from "../lib/version";
 import { useAppStore } from "../lib/store";
 import { cn } from "../lib/format";
 
-interface SettingsView {
-  root: string | null;
-  downloadsDir: string | null;
-  portable: boolean;
-  dataDir: string;
-}
+type SettingsView = Awaited<ReturnType<typeof api.getSettings>>;
 
 interface Backup {
   file: string;
@@ -36,13 +32,19 @@ export function Settings() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [rootInput, setRootInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmRecovery, setConfirmRecovery] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const refreshOverview = useAppStore((s) => s.refreshOverview);
 
   const load = async () => {
     try {
-      setSettings(await api.getSettings());
+      setLoadError(null);
+      const next = await api.getSettings();
+      setSettings(next);
       setBackups(await api.listPathBackups());
+      return next;
     } catch (e) {
+      setLoadError(String(e));
       toast.error("加载设置失败", String(e));
     }
   };
@@ -102,10 +104,56 @@ export function Settings() {
     }
   };
 
-  if (!settings) return null;
+  const recoverSettings = async (restoreBackup: boolean) => {
+    if (busy) return;
+    setBusy("config");
+    try {
+      if (restoreBackup) await api.restoreSettingsBackup();
+      else await api.reloadSettings();
+      const next = await load();
+      refreshOverview();
+      if (next?.configWarning) toast.error("配置仍不可用", next.configWarning);
+      else if (next) toast.success(restoreBackup ? "配置已恢复" : "配置已重新加载");
+      setConfirmRecovery(false);
+    } catch (e) {
+      toast.error("配置恢复失败", String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!settings) return (
+    <PageShell title="设置">
+      <Empty title={loadError ? "加载设置失败" : "正在读取设置"} desc={loadError ?? undefined} />
+      {loadError && <Button onClick={load}>重试</Button>}
+    </PageShell>
+  );
 
   return (
     <PageShell title="设置" desc="管理根目录 / 存储位置 / PATH 备份">
+      <Card className="mb-5 p-4 space-y-3">
+        <div className="text-sm font-semibold">配置保护与恢复</div>
+        {settings.configWarning ? (
+          <p role="alert" className="text-xs text-amber-700 dark:text-amber-400 break-words">{settings.configWarning}</p>
+        ) : (
+          <p className="text-xs text-zinc-500">保存前保留上一次有效配置。恢复只改变应用设置，不移动环境、不修改系统 PATH。</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => recoverSettings(false)} disabled={!!busy}>重新加载配置</Button>
+          <Button size="sm" onClick={() => setConfirmRecovery(true)} disabled={!!busy || !settings.hasConfigBackup}>恢复上次有效配置</Button>
+          <Button size="sm" onClick={() => api.openPath(settings.dataDir).catch((e) => toast.error("打开失败", String(e)))}>打开配置目录</Button>
+        </div>
+        {!settings.hasConfigBackup && <p className="text-xs text-zinc-400">暂无可恢复的有效备份。</p>}
+      </Card>
+      <ConfirmDialog
+        open={confirmRecovery}
+        onClose={() => setConfirmRecovery(false)}
+        onConfirm={() => recoverSettings(true)}
+        loading={busy === "config"}
+        title="恢复上次有效配置"
+        confirmText="确认恢复"
+        message="将恢复管理根目录、下载目录等应用设置。当前配置文件会另外保留在配置目录中，环境文件与系统 PATH 不会被移动或修改。"
+      />
       {/* 管理根目录 */}
       <Card>
         <CardHeader
@@ -134,12 +182,13 @@ export function Settings() {
           <div className="flex items-center gap-2">
             <input
               value={rootInput}
+              disabled={settings.writeBlocked || !!busy}
               onChange={(e) => setRootInput(e.target.value)}
               placeholder="D:\DevEnv"
-              className="h-9 flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 text-sm outline-none focus:border-emerald-500"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 text-sm outline-none focus:border-emerald-500"
             />
-            <Button onClick={pickRoot}>浏览…</Button>
-            <Button variant="primary" onClick={applyRoot} loading={busy === "root"} disabled={!rootInput.trim()}>
+            <Button onClick={pickRoot} disabled={settings.writeBlocked || !!busy}>浏览…</Button>
+            <Button variant="primary" onClick={applyRoot} loading={busy === "root"} disabled={!rootInput.trim() || settings.writeBlocked || !!busy}>
               应用
             </Button>
           </div>
@@ -175,7 +224,7 @@ export function Settings() {
                 {settings.downloadsDir ?? `${settings.root ?? ""}\\downloads(默认)`}
               </div>
             </div>
-            <Button size="sm" onClick={pickDownloads} loading={busy === "dl"}>
+            <Button size="sm" onClick={pickDownloads} loading={busy === "dl"} disabled={settings.writeBlocked || !!busy}>
               更改
             </Button>
           </div>
@@ -214,6 +263,7 @@ export function Settings() {
                   variant="ghost"
                   onClick={() => restore(b)}
                   loading={busy === `restore:${b.file}`}
+                  disabled={!!busy}
                 >
                   <RotateCcw className="size-3.5" />
                   恢复

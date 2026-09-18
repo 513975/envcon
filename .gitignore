@@ -18,12 +18,22 @@ src-tauri/target-*/
 
 # Local dev docs and process notes (not published)
 /docs/*.md
+!/docs/release-0.5.2.md
+!/docs/iteration-0.5.3.md
+!/docs/testing.md
 /findings.md
 /progress.md
 /task_plan.md
 
 # Local test scripts and artifacts (not published)
-/tests/
+/tests/*
+!/tests/run-ui.mjs
+!/tests/release-052-ui.mjs
+!/tests/download-ui.mjs
+!/tests/startup-ui.mjs
+!/tests/settings-ui.mjs
+!/tests/read-cache.mjs
+!/tests/verify.mjs
 /src-tauri/tests/
 
 # TRAE IDE

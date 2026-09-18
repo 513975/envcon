@@ -19,13 +19,16 @@ export function cachedRead<T>(
     expires: Infinity,
     promise: Promise.resolve(null) as Promise<unknown>,
   };
-  entry.promise = read().then(
+  entry.promise = Promise.resolve().then(read).then(
     (value) => {
+      // A mutation or a newer refresh superseded this request while it was running.
+      if (entries.get(key) !== entry) return cachedRead(key, read);
       entry.expires = Date.now() + 60_000;
       return value;
     },
     (error) => {
-      if (entries.get(key) === entry) entries.delete(key);
+      if (entries.get(key) !== entry) return cachedRead(key, read);
+      entries.delete(key);
       throw error;
     },
   );

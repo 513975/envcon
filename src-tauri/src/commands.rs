@@ -16,6 +16,7 @@ use crate::types::{CategoryOverview, EnvType, Overview, ALL_ENV_TYPES};
 pub struct AppState {
     pub cfg: Mutex<AppConfig>,
     pub tasks: TaskManager,
+    pub tool_queries: crate::singleflight::SingleFlight<Option<PathBuf>, Vec<crate::pkgtools::ToolConfig>>,
 }
 
 impl AppState {
@@ -24,8 +25,15 @@ impl AppState {
         f(&guard)
     }
     fn with_cfg_mut<T>(&self, f: impl FnOnce(&mut AppConfig) -> T) -> T {
+        let _query_guard = self.tool_queries.mutation();
         let mut guard = self.cfg.lock().unwrap();
         f(&mut guard)
+    }
+
+    async fn tool_configs(&self, root: Option<PathBuf>, force: bool) -> Vec<crate::pkgtools::ToolConfig> {
+        self.tool_queries.read(root.clone(), force, || async {
+            crate::pkgtools::get_tool_configs(root.as_deref()).await
+        }).await
     }
 }
 
@@ -61,6 +69,7 @@ pub async fn update_package_manager(
     state: State<'_, AppState>,
     tool: crate::package_managers::ManagerId,
 ) -> Result<String> {
+    let _query_guard = state.tool_queries.mutation();
     let _guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("扫描、安装或包管理器任务正在执行，请稍后更新"))?;
@@ -173,6 +182,8 @@ pub async fn integrate_external_env(
     path: String,
     version: Option<String>,
 ) -> Result<String> {
+    let _guard = crate::migration::LOCK.try_lock()
+        .map_err(|_| AppError::msg("正在执行包管理器任务，请稍后纳入管理"))?;
     let root = require_root(&state)?;
     let exe = PathBuf::from(&path);
     if !exe.exists() {
@@ -194,9 +205,13 @@ pub async fn integrate_external_env(
     };
     let cat_dir = root.join("envs").join(env_type.folder());
     std::fs::create_dir_all(&cat_dir)?;
+    validate_environment_parent(&root, env_type)?;
+    if integrated_targets(Some(&root)).iter().any(|p| system::paths_eq(p, &install_identity)) {
+        return Err(AppError::msg("此安装目录已经纳入管理，请刷新环境列表"));
+    }
     let mut name = base.clone();
     let mut n = 2;
-    while cat_dir.join(&name).exists() {
+    while std::fs::symlink_metadata(cat_dir.join(&name)).is_ok() {
         name = format!("{base}-{n}");
         n += 1;
     }
@@ -241,6 +256,7 @@ fn version_token(raw: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn switch_env(state: State<'_, AppState>, env_type: EnvType, name: String) -> Result<()> {
+    let _query_guard = state.tool_queries.mutation();
     let _guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("包管理器任务正在执行，请结束后切换运行时"))?;
@@ -255,6 +271,7 @@ pub async fn uninstall_env(
     env_type: EnvType,
     name: String,
 ) -> Result<()> {
+    let _query_guard = state.tool_queries.mutation();
     switcher::validate_name(&name)?;
     let _guard = crate::migration::LOCK
         .try_lock()
@@ -315,6 +332,7 @@ pub fn get_path_state() -> Result<crate::types::PathState> {
 
 #[tauri::command]
 pub fn save_user_path(state: State<'_, AppState>, entries: Vec<String>) -> Result<()> {
+    let _query_guard = state.tool_queries.mutation();
     let backups = state.with_cfg(|c| c.backups_dir());
     pathman::save_user_path(&entries, &backups)
 }
@@ -322,6 +340,7 @@ pub fn save_user_path(state: State<'_, AppState>, entries: Vec<String>) -> Resul
 /// 一键集成:为已安装的类型补全 current\* PATH 条目,返回新增条目
 #[tauri::command]
 pub fn integrate_current_to_path(state: State<'_, AppState>) -> Result<Vec<String>> {
+    let _query_guard = state.tool_queries.mutation();
     let root = state.with_cfg(|c| c.resolve_root());
     let Some(root) = root else {
         return Err(AppError::msg("尚未设置管理根目录"));
@@ -335,12 +354,8 @@ fn current_path_entries(root: &Path) -> Vec<String> {
     let mut entries = Vec::new();
     for &t in ALL_ENV_TYPES.iter() {
         let installed = match t {
-            EnvType::Rust => root
-                .join("current")
-                .join("rust")
-                .join("cargo-home")
-                .join("bin")
-                .is_dir(),
+            EnvType::Rust => root.join("current").join("rust").join("cargo-home").join("bin").is_dir()
+                || root.join("current").join("rust").join("bin").is_dir(),
             _ => root.join("current").join(t.junction()).exists(),
         };
         if installed {
@@ -492,12 +507,13 @@ fn reject_active_install(state: &AppState, env_type: EnvType, name: &str) -> Res
 }
 
 #[tauri::command]
-pub async fn get_caches(state: State<'_, AppState>) -> Result<Vec<crate::caches::CacheInfo>> {
+pub async fn get_caches(state: State<'_, AppState>, force: Option<bool>) -> Result<Vec<crate::caches::CacheInfo>> {
     let (root, downloads) =
         state.with_cfg(|c| (c.resolve_root(), c.settings.downloads_dir.clone()));
     let downloads = downloads.map(PathBuf::from);
     let environment = crate::detect::discovery::effective_environment();
-    let configured = crate::pkgtools::effective_cache_paths(root.as_deref()).await;
+    let configured = state.tool_configs(root.clone(), force.unwrap_or(false)).await
+        .into_iter().filter_map(|tool| tool.cache_path.map(|p| (tool.tool, PathBuf::from(p)))).collect();
     let caches = crate::caches::detect_caches(
         root.as_deref(),
         downloads.as_deref(),
@@ -568,6 +584,9 @@ pub struct SettingsView {
     pub downloads_dir: Option<String>,
     pub portable: bool,
     pub data_dir: String,
+    pub config_warning: Option<String>,
+    pub write_blocked: bool,
+    pub has_config_backup: bool,
 }
 
 #[tauri::command]
@@ -577,7 +596,20 @@ pub fn get_settings(state: State<'_, AppState>) -> SettingsView {
         downloads_dir: c.settings.downloads_dir.clone(),
         portable: c.portable,
         data_dir: c.data_dir.to_string_lossy().to_string(),
+        config_warning: c.warning.clone(),
+        write_blocked: c.write_blocked,
+        has_config_backup: c.has_valid_backup(),
     })
+}
+
+#[tauri::command]
+pub fn reload_settings(state: State<'_, AppState>) {
+    state.with_cfg_mut(|c| c.reload());
+}
+
+#[tauri::command]
+pub fn restore_settings_backup(state: State<'_, AppState>) -> Result<()> {
+    state.with_cfg_mut(|c| c.restore_backup())
 }
 
 #[tauri::command]
@@ -650,6 +682,7 @@ fn parse_backup_name(name: &str) -> String {
 
 #[tauri::command]
 pub fn restore_path_backup(state: State<'_, AppState>, file: String) -> Result<()> {
+    let _query_guard = state.tool_queries.mutation();
     let path = PathBuf::from(&file);
     let backups_dir = state.with_cfg(|c| c.backups_dir());
     if !system::path_within(&backups_dir, &path) || !path.extension().is_some_and(|e| e == "json") {
@@ -704,6 +737,8 @@ fn suggested_env_path(root: &Path, env_type: EnvType, name: &str) -> Option<Stri
         return None;
     }
     let path = match (env_type, name) {
+        (EnvType::Rust, "CARGO_HOME" | "RUSTUP_HOME")
+            if system::is_rust_toolchain(&cur) => return None,
         (EnvType::Rust, "CARGO_HOME") => cur.join("cargo-home"),
         (EnvType::Rust, "RUSTUP_HOME") => cur.join("rustup-home"),
         _ => cur,
@@ -747,6 +782,7 @@ pub fn get_env_vars(state: State<'_, AppState>) -> Result<Vec<EnvVarInfo>> {
 
 #[tauri::command]
 pub fn save_env_var(state: State<'_, AppState>, name: String, value: String) -> Result<()> {
+    let _query_guard = state.tool_queries.mutation();
     let backups = state.with_cfg(|c| c.backups_dir());
     if value.trim().is_empty() {
         pathman::delete_user_env_var(&name, &backups)
@@ -806,9 +842,10 @@ pub async fn global_package_sources(
 #[tauri::command]
 pub async fn get_tool_configs(
     state: State<'_, AppState>,
+    force: Option<bool>,
 ) -> Result<Vec<crate::pkgtools::ToolConfig>> {
     let root = state.with_cfg(|c| c.resolve_root());
-    Ok(crate::pkgtools::get_tool_configs(root.as_deref()).await)
+    Ok(state.tool_configs(root, force.unwrap_or(false)).await)
 }
 
 #[tauri::command]
@@ -818,6 +855,7 @@ pub async fn apply_tool_config(
     global_path: Option<String>,
     cache_path: Option<String>,
 ) -> Result<Vec<String>> {
+    let _query_guard = state.tool_queries.mutation();
     let _guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("正在迁移或修改包管理器路径，请稍后重试"))?;
@@ -867,6 +905,7 @@ pub async fn migrate_tool_data(
     state: State<'_, AppState>,
     plan: crate::migration::MigrationPlan,
 ) -> Result<crate::migration::MigrationResult> {
+    let _query_guard = state.tool_queries.mutation();
     let guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("正在迁移或修改包管理器路径，请稍后重试"))?;
@@ -984,6 +1023,59 @@ pub async fn cleanup_old_packages(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    #[ignore = "Read-only host benchmark; invokes installed managers, run explicitly and serially"]
+    async fn host_query_benchmark() {
+        use std::sync::atomic::Ordering;
+        use std::time::Instant;
+        let mut records = Vec::new();
+        for sample in 1..=3 {
+            for shared in [false, true] {
+                crate::pkgtools::QUERY_COMMAND_ATTEMPTS.store(0, Ordering::Relaxed);
+                let start = Instant::now();
+                let (a, b) = if shared {
+                    let flight = crate::singleflight::SingleFlight::default();
+                    tokio::join!(
+                        flight.read((), false, || crate::pkgtools::get_tool_configs(None)),
+                        flight.read((), false, || crate::pkgtools::get_tool_configs(None)),
+                    )
+                } else {
+                    tokio::join!(crate::pkgtools::get_tool_configs(None), crate::pkgtools::get_tool_configs(None))
+                };
+                assert_eq!(serde_json::to_value(&a).unwrap(), serde_json::to_value(&b).unwrap());
+                assert_eq!(a.len(), crate::package_managers::definitions().len());
+                records.push(serde_json::json!({"sample":sample,"shared":shared,"elapsedMs":start.elapsed().as_millis(),"commandAttempts":crate::pkgtools::QUERY_COMMAND_ATTEMPTS.load(Ordering::Relaxed),"managers":a.len()}));
+            }
+        }
+        let start = Instant::now();
+        for _ in 0..3 { crate::detect::discovery::discover(None, &[]); }
+        let full = start.elapsed().as_micros();
+        let start = Instant::now();
+        for _ in 0..3 { crate::detect::discovery::effective_environment(); }
+        println!("BENCHMARK {}", serde_json::json!({"configurationQueries":records,"environmentRead3xMicros":{"previousFullDiscovery":full,"snapshotOnly":start.elapsed().as_micros()},"scope":"root=None; no project directories; command attempts include discovery and probes; not a cold-start or process/memory/IO benchmark"}));
+    }
+
+    #[test]
+    fn linked_rust_toolchain_preserves_external_files_and_does_not_invent_homes() {
+        let d = crate::test_support::TestDir::new();
+        let root = d.path().join("managed");
+        let toolchain = d.path().join("toolchain");
+        std::fs::create_dir_all(toolchain.join("bin")).unwrap();
+        std::fs::create_dir_all(toolchain.join("lib/rustlib")).unwrap();
+        for exe in ["rustc.exe", "cargo.exe"] { std::fs::write(toolchain.join("bin").join(exe), b"fixture").unwrap(); }
+        let link = root.join("envs/rusts/system-stable");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        junction::create(&toolchain, &link).unwrap();
+        switcher::switch(&root, EnvType::Rust, "system-stable").unwrap();
+        assert!(system::is_rust_toolchain(&root.join("current/rust")));
+        assert!(suggested_env_path(&root, EnvType::Rust, "CARGO_HOME").is_none());
+        assert!(suggested_env_path(&root, EnvType::Rust, "RUSTUP_HOME").is_none());
+        assert!(current_path_entries(&root).iter().any(|p| system::paths_eq(Path::new(p), &root.join("current/rust/bin"))));
+        switcher::remove_junction_for(&root, EnvType::Rust).unwrap();
+        force_remove_dir_all(&link).unwrap();
+        assert!(toolchain.join("bin/rustc.exe").is_file());
+    }
+
     #[test]
     fn environment_delete_preserves_external_junction_targets() {
         let dir = crate::test_support::TestDir::new();
@@ -1040,7 +1132,7 @@ mod tests {
         let current = root.join("current").join("rust");
         assert_eq!(
             current_path_entries(root),
-            vec![current
+            vec![current.join("bin").to_string_lossy().to_string(), current
                 .join("cargo-home")
                 .join("bin")
                 .to_string_lossy()

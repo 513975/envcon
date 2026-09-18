@@ -73,6 +73,7 @@ export function Environments() {
   }, [projectDirs]);
 
   const doSwitch = async (env: ManagedEnv) => {
+    if (busy) return;
     setBusy(`switch:${env.name}`);
     try {
       await api.switchEnv(env.envType, env.name);
@@ -89,18 +90,19 @@ export function Environments() {
   };
 
   const doUninstall = async () => {
-    if (!confirmUninstall) return;
+    if (!confirmUninstall || busy) return;
     const env = confirmUninstall;
     setBusy(`uninstall:${env.name}`);
     try {
       await api.uninstallEnv(env.envType, env.name);
-      toast.success("已卸载", `${env.name} 已删除`);
+      toast.success(env.isExternalLink ? "已移除管理链接" : "已卸载", env.isExternalLink ? `${env.name} 原安装目录已保留` : `${env.name} 已删除`);
       setConfirmUninstall(null);
-      refreshOverview();
     } catch (e) {
       toast.error("卸载失败", String(e));
     } finally {
       setBusy(null);
+      // A failed removal may already have detached current or removed some files.
+      refreshOverview();
     }
   };
 
@@ -224,12 +226,12 @@ export function Environments() {
             {category.envs.map((env) => (
               <div
                 key={env.name}
-                className="flex items-center gap-4 px-4 py-3.5"
+                className="grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3.5"
               >
                 <EnvTypeBadge type={env.envType} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 break-all">
                       {env.name}
                     </span>
                     {env.isCurrent && <Badge color="green">当前</Badge>}
@@ -240,12 +242,12 @@ export function Environments() {
                     )}
                     {env.isExternalLink && <Badge color="blue">外部链接</Badge>}
                   </div>
-                  <div className="mt-0.5 flex items-center gap-3 text-xs text-zinc-500">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
                     <span>{env.version ?? "未知版本"}</span>
                     <span>{formatBytes(env.sizeBytes)}</span>
                     {!env.sizeComplete && (
                       <span className="text-amber-600 dark:text-amber-400">
-                        大小统计不完整
+                        {env.sizeBytes === null ? "尚未统计大小" : "大小统计不完整"}
                       </span>
                     )}
                     <span
@@ -261,13 +263,13 @@ export function Environments() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="col-span-2 sm:col-span-1 flex flex-wrap justify-end items-center gap-1.5">
                   {!env.isCurrent && (
                     <Button
                       size="sm"
                       variant="primary"
                       loading={busy === `switch:${env.name}`}
-                      disabled={env.status !== "available"}
+                      disabled={busy !== null || env.status !== "available"}
                       onClick={() => doSwitch(env)}
                     >
                       <Check className="size-3.5" />
@@ -276,6 +278,8 @@ export function Environments() {
                   )}
                   <Button
                     size="sm"
+                    title={`打开 ${env.name} 安装目录`}
+                    aria-label={`打开 ${env.name} 安装目录`}
                     onClick={() =>
                       api
                         .openPath(env.path)
@@ -288,9 +292,12 @@ export function Environments() {
                     size="sm"
                     variant="ghost"
                     className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+                    disabled={busy !== null}
+                    aria-label={`${env.isExternalLink ? "移除管理" : "卸载环境"} ${env.name}`}
                     onClick={() => setConfirmUninstall(env)}
                   >
                     <Trash2 className="size-3.5" />
+                    {env.isExternalLink ? "移除管理" : "卸载"}
                   </Button>
                 </div>
               </div>
@@ -385,21 +392,23 @@ export function Environments() {
       {/* 卸载确认 */}
       <ConfirmDialog
         open={confirmUninstall !== null}
-        onClose={() => setConfirmUninstall(null)}
+        onClose={() => { if (!busy) setConfirmUninstall(null); }}
         onConfirm={doUninstall}
         danger
-        confirmText="卸载"
+        confirmText={confirmUninstall?.isExternalLink ? "移除管理" : "确认卸载"}
         loading={busy?.startsWith("uninstall:") ?? false}
-        title={`卸载 ${confirmUninstall?.name ?? ""}`}
+        title={`${confirmUninstall?.isExternalLink ? "移除管理" : "卸载环境"} ${confirmUninstall?.name ?? ""}`}
         message={
           <>
             <p>
-              将永久删除 <b>{confirmUninstall?.path}</b>
+              {confirmUninstall?.isExternalLink ? "仅移除管理链接：" : "将永久删除安装目录及其中的文件（包括在该目录安装的包）："}
+              <b className="break-all">{confirmUninstall?.path}</b>
             </p>
+            {confirmUninstall?.isExternalLink && <p className="mt-2 break-all">原安装目录保留：{confirmUninstall.identityPath}</p>}
             <p className="mt-1.5 text-xs text-zinc-400">
-              占用 {formatBytes(confirmUninstall?.sizeBytes ?? null)}
-              {confirmUninstall?.isCurrent ? ",当前链接也会一并移除" : ""}
-              ,此操作不可恢复。
+              {confirmUninstall?.isCurrent ? "当前链接也会一并移除，需要重新选择当前环境。" : ""}
+              {confirmUninstall?.isExternalLink ? "之后可以重新扫描并纳入管理。" : "此操作不可恢复，请先关闭使用此环境的程序。"}
+              不会修改其他环境或自动清理共享 PATH 条目。
             </p>
           </>
         }

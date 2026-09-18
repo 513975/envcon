@@ -60,7 +60,7 @@ export const api = {
   getCaches: (force = false) =>
     cachedRead(
       "caches",
-      () => cmd<import("./types").CacheInfo[]>("get_caches"),
+      () => cmd<import("./types").CacheInfo[]>("get_caches", { force }),
       force,
     ),
   cleanCache: (tool: string, expectedPath: string) =>
@@ -71,7 +71,12 @@ export const api = {
       downloadsDir: string | null;
       portable: boolean;
       dataDir: string;
+      configWarning: string | null;
+      writeBlocked: boolean;
+      hasConfigBackup: boolean;
     }>("get_settings"),
+  reloadSettings: () => cmd<void>("reload_settings"),
+  restoreSettingsBackup: () => cmd<void>("restore_settings_backup"),
   setDownloadsDir: (dir: string) => cmd<void>("set_downloads_dir", { dir }),
   listPathBackups: () =>
     cmd<{ file: string; time: string }[]>("list_path_backups"),
@@ -83,7 +88,7 @@ export const api = {
   getToolConfigs: (force = false) =>
     cachedRead(
       "tool-configs",
-      () => cmd<import("./types").ToolConfig[]>("get_tool_configs"),
+      () => cmd<import("./types").ToolConfig[]>("get_tool_configs", { force }),
       force,
     ),
   listInstalledPackages: (
