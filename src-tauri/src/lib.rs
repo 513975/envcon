@@ -1,6 +1,7 @@
 pub mod caches;
 mod fsutil;
 mod singleflight;
+mod scan_cache;
 pub mod commands;
 pub mod config;
 pub mod detect;
@@ -29,16 +30,21 @@ use std::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let cfg = config::AppConfig::load();
+    let scans = scan_cache::ScanCache::new(&cfg.data_dir);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            cfg: Mutex::new(config::AppConfig::load()),
+            cfg: Mutex::new(cfg),
             tasks: install::TaskManager::new(),
             tool_queries: Default::default(),
+            scans,
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_overview,
+            commands::query_scan,
+            commands::invalidate_scans,
             commands::update_package_manager,
             commands::set_root,
             commands::scan_system,

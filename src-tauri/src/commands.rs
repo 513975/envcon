@@ -17,6 +17,7 @@ pub struct AppState {
     pub cfg: Mutex<AppConfig>,
     pub tasks: TaskManager,
     pub tool_queries: crate::singleflight::SingleFlight<Option<PathBuf>, Vec<crate::pkgtools::ToolConfig>>,
+    pub scans: std::sync::Arc<crate::scan_cache::ScanCache>,
 }
 
 impl AppState {
@@ -26,6 +27,7 @@ impl AppState {
     }
     fn with_cfg_mut<T>(&self, f: impl FnOnce(&mut AppConfig) -> T) -> T {
         let _query_guard = self.tool_queries.mutation();
+        let _scan_guard = self.scans.mutation();
         let mut guard = self.cfg.lock().unwrap();
         f(&mut guard)
     }
@@ -35,6 +37,66 @@ impl AppState {
             crate::pkgtools::get_tool_configs(root.as_deref()).await
         }).await
     }
+}
+
+#[tauri::command]
+pub fn invalidate_scans(state: State<'_, AppState>) {
+    state.scans.invalidate();
+}
+
+#[tauri::command]
+pub async fn query_scan(
+    state: State<'_, AppState>,
+    kind: String,
+    project_dirs: Option<Vec<String>>,
+    force: Option<bool>,
+    cached_only: Option<bool>,
+) -> Result<Option<crate::scan_cache::Snapshot>> {
+    if !matches!(kind.as_str(), "overview" | "system" | "tools" | "caches") { return Err(AppError::msg("未知扫描类型")); }
+    let projects: Vec<PathBuf> = project_dirs.unwrap_or_default().into_iter().map(PathBuf::from).collect();
+    if projects.len() > 8 || projects.iter().any(|p| !p.is_absolute()) { return Err(AppError::msg("最多选择 8 个绝对路径项目目录")); }
+    let cfg = state.with_cfg(Clone::clone);
+    let root = cfg.resolve_root();
+    let key = crate::scan_cache::key(&kind, root.as_deref(), &projects);
+    if cached_only.unwrap_or(false) { return Ok(state.scans.peek(&key)); }
+    let previous = state.scans.peek(&key).map(|s| s.value);
+    let fp_root = root.clone();
+    let fp_projects = projects.clone();
+    let settings = cfg.settings.clone();
+    let task_state = serde_json::to_string(&state.tasks.snapshots())?;
+    let fingerprint = tokio::task::spawn_blocking(move || format!("{}:{task_state}", crate::scan_cache::fingerprint(fp_root.as_deref(), &fp_projects, &settings, previous.as_ref())))
+        .await.map_err(|e| AppError::msg(e.to_string()))?;
+    let snapshot = state.scans.read(key.clone(), fingerprint, force.unwrap_or(false), || async {
+        let value = match kind.as_str() {
+            "overview" => serde_json::to_value(get_overview(state.clone()).await?)?,
+            "system" => serde_json::to_value(scan_system(state.clone(), Some(projects.iter().map(|p| p.to_string_lossy().into()).collect())).await?)?,
+            "tools" => serde_json::to_value(state.tool_configs(root.clone(), force.unwrap_or(false)).await)?,
+            "caches" => {
+                let environment = crate::detect::discovery::effective_environment();
+                // Configuration queries are shared with the tool page; recursive sizing is an explicit action.
+                let tool_key = crate::scan_cache::key("tools", root.as_deref(), &[]);
+                let cached = state.scans.peek(&tool_key).filter(|s| crate::scan_cache::now_ms().saturating_sub(s.updated_at) < crate::scan_cache::RECHECK_MS);
+                let configs: Vec<crate::pkgtools::ToolConfig> = match cached.and_then(|s| serde_json::from_value(s.value).ok()) {
+                    Some(configs) if !force.unwrap_or(false) => configs,
+                    _ => state.tool_configs(root.clone(), false).await,
+                };
+                let configured = configs.into_iter().filter_map(|t| t.cache_path.map(|p| (t.tool, PathBuf::from(p)))).collect();
+                serde_json::to_value(crate::caches::detect_caches(root.as_deref(), cfg.settings.downloads_dir.as_deref().map(Path::new), &environment, &configured))?
+            }
+            _ => unreachable!(),
+        };
+        Ok(value)
+    }).await?;
+    // Include paths first discovered by this scan so the first warm read is not a false miss.
+    let stamp_root = root.clone();
+    let stamp_projects = projects.clone();
+    let stamp_settings = cfg.settings.clone();
+    let value = snapshot.value.clone();
+    let task_state = serde_json::to_string(&state.tasks.snapshots())?;
+    let stamp = tokio::task::spawn_blocking(move || format!("{}:{task_state}", crate::scan_cache::fingerprint(stamp_root.as_deref(), &stamp_projects, &stamp_settings, Some(&value))))
+        .await.map_err(|e| AppError::msg(e.to_string()))?;
+    state.scans.update_fingerprint(&key, snapshot.updated_at, stamp);
+    Ok(Some(snapshot))
 }
 
 #[tauri::command]
@@ -70,6 +132,7 @@ pub async fn update_package_manager(
     tool: crate::package_managers::ManagerId,
 ) -> Result<String> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let _guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("扫描、安装或包管理器任务正在执行，请稍后更新"))?;
@@ -257,6 +320,7 @@ fn version_token(raw: &str) -> Option<String> {
 #[tauri::command]
 pub async fn switch_env(state: State<'_, AppState>, env_type: EnvType, name: String) -> Result<()> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let _guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("包管理器任务正在执行，请结束后切换运行时"))?;
@@ -272,6 +336,7 @@ pub async fn uninstall_env(
     name: String,
 ) -> Result<()> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     switcher::validate_name(&name)?;
     let _guard = crate::migration::LOCK
         .try_lock()
@@ -333,6 +398,7 @@ pub fn get_path_state() -> Result<crate::types::PathState> {
 #[tauri::command]
 pub fn save_user_path(state: State<'_, AppState>, entries: Vec<String>) -> Result<()> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let backups = state.with_cfg(|c| c.backups_dir());
     pathman::save_user_path(&entries, &backups)
 }
@@ -341,6 +407,7 @@ pub fn save_user_path(state: State<'_, AppState>, entries: Vec<String>) -> Resul
 #[tauri::command]
 pub fn integrate_current_to_path(state: State<'_, AppState>) -> Result<Vec<String>> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let root = state.with_cfg(|c| c.resolve_root());
     let Some(root) = root else {
         return Err(AppError::msg("尚未设置管理根目录"));
@@ -683,6 +750,7 @@ fn parse_backup_name(name: &str) -> String {
 #[tauri::command]
 pub fn restore_path_backup(state: State<'_, AppState>, file: String) -> Result<()> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let path = PathBuf::from(&file);
     let backups_dir = state.with_cfg(|c| c.backups_dir());
     if !system::path_within(&backups_dir, &path) || !path.extension().is_some_and(|e| e == "json") {
@@ -783,6 +851,7 @@ pub fn get_env_vars(state: State<'_, AppState>) -> Result<Vec<EnvVarInfo>> {
 #[tauri::command]
 pub fn save_env_var(state: State<'_, AppState>, name: String, value: String) -> Result<()> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let backups = state.with_cfg(|c| c.backups_dir());
     if value.trim().is_empty() {
         pathman::delete_user_env_var(&name, &backups)
@@ -856,6 +925,7 @@ pub async fn apply_tool_config(
     cache_path: Option<String>,
 ) -> Result<Vec<String>> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let _guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("正在迁移或修改包管理器路径，请稍后重试"))?;
@@ -906,6 +976,7 @@ pub async fn migrate_tool_data(
     plan: crate::migration::MigrationPlan,
 ) -> Result<crate::migration::MigrationResult> {
     let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
     let guard = crate::migration::LOCK
         .try_lock()
         .map_err(|_| AppError::msg("正在迁移或修改包管理器路径，请稍后重试"))?;

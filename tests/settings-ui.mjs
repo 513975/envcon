@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installScanMock } from "./scan-mock.mjs";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.argv[3] || "playwright");
@@ -7,6 +8,7 @@ const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
 const errors = [];
 page.on("pageerror", error => errors.push(String(error)));
 try {
+  await installScanMock(page);
   await page.addInitScript(() => {
     window.calls = [];
     window.settings = { root: null, downloadsDir: null, portable: true, dataDir: "D:/fixture/data", configWarning: "配置文件格式无效。原文件未修改，请恢复备份。", writeBlocked: true, hasConfigBackup: true };

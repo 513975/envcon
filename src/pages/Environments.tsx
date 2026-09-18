@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   RefreshCw,
@@ -19,6 +19,8 @@ import { EnvTypeBadge } from "../components/EnvTypeBadge";
 import { ScanResults } from "../components/ScanResults";
 import { SelectionButton } from "../components/ui/SelectionButton";
 import { api } from "../lib/api";
+import { useScanResult } from "../lib/scanClient";
+import { ScanStatus } from "../components/ScanStatus";
 import { savedProjectDirs } from "../lib/scanPreferences";
 import { toast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
@@ -30,6 +32,7 @@ import {
   type Overview,
   type ExternalEnv,
   type ManagedEnv,
+  type ScanReport,
 } from "../lib/types";
 
 export function Environments() {
@@ -45,6 +48,11 @@ export function Environments() {
   const [projectDirs, setProjectDirs] = useState<string[]>(savedProjectDirs);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
   const [integrating, setIntegrating] = useState<string | null>(null);
+  useScanResult<Overview>("overview", [], setOverview);
+  useScanResult<ScanReport>("system", projectDirs, useCallback((report: ScanReport) => {
+    setSystemEnvs(report.tools);
+    setScanWarnings(report.warnings);
+  }, []));
 
   const refreshOverview = useAppStore((s) => s.refreshOverview);
   const overviewVersion = useAppStore((s) => s.overviewVersion);
@@ -121,7 +129,7 @@ export function Environments() {
 
   useEffect(() => {
     void doScanSystem(false);
-  }, []);
+  }, [JSON.stringify(projectDirs), overviewVersion]);
 
   const addProject = async () => {
     try {
@@ -189,6 +197,7 @@ export function Environments() {
       }
     >
       {/* 类型 Tab */}
+      <ScanStatus kind="overview" />
       <div className="flex gap-1.5 mb-4 flex-wrap">
         {ALL_ENV_TYPES.map((t) => {
           const cat = overview.categories.find((c) => c.envType === t);
@@ -341,6 +350,7 @@ export function Environments() {
             </div>
           }
         />
+        <div className="px-4"><ScanStatus kind="system" projects={projectDirs} /></div>
         {projectDirs.length > 0 && (
           <div className="px-4 py-2 space-y-1">
             {projectDirs.map((dir) => (

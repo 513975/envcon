@@ -5,14 +5,15 @@ pub(crate) mod discovery;
 use std::path::Path;
 use std::os::windows::fs::MetadataExt;
 
-use futures_util::future::join_all;
+use futures_util::{stream, StreamExt};
 
 use crate::config::junction_target_name;
 use crate::types::{CategoryOverview, EnvType, ManagedEnv, ALL_ENV_TYPES};
 
 /// 扫描根目录,生成完整 Overview 的 categories 部分
 pub async fn scan_root(root: &Path) -> Vec<CategoryOverview> {
-    join_all(ALL_ENV_TYPES.iter().map(|&t| scan_category(root, t))).await
+    let scans: Vec<_> = ALL_ENV_TYPES.into_iter().map(|t| scan_category(root, t)).collect();
+    stream::iter(scans).buffered(3).collect().await
 }
 
 async fn scan_category(root: &Path, env_type: EnvType) -> CategoryOverview {

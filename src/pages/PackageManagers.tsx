@@ -14,6 +14,8 @@ import { Badge } from "../components/ui/Badge";
 import { Spinner } from "../components/ui/Empty";
 import { ConfirmDialog } from "../components/ui/Modal";
 import { api } from "../lib/api";
+import { useScanResult } from "../lib/scanClient";
+import { ScanStatus } from "../components/ScanStatus";
 import { ToolMigration } from "../components/ToolMigration";
 import { PipReinstall } from "../components/PipReinstall";
 import { GlobalPackageReinstall } from "../components/GlobalPackageReinstall";
@@ -66,6 +68,8 @@ export function PackageManagers() {
 
   // 缓存
   const [caches, setCaches] = useState<CacheInfo[] | null>(null);
+  useScanResult<ToolConfig[]>("tools", [], setToolConfigs);
+  useScanResult<CacheInfo[]>("caches", [], setCaches);
   const [cacheLoading, setCacheLoading] = useState(false);
   const [confirmClean, setConfirmClean] = useState<CacheInfo | null>(null);
   const [cleaning, setCleaning] = useState(false);
@@ -226,6 +230,7 @@ export function PackageManagers() {
         </div>
       }
     >
+      <ScanStatus kind="tools" />
       <div
         role="group"
         aria-label="选择包管理器"
@@ -529,7 +534,7 @@ export function PackageManagers() {
                       size="sm"
                       variant="ghost"
                       className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950 disabled:hidden"
-                      disabled={!c.exists || (c.sizeBytes ?? 0) === 0}
+                      disabled={!c.exists || c.sizeBytes === 0}
                       onClick={() => setConfirmClean(c)}
                     >
                       <Eraser className="size-3.5" />

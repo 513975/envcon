@@ -15,6 +15,8 @@ import { Badge } from "../components/ui/Badge";
 import { Spinner, Empty } from "../components/ui/Empty";
 import { EnvTypeBadge } from "../components/EnvTypeBadge";
 import { api } from "../lib/api";
+import { useScanResult } from "../lib/scanClient";
+import { ScanStatus } from "../components/ScanStatus";
 import { toast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
 import { formatBytes, cn } from "../lib/format";
@@ -23,6 +25,7 @@ import { ENV_TYPE_META } from "../lib/types";
 
 export function Dashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
+  useScanResult<Overview>("overview", [], setOverview);
   const [loading, setLoading] = useState(true);
   const [rootSetting, setRootSetting] = useState(false);
   const [rootInput, setRootInput] = useState("");
@@ -129,6 +132,7 @@ export function Dashboard() {
       }
     >
       {/* 统计卡片 */}
+      <ScanStatus kind="overview" />
       <div className="grid grid-cols-3 gap-4 mb-5">
         <Card className="p-4">
           <div className="flex items-center gap-3">

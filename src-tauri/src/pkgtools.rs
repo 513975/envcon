@@ -1,6 +1,6 @@
 use crate::error::{AppError, Result};
 use crate::package_managers as managers;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 use tokio::process::Command;
@@ -8,7 +8,7 @@ use tokio::process::Command;
 #[cfg(test)]
 pub(crate) static QUERY_COMMAND_ATTEMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolConfig {
     pub tool: String,

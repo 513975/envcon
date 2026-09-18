@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { installScanMock } from "./scan-mock.mjs";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.argv[3] || "playwright");
@@ -7,6 +8,7 @@ const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
 const errors = [];
 page.on("pageerror", e => errors.push(String(e)));
 try {
+  await installScanMock(page);
   await page.addInitScript(() => {
     localStorage.setItem("envcon.scan.projectDirs", JSON.stringify(["D:/saved-project"]));
     window.calls = [];

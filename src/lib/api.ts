@@ -1,5 +1,5 @@
 import { cmd } from "./tauri";
-import { cachedRead } from "./readCache";
+import { scanRead } from "./scanClient";
 import type {
   EnvType,
   ScanReport,
@@ -14,16 +14,12 @@ import type {
 /** 后端 API 封装 */
 export const api = {
   getOverview: (force = false) =>
-    cachedRead("overview", () => cmd<Overview>("get_overview"), force),
+    scanRead<Overview>("overview", [], force),
   updatePackageManager: (tool: string) =>
     cmd<string>("update_package_manager", { tool }),
   setRoot: (path: string) => cmd<string>("set_root", { path }),
   scanSystem: (projectDirs: string[] = [], force = false) =>
-    cachedRead(
-      `system:${JSON.stringify(projectDirs)}`,
-      () => cmd<ScanReport>("scan_system", { projectDirs }),
-      force,
-    ),
+    scanRead<ScanReport>("system", projectDirs, force),
   integrateExternalEnv: (
     envType: EnvType,
     path: string,
@@ -58,11 +54,7 @@ export const api = {
   cancelInstall: (id: number) => cmd<void>("cancel_install", { id }),
   installTasks: () => cmd<InstallTask[]>("install_tasks"),
   getCaches: (force = false) =>
-    cachedRead(
-      "caches",
-      () => cmd<import("./types").CacheInfo[]>("get_caches", { force }),
-      force,
-    ),
+    scanRead<import("./types").CacheInfo[]>("caches", [], force),
   cleanCache: (tool: string, expectedPath: string) =>
     cmd<number>("clean_cache", { tool, expectedPath }),
   getSettings: () =>
@@ -86,11 +78,7 @@ export const api = {
   saveEnvVar: (name: string, value: string) =>
     cmd<void>("save_env_var", { name, value }),
   getToolConfigs: (force = false) =>
-    cachedRead(
-      "tool-configs",
-      () => cmd<import("./types").ToolConfig[]>("get_tool_configs", { force }),
-      force,
-    ),
+    scanRead<import("./types").ToolConfig[]>("tools", [], force),
   listInstalledPackages: (
     tool: string,
     directory: string | null = null,

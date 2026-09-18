@@ -34,6 +34,9 @@ src-tauri/target-*/
 !/tests/settings-ui.mjs
 !/tests/read-cache.mjs
 !/tests/verify.mjs
+!/tests/scan-mock.mjs
+!/tests/scans-ui.mjs
+!/docs/imp01.md
 /src-tauri/tests/
 
 # TRAE IDE

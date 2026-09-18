@@ -11,6 +11,7 @@ import { Settings } from "./pages/Settings";
 import { PackageManagers } from "./pages/PackageManagers";
 import { api } from "./lib/api";
 import { savedProjectDirs } from "./lib/scanPreferences";
+import { startScanRevalidation } from "./lib/scanClient";
 
 const PAGES: { id: Page; Component: ComponentType }[] = [
   { id: "dashboard", Component: Dashboard },
@@ -50,6 +51,7 @@ export default function App() {
 
   useEffect(() => {
     startInstallListener();
+    const stopRevalidation = startScanRevalidation({ overview: api.getOverview, tools: api.getToolConfigs, caches: api.getCaches, system: (force) => api.scanSystem(savedProjectDirs(), force) });
     const timer = window.setTimeout(() => {
       void Promise.allSettled([
         api.getOverview(),
@@ -63,6 +65,7 @@ export default function App() {
     return () => {
       window.clearTimeout(timer);
       window.clearTimeout(cacheTimer);
+      stopRevalidation();
     };
   }, []);
 
