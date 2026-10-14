@@ -7,6 +7,8 @@ use futures_util::{stream, StreamExt};
 use crate::error::{AppError, Result};
 use crate::types::EnvType;
 
+mod android;
+
 pub const SOURCE_MIRROR: &str = "mirror";
 pub const SOURCE_OFFICIAL: &str = "official";
 
@@ -74,6 +76,7 @@ pub fn available_sources(env_type: EnvType) -> Vec<SourceInfo> {
         EnvType::Git => vec![mirror("ghfast.top(GitHub)"), official("GitHub")],
         EnvType::Gh => vec![mirror("ghfast.top(GitHub)"), official("GitHub")],
         EnvType::Mingw => vec![mirror("ghfast.top(GitHub)"), official("GitHub")],
+        EnvType::Adb => vec![official("Google Android SDK")],
     }
 }
 
@@ -116,6 +119,7 @@ pub async fn list_versions(
         (EnvType::Git, _) => git_releases().await,
         (EnvType::Gh, _) => gh_releases().await,
         (EnvType::Mingw, _) => mingw_releases().await,
+        (EnvType::Adb, _) => android::releases().await,
     };
 
     let result = result.and_then(|v| if v.is_empty() {
@@ -159,6 +163,7 @@ pub fn download_spec(
         }
     };
     match env_type {
+        EnvType::Adb => android::download_spec(version, url_hint),
         EnvType::Node => {
             let base = if source == SOURCE_MIRROR {
                 "https://npmmirror.com/mirrors/node"

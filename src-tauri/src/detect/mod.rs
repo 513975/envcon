@@ -113,5 +113,6 @@ fn looks_like(env_type: EnvType, root: &Path) -> bool {
         EnvType::Git => file("cmd/git.exe"),
         EnvType::Gh => file("bin/gh.exe"),
         EnvType::Mingw => file("bin/gcc.exe"),
+        EnvType::Adb => system::is_adb_installation(root),
     }
 }

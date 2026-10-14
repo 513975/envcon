@@ -342,12 +342,14 @@ async fn run_install(
                     },
                 ).await;
                 let r = match unzip_result {
-                    Ok(()) => match begin_installing(tasks, id, app, "正在完成安装…", false) {
-                        Ok(()) => tokio::fs::rename(&tmp_dir, &final_dir)
+                    Ok(()) => async {
+                        let version = tasks.lock().unwrap().get(&id).unwrap().snapshot.version.clone();
+                        validate_unpacked(env_type, &version, &tmp_dir).await?;
+                        begin_installing(tasks, id, app, "正在完成安装…", false)?;
+                        tokio::fs::rename(&tmp_dir, &final_dir)
                             .await
-                            .map_err(|e| AppError::msg(format!("移动到最终目录失败: {e}"))),
-                        Err(e) => Err(e),
-                    },
+                            .map_err(|e| AppError::msg(format!("移动到最终目录失败: {e}")))
+                    }.await,
                     Err(e) => Err(e),
                 };
                 // 失败清理
@@ -403,6 +405,19 @@ async fn run_install(
     result
 }
 
+async fn validate_unpacked(env_type: EnvType, version: &str, dir: &Path) -> Result<()> {
+    if env_type == EnvType::Adb {
+        if !crate::detect::system::is_adb_installation(dir) || !dir.join("fastboot.exe").is_file() {
+            return Err(AppError::msg("Platform Tools 安装包不完整，缺少 ADB、Fastboot 或运行库"));
+        }
+        let actual = crate::detect::probe::probe_version(env_type, dir).await;
+        if actual.as_deref() != Some(version) {
+            return Err(AppError::msg(format!("Platform Tools 版本校验失败：预期 {version}，实际 {}", actual.as_deref().unwrap_or("未知"))));
+        }
+    }
+    Ok(())
+}
+
 fn recover_failed_install(final_dir: &Path, result: Result<()>) -> Result<()> {
     let Err(error) = result else { return Ok(()) };
     if !final_dir.try_exists()? {
@@ -455,6 +470,19 @@ mod tests {
             },
             cancel: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    #[tokio::test]
+    async fn adb_archive_validation_rejects_incomplete_or_wrong_release() {
+        let dir = crate::test_support::TestDir::new();
+        for name in ["adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll"] {
+            std::fs::write(dir.path().join(name), b"fixture").unwrap();
+        }
+        std::fs::write(dir.path().join("source.properties"), "Pkg.Revision=36.0.2\n").unwrap();
+        assert!(validate_unpacked(EnvType::Adb, "36.0.2", dir.path()).await.is_err());
+        std::fs::write(dir.path().join("fastboot.exe"), b"fixture").unwrap();
+        assert!(validate_unpacked(EnvType::Adb, "36.0.2", dir.path()).await.is_ok());
+        assert!(validate_unpacked(EnvType::Adb, "36.0.1", dir.path()).await.is_err());
     }
 
     #[test]

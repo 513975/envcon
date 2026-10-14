@@ -63,6 +63,8 @@ function defaultTargetName(envType: EnvType, version: string): string {
       return `gh-${v}`;
     case "mingw":
       return `mingw-${v.split("-")[0]}`;
+    case "adb":
+      return `platform-tools-${v}`;
   }
 }
 
@@ -305,6 +307,7 @@ export function Download() {
           {envType === "jdk" && <p>{source === "mirror" ? "镜像列出常用 LTS 主版本的最新构建；更多主版本请切换官方源。" : "官方列出可用主版本的最新构建，不包含每个历史补丁。"}</p>}
           {envType === "rust" && <p>Rust 按 stable / beta / nightly 渠道安装，由 rustup 获取对应最新版本。</p>}
           {["llvm", "deno", "bun", "git", "gh", "mingw"].includes(envType) && <p>GitHub 源查询最近 100 个发布记录后筛选兼容安装包，不代表完整历史归档。</p>}
+          {envType === "adb" && <p>Android SDK Platform Tools，包含 ADB 和 Fastboot。仅列出 Google 当前索引提供的 Windows 稳定版，不代表完整历史版本。使用需遵守 Android SDK 许可条款。</p>}
           {envType === "python" && <p>Python 列表来自版本目录；仅源码发布的安全维护版本可能没有 Windows 安装器。</p>}
           {envType === "maven" && <p>Maven 仅适配 3.x；官方当前分发目录不包含全部历史版本。</p>}
           {versions?.some(v => v.note?.includes("离线缓存")) && <p role="alert" className="text-amber-700 dark:text-amber-400">在线查询失败，正在展示离线缓存，版本可能过期。请检查网络后刷新或切换源。</p>}

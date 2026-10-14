@@ -14,7 +14,8 @@ export type EnvType =
   | "bun"
   | "git"
   | "gh"
-  | "mingw";
+  | "mingw"
+  | "adb";
 
 export const ENV_TYPE_META: Record<
   EnvType,
@@ -35,11 +36,12 @@ export const ENV_TYPE_META: Record<
   git: { label: "Git", folder: "gits", junction: "git", color: "text-lime-700 dark:text-lime-300 bg-lime-100 dark:bg-lime-950/50" },
   gh: { label: "GitHub CLI", folder: "ghs", junction: "gh", color: "text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-950/50" },
   mingw: { label: "C/C++", folder: "mingws", junction: "mingw", color: "text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950/50" },
+  adb: { label: "ADB", folder: "adbs", junction: "adb", color: "text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-950/50" },
 };
 
 export const ALL_ENV_TYPES: EnvType[] = [
   "jdk", "python", "node", "go", "rust", "maven", "gradle",
-  "php", "llvm", "zig", "deno", "bun", "git", "gh", "mingw",
+  "php", "llvm", "zig", "deno", "bun", "git", "gh", "mingw", "adb",
 ];
 
 /** 管理器内的已装环境 */

@@ -19,6 +19,8 @@ src-tauri/target-*/
 # Local dev docs and process notes (not published)
 /docs/*.md
 !/docs/release-0.5.2.md
+!/docs/release-0.5.5.md
+!/docs/adb.md
 !/docs/iteration-0.5.3.md
 !/docs/testing.md
 /findings.md

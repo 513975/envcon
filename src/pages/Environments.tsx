@@ -219,6 +219,7 @@ export function Environments() {
       </div>
 
       {/* 环境列表 */}
+      {tab === "adb" && <p className="mb-3 text-xs text-zinc-500">管理 Android Platform Tools（ADB / Fastboot），已有 SDK 仅链接其 platform-tools 目录。切换版本不重启已运行的 ADB 服务；若版本未生效或卸载提示占用，可自行执行 adb kill-server 后重试。</p>}
       <Card>
         {category?.scanWarning && (
           <div className="px-4 py-2 text-xs text-amber-700 dark:text-amber-300 border-b border-zinc-100 dark:border-zinc-800">

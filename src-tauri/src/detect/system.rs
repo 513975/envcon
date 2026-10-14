@@ -40,6 +40,7 @@ const TOOLS: &[(&str, &str, &[&str], Duration)] = &[
     ("Git", "git", &["--version"], Duration::from_secs(5)),
     (".NET", "dotnet", &["--version"], Duration::from_secs(10)),
     ("Docker", "docker", &["--version"], Duration::from_secs(8)),
+    ("ADB", "adb", &["version"], Duration::from_secs(5)),
 ];
 
 /// 工具名 → 可纳入管理的环境类型(结构不兼容的不支持)
@@ -60,6 +61,7 @@ fn integrable_type(tool: &str) -> Option<EnvType> {
         "Gradle" => Some(EnvType::Gradle),
         "Git" => Some(EnvType::Git),
         "GCC" => Some(EnvType::Mingw),
+        "ADB" => Some(EnvType::Adb),
         _ => None,
     }
 }
@@ -84,11 +86,16 @@ fn looks_like(env_type: EnvType, root: &Path) -> bool {
         EnvType::Gh => has(root.join("bin").join("gh.exe")),
         EnvType::Mingw => has(root.join("bin").join("gcc.exe")),
         EnvType::Rust => is_rust_toolchain(root),
+        EnvType::Adb => is_adb_installation(root),
     }
 }
 
 /// 从 where.exe 定位到的可执行文件推导安装根目录
 pub fn install_root_for(env_type: EnvType, exe: &Path) -> Option<PathBuf> {
+    if env_type == EnvType::Adb {
+        // Only the executable's own directory belongs to this environment, never its SDK parent.
+        return exe.parent().filter(|root| is_adb_installation(root)).map(Path::to_path_buf);
+    }
     if env_type == EnvType::Git {
         // Git for Windows includes wrappers and internal copies under the same root.
         for root in exe.ancestors().skip(2).take(4) {
@@ -121,6 +128,10 @@ pub(crate) fn is_rust_toolchain(root: &Path) -> bool {
     root.join("bin/rustc.exe").is_file()
         && root.join("bin/cargo.exe").is_file()
         && root.join("lib/rustlib").is_dir()
+}
+
+pub(crate) fn is_adb_installation(root: &Path) -> bool {
+    ["adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll"].iter().all(|name| root.join(name).is_file())
 }
 
 async fn rust_toolchain_executable(exe: &Path, discovery: &Discovery) -> Option<PathBuf> {
@@ -336,6 +347,7 @@ async fn probe(tool: &str, exe: &Path, args: &[String], timeout: Duration, disco
 }
 
 fn parse_version(tool: &str, output: &str) -> Option<String> {
+    if tool == "ADB" { return super::probe::adb_output_version(output); }
     let marker = match tool {
         "Java" => Some("version"),
         "Go" => Some("go version"),
@@ -383,6 +395,36 @@ mod tests {
         Discovery { environment: std::env::vars().map(|(k,v)| (k.to_uppercase(),v)).collect(),
             path: std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
             directories: vec![], warnings: vec![] }
+    }
+
+    #[tokio::test]
+    async fn adb_external_platform_tools_lifecycle_preserves_sdk() {
+        let d = crate::test_support::TestDir::new();
+        let sdk = d.path().join("Android SDK");
+        let platform = sdk.join("platform-tools");
+        std::fs::create_dir_all(&platform).unwrap();
+        std::fs::write(sdk.join("keep-sdk.txt"), b"other components").unwrap();
+        let exe = platform.join("adb.exe");
+        std::fs::write(&exe, b"fixture").unwrap();
+        assert!(install_root_for(EnvType::Adb, &exe).is_none());
+        for name in ["AdbWinApi.dll", "AdbWinUsbApi.dll"] { std::fs::write(platform.join(name), b"fixture").unwrap(); }
+        std::fs::write(platform.join("source.properties"), "Pkg.Revision=36.0.2\n").unwrap();
+        assert_eq!(install_root_for(EnvType::Adb, &exe), Some(platform.clone()));
+        assert!(!looks_like(EnvType::Adb, &sdk));
+        let root = d.path().join("managed");
+        let category = root.join("envs/adbs");
+        std::fs::create_dir_all(&category).unwrap();
+        let link = category.join("external");
+        junction::create(&platform, &link).unwrap();
+        crate::switcher::switch(&root, EnvType::Adb, "external").unwrap();
+        assert_eq!(EnvType::Adb.path_entries(&root), vec![root.join("current/adb")]);
+        let overview = crate::detect::scan_root(&root).await;
+        let env = &overview.iter().find(|c| c.env_type == EnvType::Adb).unwrap().envs[0];
+        assert_eq!(env.version.as_deref(), Some("36.0.2"));
+        assert!(env.is_current && env.is_external_link);
+        crate::switcher::remove_junction_for(&root, EnvType::Adb).unwrap();
+        std::fs::remove_dir(&link).unwrap();
+        assert!(exe.is_file() && sdk.join("keep-sdk.txt").is_file());
     }
 
     #[test]

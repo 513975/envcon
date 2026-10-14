@@ -35,6 +35,7 @@ EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JD
 ### 📦 环境管理
 - **0.5.3 首轮持续改进**：启动配置查询合并、环境变量读取去除隐式目录扫描；损坏配置提示与写入保护、上次有效配置恢复、前端旧响应保护。[改进记录](docs/iteration-0.5.3.md) · [测试方式与覆盖](docs/testing.md)。
 - **0.5.4 / IMP-01**：版本化扫描缓存、后台核对、更新时间与失效控制；环境及缓存大小按需统计，支持取消、进度和部分结果。性能实测与打包状态见 [IMP-01 验收记录](docs/imp01.md)，主进度见 [ROADMAP](ROADMAP.md)。
+- **0.5.5 / ADB**：扫描 PATH 和 Android SDK 标准目录，管理、下载、切换及卸载 Platform Tools；已有 SDK 只链接 `platform-tools`，不会删除其他 SDK 组件。[使用与边界](docs/adb.md)。
 - **0.5.2 修订**：明确的卸载/移除管理入口；支持纳入本机 rustup 实际工具链；合并同一 Git 安装的重复入口。[版本说明与验证](docs/release-0.5.2.md)。
 - **多版本并存**:同一类型环境可安装任意多个版本,互不干扰
 - **一键切换**:通过 Junction 指针切换当前版本,无需改动 PATH
@@ -43,7 +44,7 @@ EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JD
 
 ### ⬇️ 下载中心
 - 默认查询官方源，Node 按 Windows x64 ZIP 筛选并提供完整返回列表的分页访问；离线缓存与各源覆盖范围会明确提示。
-- 支持 **15 种**环境类型(见下表)
+- 支持 **16 种**环境类型(见下表)，包含 Android Platform Tools / ADB
 - **镜像加速**:默认走国内镜像源,大幅提升下载速度
 - **并行下载**:多个环境同时下载,实时显示进度与速度
 - **断点反馈**:下载 / 解压 / 安装全流程状态提示
@@ -94,6 +95,7 @@ EnvCon 是一款面向 Windows 的**便携式开发环境管理器**。它把 JD
 | Git | Git for Windows | ghfast.top 加速 |
 | GitHub CLI | 官方发行版 | ghfast.top 加速 |
 | C/C++ | MinGW-w64 (WinLibs, UCRT) | ghfast.top 加速 |
+| ADB | Android SDK Platform Tools | Google 官方 |
 
 ## 工作原理
 

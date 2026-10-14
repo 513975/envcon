@@ -23,7 +23,39 @@ pub async fn probe_version(env_type: EnvType, dir: &Path) -> Option<String> {
         EnvType::Git => probe_git(dir).await,
         EnvType::Gh => probe_gh(dir).await,
         EnvType::Mingw => probe_mingw(dir).await,
+        EnvType::Adb => probe_adb(dir).await,
     }
+}
+
+/// Platform Tools release, not the ADB protocol version (usually 1.0.41).
+pub(crate) fn adb_output_version(output: &str) -> Option<String> {
+    output.lines().map(str::trim).find_map(|line| {
+        line.strip_prefix("Version ").and_then(|value| value.split_whitespace().next())
+            .and_then(|value| adb_release_version(value.split('-').next()?))
+    }).or_else(|| output.lines().map(str::trim).find_map(|line| {
+        line.strip_prefix("Android Debug Bridge version ").and_then(version_token)
+            .map(|version| format!("{version}（ADB 协议；发行版本未知）"))
+    }))
+}
+
+fn adb_release_version(value: &str) -> Option<String> {
+    let parts: Vec<_> = value.trim().split('.').collect();
+    (parts.len() == 3 && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())))
+        .then(|| value.trim().to_string())
+}
+
+async fn probe_adb(dir: &Path) -> Option<String> {
+    if let Ok(properties) = tokio::fs::read_to_string(dir.join("source.properties")).await {
+        for line in properties.lines() {
+            if let Some((key, value)) = line.split_once('=') {
+                if key.trim() == "Pkg.Revision" {
+                    if let Some(version) = adb_release_version(value) { return Some(version); }
+                }
+            }
+        }
+    }
+    let output = run_capture(&dir.join("adb.exe"), &["version"], Duration::from_secs(5)).await.ok()?;
+    adb_output_version(&output)
 }
 
 /// 执行命令并保留 stdout/stderr，避免把启动提示误当版本。
@@ -260,6 +292,16 @@ async fn probe_mingw(dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::version_token;
+
+    #[tokio::test]
+    async fn adb_uses_release_metadata_and_never_confuses_protocol_version() {
+        assert_eq!(super::adb_output_version("Android Debug Bridge version 1.0.41\nVersion 36.0.2-14143358\nInstalled as C:\\sdk\\adb.exe"), Some("36.0.2".into()));
+        assert_eq!(super::adb_output_version("Android Debug Bridge version 1.0.41"), Some("1.0.41（ADB 协议；发行版本未知）".into()));
+        assert_eq!(super::adb_output_version("error 2026.01"), None);
+        let dir = crate::test_support::TestDir::new();
+        std::fs::write(dir.path().join("source.properties"), "# SDK metadata\nPkg.Revision = 36.0.2\n").unwrap();
+        assert_eq!(super::probe_version(crate::types::EnvType::Adb, dir.path()).await.as_deref(), Some("36.0.2"));
+    }
 
     #[test]
     fn extracts_versions_without_accepting_non_versions() {

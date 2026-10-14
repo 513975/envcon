@@ -19,9 +19,10 @@ pub enum EnvType {
     Git,
     Gh,
     Mingw,
+    Adb,
 }
 
-pub const ALL_ENV_TYPES: [EnvType; 15] = [
+pub const ALL_ENV_TYPES: [EnvType; 16] = [
     EnvType::Jdk,
     EnvType::Python,
     EnvType::Node,
@@ -37,6 +38,7 @@ pub const ALL_ENV_TYPES: [EnvType; 15] = [
     EnvType::Git,
     EnvType::Gh,
     EnvType::Mingw,
+    EnvType::Adb,
 ];
 
 impl EnvType {
@@ -58,6 +60,7 @@ impl EnvType {
             EnvType::Git => "gits",
             EnvType::Gh => "ghs",
             EnvType::Mingw => "mingws",
+            EnvType::Adb => "adbs",
         }
     }
 
@@ -79,6 +82,7 @@ impl EnvType {
             EnvType::Git => "git",
             EnvType::Gh => "gh",
             EnvType::Mingw => "mingw",
+            EnvType::Adb => "adb",
         }
     }
 
@@ -104,6 +108,7 @@ impl EnvType {
             EnvType::Git => vec![cur.join("cmd")],
             EnvType::Gh => vec![cur.join("bin")],
             EnvType::Mingw => vec![cur.join("bin")],
+            EnvType::Adb => vec![cur],
         }
     }
 }

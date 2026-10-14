@@ -186,7 +186,7 @@ pub fn fingerprint(root: Option<&Path>, projects: &[PathBuf], config: &crate::co
                 path.canonicalize().ok().hash(&mut hasher);
                 if meta.is_dir() {
                     // Probe files as well as parent timestamps. Unknown deeper installs are caught by the periodic full rescan.
-                    for relative in ["node.exe", "python.exe", "bin/java.exe", "bin/rustc.exe", "bin/cargo.exe", "bin/go.exe", "cmd/git.exe", "release", "VERSION", "pyvenv.cfg", ".npmrc", "package.json"] {
+                    for relative in ["node.exe", "python.exe", "bin/java.exe", "bin/rustc.exe", "bin/cargo.exe", "bin/go.exe", "cmd/git.exe", "adb.exe", "source.properties", "AdbWinApi.dll", "AdbWinUsbApi.dll", "release", "VERSION", "pyvenv.cfg", ".npmrc", "package.json"] {
                         let child = path.join(relative);
                         if let Ok(m) = std::fs::metadata(&child) { relative.hash(&mut hasher); m.len().hash(&mut hasher); m.modified().ok().hash(&mut hasher); }
                     }

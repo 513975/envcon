@@ -19,7 +19,7 @@ struct RegistryVar {
 const PERSISTED_ROOT_VARS: &[&str] = &[
     "JAVA_HOME", "GOROOT", "MAVEN_HOME", "GRADLE_HOME", "CARGO_HOME", "RUSTUP_HOME",
     "VIRTUAL_ENV", "CONDA_PREFIX", "PYTHON_HOME", "PNPM_HOME", "NVM_HOME", "NVM_SYMLINK",
-    "SCOOP", "PHP_HOME", "ZIG_HOME", "LLVM_HOME",
+    "SCOOP", "PHP_HOME", "ZIG_HOME", "LLVM_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT",
 ];
 
 /// 获取注册表合并后的当前有效环境，用于缓存和工具配置读取。
@@ -129,6 +129,10 @@ pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
 
     let home = dirs::home_dir().unwrap_or_default();
     let mut roots = Vec::new();
+    // SDKs can contain millions of build/emulator files; discover only Platform Tools.
+    for dir in android_platform_tools_roots(&result.environment) {
+        result.walk(&dir, 0, "Android SDK", false);
+    }
     for (var, children) in [
         ("ProgramFiles", vec!["nodejs", "Python", "Java", "Eclipse Adoptium", "Go", "Git", "LLVM", "CMake", "dotnet"]),
         ("ProgramFiles(x86)", vec!["Python", "Java", "Git"]),
@@ -170,6 +174,40 @@ pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
     }
     for project in projects { result.walk(project, 6, "项目目录", true); }
     result
+}
+
+fn android_platform_tools_roots(environment: &HashMap<String, String>) -> Vec<PathBuf> {
+    let mut roots: Vec<_> = ["ANDROID_HOME", "ANDROID_SDK_ROOT"].iter()
+        .filter_map(|key| environment.get(*key))
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| PathBuf::from(value).join("platform-tools")).collect();
+    if let Some(local) = environment.get("LOCALAPPDATA") {
+        roots.push(PathBuf::from(local).join("Android/Sdk/platform-tools"));
+    }
+    roots.retain(|root| root.is_absolute());
+    roots.sort_by_key(|root| key(root));
+    roots.dedup_by(|a, b| key(a) == key(b));
+    roots
+}
+
+#[cfg(test)]
+mod android_tests {
+    use super::*;
+
+    #[test]
+    fn adb_sdk_discovery_is_shallow_and_deduplicated() {
+        let dir = crate::test_support::TestDir::new();
+        let sdk = dir.path().join("SDK with spaces");
+        let platform = sdk.join("platform-tools");
+        std::fs::create_dir_all(&platform).unwrap();
+        std::fs::create_dir_all(platform.join("irrelevant")).unwrap();
+        let mut environment = HashMap::new();
+        for name in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] { environment.insert(name.into(), sdk.to_string_lossy().into_owned()); }
+        assert_eq!(android_platform_tools_roots(&environment), vec![platform.clone()]);
+        let mut discovery = Discovery { environment, path: vec![], directories: vec![], warnings: vec![] };
+        discovery.walk(&platform, 0, "Android SDK", false);
+        assert_eq!(discovery.directories, vec![(platform, "Android SDK".into())]);
+    }
 }
 
 pub fn key(path: &Path) -> String {

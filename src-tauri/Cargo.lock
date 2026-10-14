@@ -1031,12 +1031,13 @@ dependencies = [
 
 [[package]]
 name = "envcon"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "dirs",
  "flate2",
  "futures-util",
  "junction",
+ "quick-xml",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3059,6 +3060,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "memchr",
+ "serde",
 ]
 
 [[package]]
