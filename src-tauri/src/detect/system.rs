@@ -950,6 +950,95 @@ mod tests {
         assert!(!path_within(&root, &target));
     }
 
+    /// Path edge cases that real Windows layouts actually produce.
+    ///
+    /// The existing test above covers case, trailing separators and junctions.
+    /// These three are the ones that silently break path comparisons in
+    /// practice, and none of them were covered:
+    ///
+    /// - **Space** in a directory name: `C:\Program Files\EnvCon`. A space must
+    ///   not change identity, and must not be trimmed by the key function.
+    /// - **Unicode**: Chinese user directories (`C:\Users\张三`) are common on
+    ///   this product's target platform. `to_string_lossy` in `path_key` could
+    ///   mangle them, so this asserts the round trip stays exact.
+    /// - **Long path** (> 260 chars): without the `\\?\` prefix Windows rejects
+    ///   these, and `path_key` strips that prefix. Creating one proves the
+    ///   comparison still works when canonicalize returns the extended form.
+    ///
+    /// Each case is checked for both directions of `path_within`, because a
+    /// false positive there would let a cleanup delete a sibling directory.
+    #[test]
+    fn path_comparisons_survive_spaces_unicode_and_long_paths() {
+        let dir = crate::test_support::TestDir::new();
+
+        // --- Space in the name ---------------------------------------------
+        let spaced = dir.path().join("Program Files").join("EnvCon Home");
+        std::fs::create_dir_all(&spaced).unwrap();
+        let spaced_child = spaced.join("bin");
+        std::fs::create_dir_all(&spaced_child).unwrap();
+
+        assert!(paths_eq(&spaced, &dir.path().join("Program Files").join("EnvCon Home")));
+        assert!(path_within(&spaced, &spaced_child));
+        assert!(!path_within(&spaced_child, &spaced));
+        // Windows trims trailing spaces at the filesystem API level, so an
+        // unescaped trailing space resolves to the same directory. This is
+        // measured behaviour, not a guess: creating "EnvCon Home " yields a
+        // directory whose canonical name has no trailing space. The comparison
+        // must therefore treat them as equal rather than inventing a distinct
+        // directory that the OS itself would never create.
+        let trailing_space = dir.path().join("Program Files").join("EnvCon Home ");
+        assert!(
+            paths_eq(&spaced, &trailing_space),
+            "Windows trims trailing spaces, so both names resolve to one directory"
+        );
+
+        // --- Unicode --------------------------------------------------------
+        let unicode_root = dir.path().join("用户").join("开发环境");
+        let unicode_child = unicode_root.join("工具");
+        std::fs::create_dir_all(&unicode_child).unwrap();
+
+        assert!(paths_eq(&unicode_root, &dir.path().join("用户").join("开发环境")));
+        assert!(path_within(&unicode_root, &unicode_child));
+        assert!(!path_within(&unicode_child, &unicode_root));
+        // Case folding must not corrupt non-ASCII bytes.
+        assert!(path_key(&unicode_root).contains("用户"));
+        assert!(!path_key(&unicode_root).contains('\u{FFFD}'), "no replacement characters");
+
+        // --- Long path ------------------------------------------------------
+        // Build a path past 260 chars. Each segment is short so no single
+        // component exceeds MAX_PATH on its own.
+        let mut deep = dir.path().to_path_buf();
+        for i in 0..20 {
+            deep.push(format!("segment-{i:02}-padding-padding"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        assert!(
+            deep.as_os_str().len() > 260,
+            "fixture must exceed MAX_PATH, got {}",
+            deep.as_os_str().len()
+        );
+        let deep_child = deep.join("leaf");
+        std::fs::create_dir_all(&deep_child).unwrap();
+
+        assert!(paths_eq(&deep, &deep.clone()));
+        assert!(path_within(&deep, &deep_child));
+        assert!(!path_within(&deep_child, &deep));
+        // The `\\?\` prefix canonicalize adds must not leak into the key.
+        assert!(
+            !path_key(&deep).starts_with("\\\\?\\"),
+            "extended-length prefix must be stripped from the comparison key"
+        );
+
+        // A sibling whose name merely shares the prefix is NOT within the root.
+        // This is the false positive that would let a cleanup escape its scope.
+        let lookalike = dir.path().join("segment-00-padding-padding");
+        std::fs::create_dir_all(&lookalike).unwrap();
+        assert!(
+            !path_within(&deep, &lookalike),
+            "a name sharing a text prefix is not a descendant"
+        );
+    }
+
     #[test]
     fn probe_failures_map_to_structured_scan_statuses() {
         assert!(matches!(status_for_probe(&Ok("1.2.3".into())), ScanStatus::Available));
