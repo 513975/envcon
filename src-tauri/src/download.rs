@@ -278,12 +278,13 @@ fn unzip_blocking(
         None
     };
 
-    for i in 0..archive.len() {
+    // 用 names 驱动迭代：两个长度在上面的校验循环里必然相等，
+    // 但以 names 为准可以避免"索引越界才暴露不一致"。
+    for (i, name) in names.iter().enumerate() {
         check_canceled(cancel)?;
         let mut entry = archive
             .by_index(i)
             .map_err(|e| AppError::msg(format!("读取条目失败: {e}")))?;
-        let name = &names[i];
 
         let rel = match &top {
             Some(t) if name.starts_with(&format!("{t}/")) || name.as_str() == t.as_str() => {

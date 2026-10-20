@@ -6,6 +6,10 @@ use tokio::process::Command;
 use crate::types::{EnvType, ExternalEnv, ScanReport, ScanRunStatus, ScanStatus, ToolScanSummary};
 use super::discovery::{self, Discovery};
 
+/// 一次扫描中的单条结果：(工具名, 版本探测结果, 路径, 来源, 是否优先)。
+/// 字段多且类型相近，提取别名让 `rows` 的读写不必每次展开完整元组。
+type ScanRow = (String, Result<String, String>, PathBuf, String, bool);
+
 /// 工具定义:(展示名, 可执行名, 版本参数, 版本命令超时)
 const TOOLS: &[(&str, &str, &[&str], Duration)] = &[
     // 语言运行时
@@ -270,7 +274,7 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                     }
                 }
                 let mut seen: Vec<PathBuf> = Vec::new();
-                let mut rows: Vec<(String, Result<String, String>, PathBuf, String, bool)> = Vec::new();
+                let mut rows: Vec<ScanRow> = Vec::new();
                 // Entrypoints that belong to an installation already selected but
                 // report a different version. They are not separate installations,
                 // yet silently dropping the discrepancy would misreport the install.

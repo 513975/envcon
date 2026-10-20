@@ -5,8 +5,13 @@ use std::hash::Hash;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::OnceCell;
 
+/// 一个在途读取：弱引用指向共享的 cell，布尔位记录它是否为强制刷新。
+/// 提取成别名是因为 `Mutex<HashMap<K, (Weak<OnceCell<V>>, bool)>>` 在签名和
+/// 字段声明里都难以一眼读清。
+type Pending<K, V> = HashMap<K, (Weak<OnceCell<V>>, bool)>;
+
 pub struct SingleFlight<K, V> {
-    pending: Mutex<HashMap<K, (Weak<OnceCell<V>>, bool)>>,
+    pending: Mutex<Pending<K, V>>,
 }
 
 impl<K, V> Default for SingleFlight<K, V> {

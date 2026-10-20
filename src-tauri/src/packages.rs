@@ -394,12 +394,16 @@ fn global_rows(tool: &str, source: &Path) -> Result<Vec<InstalledPackage>> {
         .collect())
 }
 
+/// 只读全局包行：(名称, 版本, 说明)。版本与说明在管理器未提供时为空，
+/// 因此是 `Option` 而不是空字符串——两者含义不同。
+pub(crate) type GlobalPackageRow = (String, Option<String>, Option<String>);
+
 /// Read-only global package rows for a given root, without a manager launcher.
 /// Used by the configuration preview; it never installs, updates or deletes.
 pub(crate) fn global_package_rows(
     tool: &str,
     source: &Path,
-) -> Result<Vec<(String, Option<String>, Option<String>)>> {
+) -> Result<Vec<GlobalPackageRow>> {
     Ok(global_rows(tool, source)?
         .into_iter()
         .map(|package| (package.name, package.version, package.detail))
