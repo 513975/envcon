@@ -129,20 +129,37 @@ async fn run_uv_command(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// 恢复单个工具时用到的固定路径集合。
+///
+/// 这几个参数类型完全相同（都是 `&Path`），逐个传参时把 legacy 与 proposed
+/// 传反不会编译失败，只会在运行时动错目录。收进结构体后调用点按字段名书写，
+/// 传错会变成字段名写错，读代码时也能直接看出用的是哪一组。
+struct RecoveryPaths<'a> {
+    root: &'a Path,
+    legacy_bin: &'a Path,
+    legacy_cache: &'a Path,
+    proposed_bin: &'a Path,
+    proposed_cache: &'a Path,
+    executable: &'a Path,
+}
+
 async fn recover_tool<F, Fut>(
     tool: &UvToolLayout,
-    root: &Path,
-    legacy_bin: &Path,
-    legacy_cache: &Path,
-    proposed_bin: &Path,
-    proposed_cache: &Path,
-    executable: &Path,
+    paths: &RecoveryPaths<'_>,
     run: &F,
 ) -> Result<UvRecoveryItem>
 where
     F: Fn(PathBuf, Vec<String>, BTreeMap<String, String>) -> Fut,
     Fut: Future<Output = Result<String>>,
 {
+    let RecoveryPaths {
+        root,
+        legacy_bin,
+        legacy_cache,
+        proposed_bin,
+        proposed_cache,
+        executable,
+    } = *paths;
     let directory = PathBuf::from(&tool.directory);
     let before = inspect_uv_tool(&directory, &tool.name, legacy_bin, proposed_bin);
     if &before != tool {
@@ -327,20 +344,17 @@ where
         ));
     }
 
+    let paths = RecoveryPaths {
+        root: &root,
+        legacy_bin: &legacy_bin,
+        legacy_cache: &legacy_cache,
+        proposed_bin: &proposed_bin,
+        proposed_cache: &proposed_cache,
+        executable: &executable,
+    };
     let mut items = Vec::new();
     for tool in &recoverable {
-        match recover_tool(
-            tool,
-            &root,
-            &legacy_bin,
-            &legacy_cache,
-            &proposed_bin,
-            &proposed_cache,
-            &executable,
-            &run,
-        )
-        .await
-        {
+        match recover_tool(tool, &paths, &run).await {
             Ok(item) => items.push(item),
             Err(error) => items.push(UvRecoveryItem {
                 name: tool.name.clone(),

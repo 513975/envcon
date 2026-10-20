@@ -1912,7 +1912,10 @@ async fn execute_uninstall_with_path(
     validate_uninstall_execution_preview(&preview, &checked)?;
     let mut result = execute_uninstall_scope(root.clone(), env_type, name.clone(), basic).await?;
     apply_path_scope_and_cleanup(
-        &mut result, &preview, plan, &expected, &root, env_type, &name, journal, store,
+        &mut result,
+        UninstallPathScope { preview: &preview, expected: &expected, plan },
+        UninstallTarget { root: &root, env_type, name: &name, journal },
+        store,
     );
     if !result.failed.is_empty() {
         result.status = UninstallResultStatus::Partial;
@@ -2064,7 +2067,10 @@ where
     };
     let result_name = result.name.clone();
     apply_path_scope_and_cleanup(
-        &mut result, &preview, cleanup_plan, &expected, &root, env_type, &result_name, journal, store,
+        &mut result,
+        UninstallPathScope { preview: &preview, expected: &expected, plan: cleanup_plan },
+        UninstallTarget { root: &root, env_type, name: &result_name, journal },
+        store,
     );
     if !result.failed.is_empty() {
         result.status = UninstallResultStatus::Partial;
@@ -2072,17 +2078,33 @@ where
     Ok(result)
 }
 
+/// 卸载预览与据此得出的 PATH 清理计划。
+///
+/// `preview` 与 `expected` 类型完全相同，逐个传参时传反不会编译失败，
+/// 却会让「用户确认的内容」与「当前观察到的内容」互换——两者恰恰是
+/// 用来互相校验的。收进结构体后调用点按字段名书写，传错会变成字段名写错。
+struct UninstallPathScope<'a> {
+    preview: &'a UninstallPreview,
+    expected: &'a UninstallPreview,
+    plan: Option<crate::path_ownership::CleanupPlan>,
+}
+
+/// 本次卸载的目标身份。`root` 与 `journal` 同为 `&Path`，同样有传反风险。
+struct UninstallTarget<'a> {
+    root: &'a Path,
+    env_type: EnvType,
+    name: &'a str,
+    journal: &'a Path,
+}
+
 fn apply_path_scope_and_cleanup(
     result: &mut UninstallResult,
-    preview: &UninstallPreview,
-    plan: Option<crate::path_ownership::CleanupPlan>,
-    expected: &UninstallPreview,
-    root: &Path,
-    env_type: EnvType,
-    name: &str,
-    journal: &Path,
+    scope: UninstallPathScope<'_>,
+    target: UninstallTarget<'_>,
     store: &mut Result<impl crate::path_ownership::PathStore>,
 ) {
+    let UninstallPathScope { preview, expected, plan } = scope;
+    let UninstallTarget { root, env_type, name, journal } = target;
     result.retained.extend(preview.retained.iter().filter(|item| item.resource == OWNED_PATH_RESOURCE).cloned());
     result.retained.extend(preview.legacy_path_entries.iter()
         .filter(|item| !item.path.as_ref().is_some_and(|entry| expected.confirmed_legacy_path_entries.contains(entry)))
