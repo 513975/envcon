@@ -42,6 +42,70 @@ import {
   type ManifestComparison,
 } from "../lib/types";
 
+/** 环境列表的排序方式。只影响本地视图顺序，不改变后端返回。 */
+type EnvSort = "name" | "version" | "status";
+
+/** 按健康状态筛选。`issues` 同时包含 broken 与 inaccessible。 */
+type EnvHealthFilter = "all" | "available" | "issues";
+
+const ENV_SORT_LABEL: Record<EnvSort, string> = {
+  name: "名称",
+  version: "版本",
+  status: "状态",
+};
+
+const ENV_HEALTH_LABEL: Record<EnvHealthFilter, string> = {
+  all: "全部",
+  available: "可用",
+  issues: "有问题",
+};
+
+/**
+ * 对某个分类的环境列表应用搜索、健康过滤与排序。
+ *
+ * 抽成纯函数是为了能直接测：列表视图的规则一旦写错，用户会看到
+ * 「明明装了却搜不到」或「损坏项被排序挤到看不见」，而这类问题
+ * 在 UI 上很难复现。纯函数不依赖 React，也不碰后端。
+ */
+function viewEnvs(
+  envs: ManagedEnv[],
+  query: string,
+  health: EnvHealthFilter,
+  sort: EnvSort,
+): ManagedEnv[] {
+  const needle = query.trim().toLowerCase();
+  const filtered = envs.filter((env) => {
+    if (health === "available" && env.status !== "available") return false;
+    if (health === "issues" && env.status === "available") return false;
+    if (!needle) return true;
+    // 名称之外也匹配路径与版本：用户常常只记得「装在 D 盘」或某个版本号。
+    return (
+      env.name.toLowerCase().includes(needle) ||
+      env.path.toLowerCase().includes(needle) ||
+      (env.version ?? "").toLowerCase().includes(needle)
+    );
+  });
+  const sorted = [...filtered];
+  sorted.sort((a, b) => {
+    if (sort === "version") {
+      // 缺版本的一律排后面，避免 null 混进比较。
+      const va = a.version ?? "";
+      const vb = b.version ?? "";
+      if (!va && !vb) return a.name.localeCompare(b.name);
+      if (!va) return 1;
+      if (!vb) return -1;
+      return vb.localeCompare(va, undefined, { numeric: true }) || a.name.localeCompare(b.name);
+    }
+    if (sort === "status") {
+      // 有问题的排前面：需要处理的项不该排在列表底部。
+      const rank = (env: ManagedEnv) => (env.status === "available" ? 1 : 0);
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    }
+    return a.name.localeCompare(b.name);
+  });
+  return sorted;
+}
+
 export function Environments() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,6 +139,11 @@ export function Environments() {
   const [projectDirs, setProjectDirs] = useState<string[]>(savedProjectDirs);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
   const [integrating, setIntegrating] = useState<string | null>(null);
+  // 环境列表的本地视图选项。这些只在已加载的列表上筛选/排序，
+  // 不触发重新扫描，也不改动后端返回的顺序。
+  const [envQuery, setEnvQuery] = useState("");
+  const [envSort, setEnvSort] = useState<EnvSort>("name");
+  const [envHealth, setEnvHealth] = useState<EnvHealthFilter>("all");
   useScanResult<Overview>("overview", [], setOverview);
   useScanResult<ScanReport>("system", projectDirs, useCallback((report: ScanReport) => {
     setSystemEnvs(report.tools);
@@ -409,6 +478,11 @@ export function Environments() {
   }
 
   const category = overview.categories.find((c) => c.envType === tab);
+  // 视图层的筛选与排序结果。后端返回的顺序保持不变，
+  // 这里只决定「当前这一屏显示什么、按什么顺序」。
+  const visibleEnvs = category
+    ? viewEnvs(category.envs, envQuery, envHealth, envSort)
+    : [];
 
   return (
     <PageShell
@@ -465,6 +539,43 @@ export function Environments() {
 
       {/* 环境列表 */}
       {tab === "adb" && <p className="mb-3 text-xs text-zinc-500">管理 Android Platform Tools（ADB / Fastboot），已有 SDK 仅链接其 platform-tools 目录。切换版本不重启已运行的 ADB 服务；若版本未生效或卸载提示占用，可自行执行 adb kill-server 后重试。</p>}
+      {/* 搜索、排序与健康过滤：只在已加载的列表上生效，不触发重新扫描 */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={envQuery}
+          onChange={(e) => setEnvQuery(e.target.value)}
+          placeholder="搜索名称、路径或版本"
+          aria-label="搜索环境"
+          className="h-8 min-w-40 flex-1 rounded-md border border-zinc-200 bg-white px-2.5 text-xs text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+        />
+        <div className="flex gap-1.5" role="group" aria-label="按健康状态筛选">
+          {(Object.keys(ENV_HEALTH_LABEL) as EnvHealthFilter[]).map((h) => (
+            <SelectionButton
+              key={h}
+              onClick={() => setEnvHealth(h)}
+              selected={envHealth === h}
+            >
+              {ENV_HEALTH_LABEL[h]}
+            </SelectionButton>
+          ))}
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-500">
+          排序
+          <select
+            value={envSort}
+            onChange={(e) => setEnvSort(e.target.value as EnvSort)}
+            aria-label="环境排序方式"
+            className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+          >
+            {(Object.keys(ENV_SORT_LABEL) as EnvSort[]).map((s) => (
+              <option key={s} value={s}>
+                {ENV_SORT_LABEL[s]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <Card>
         {category?.scanWarning && (
           <div className="px-4 py-2 text-xs text-amber-700 dark:text-amber-300 border-b border-zinc-100 dark:border-zinc-800">
@@ -476,9 +587,9 @@ export function Environments() {
             {category.currentError}
           </div>
         )}
-        {category && category.envs.length > 0 ? (
+        {visibleEnvs.length > 0 ? (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {category.envs.map((env) => (
+            {visibleEnvs.map((env) => (
               <div
                 key={env.name}
                 className="grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3.5"
@@ -576,10 +687,19 @@ export function Environments() {
             ))}
           </div>
         ) : (
-          <Empty
-            title={`暂无 ${ENV_TYPE_META[tab].label} 环境`}
-            desc="去下载中心安装一个吧"
-          />
+          // 两种「空」必须区分：本来就没有环境 vs 筛选后没有匹配。
+          // 混为一谈会让用户以为环境丢了，或按错误的提示去下载中心。
+          category && category.envs.length > 0 ? (
+            <Empty
+              title="没有符合筛选条件的环境"
+              desc={`当前筛选：${ENV_HEALTH_LABEL[envHealth]}${envQuery.trim() ? `，关键词「${envQuery.trim()}」` : ""}。共 ${category.envs.length} 个环境被隐藏。`}
+            />
+          ) : (
+            <Empty
+              title={`暂无 ${ENV_TYPE_META[tab].label} 环境`}
+              desc="去下载中心安装一个吧"
+            />
+          )
         )}
       </Card>
 

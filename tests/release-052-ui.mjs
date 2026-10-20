@@ -298,6 +298,49 @@ try {
   );
   await page.evaluate(() => { window.cancelManifestSave = false; });
 
+  // 环境列表的搜索与健康过滤只在本地生效：不重新扫描，也不把筛选空结果
+  // 说成「没有安装」。
+  //
+  // 定位用「重新检测 <名称>」的 aria-label，而不是按文本匹配名称：
+  // 页面上其他地方（修复说明、清单限制）也会出现同样的名字，按文本匹配
+  // 会命中那些隐藏节点。
+  const overviewCallsBefore = await page.evaluate(() =>
+    window.calls.filter(c => c.command === "get_overview").length);
+  const envSearch = page.getByLabel("搜索环境");
+  const rowFor = (name) =>
+    page.getByRole("button", { name: `重新检测 ${name}`, exact: true });
+
+  await envSearch.fill("jdk-owned");
+  await rowFor("jdk-owned").waitFor();
+  assert.equal(
+    await rowFor("jdk-linked").count(),
+    0,
+    "a non-matching environment must be filtered out",
+  );
+  // 筛选后无结果时，不能沿用「暂无环境 / 去下载中心」的文案。
+  await envSearch.fill("does-not-exist");
+  await page.getByText("没有符合筛选条件的环境").waitFor();
+  assert.equal(
+    await page.getByText("去下载中心安装一个吧").count(),
+    0,
+    "a filtered-empty list must not claim the environment is missing",
+  );
+  // 健康过滤：当前环境都可用，选「有问题」应得到空结果。
+  await envSearch.fill("");
+  await rowFor("jdk-owned").waitFor();
+  const healthGroup = page.getByRole("group", { name: "按健康状态筛选" });
+  await healthGroup.getByRole("button", { name: "有问题", exact: true }).click();
+  await page.getByText("没有符合筛选条件的环境").waitFor();
+  await healthGroup.getByRole("button", { name: "全部", exact: true }).click();
+  await rowFor("jdk-owned").waitFor();
+  // 排序默认按名称，且筛选与排序都不触发重新扫描。
+  assert.equal(await page.getByLabel("环境排序方式").inputValue(), "name");
+  assert.equal(
+    await page.evaluate(() => window.calls.filter(c => c.command === "get_overview").length),
+    overviewCallsBefore,
+    "filtering and sorting must not trigger a rescan",
+  );
+
   // 导入比对是只读操作：选文件后恰好比对一次，并如实呈现四类结论。
   const importButton = page.getByRole("button", { name: "导入比对", exact: true });
   await importButton.click();
