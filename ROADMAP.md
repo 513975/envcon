@@ -226,7 +226,7 @@ IMP-02、IMP-03 的包更新/旧包恢复，以及 IMP-04、IMP-07 中复杂生�
 - [x] 首轮 IMP-05-A：配置损坏/新旧 schema/保存失败/恢复与并发查询夹具已通过；新增 npm run verify、前端读缓存及设置 UI 专项；平台边界见 docs/guides/testing.md。
 
 - [ ] 覆盖 Windows 10/11、管理员/普通用户和多个工具版本；每项注明实机、CI 或模拟验证。
-- [ ] 覆盖多卷、空格/Unicode/长路径、只读、权限拒绝、网络盘、junction、符号链接与链接循环。
+- [ ] 覆盖多卷、空格/Unicode/长路径、只读、权限拒绝、网络盘、junction、符号链接与链接循环。（**2026-10-20 部分完成：路径形状夹具**。新增 `path_comparisons_survive_spaces_unicode_and_long_paths`（提交 `0020279`），覆盖三类此前无夹具、且实际最容易出问题的形状：目录名含空格（`Program Files\EnvCon Home`）、非 ASCII 用户目录（`用户\开发环境\工具`）、超过 MAX_PATH 的深路径（20 层、>260 字符）；同时断言「仅共享文本前缀的同级目录不算后代」——这正是会让清理越界的假阳性。写夹具时纠正了我的一个错误假设：**Windows 在文件系统 API 层会裁掉尾随空格**，`EnvCon Home ` 与 `EnvCon Home` 解析到同一目录（实测确认），断言已改为记录该实测行为。**此前已覆盖**：junction（`path_comparisons_normalize_case_trailing_separators_and_junctions`）、链接循环（`scan`/`size_tasks`/`package_scan` 各有一项）、权限拒绝（`package_scan` 的 `permission_denied_is_counted_separately_and_problems_stay_bounded`）。**未覆盖**：多卷、只读目录写入失败、网络盘路径。验证：`cargo test --offline --lib` → **300 passed / 0 failed / 14 ignored**。）
 - [ ] 各管理器使用隔离夹具验证查询、更新、重装、卸载和失败恢复；在线与离线测试分开。
 - [ ] 为解析器增加属性/异常输出测试，为下载增加网络失败、取消、校验失败与重试测试。
 - [x] **将必要测试脚本、夹具和工作流纳入版本控制（2026-10-20 完成）**：已提交 `b620e2e`，纳入 139 个文件（82 新增 / 50 修改 / 7 重命名），包括此前未跟踪的 6 个生产模块（`app_update`、`installer_uninstall`、`link_ownership`、`path_ownership`、`update_journal`、`uv_recovery`）、3 份 Rust 集成测试、3 份 UI 测试、CI workflow、发布脚本与全部证据文件。同时修正 `.gitignore`：`docs/` 重组后原例外规则指向失效旧路径，导致 `docs/README.md` 被误忽略；现改为 `/docs/*.md` + `!/docs/README.md`，子目录内容默认纳入版本控制。验证：`git status` 干净；`scripts/verify-fresh-clone.ps1 -SkipInstall -SkipTests` → passed（22 个必需文件、0 缺失）。
