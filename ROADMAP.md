@@ -28,7 +28,7 @@ PATH-01 的并行安排不等于忽略安全风险：在隔离夹具验收前，
 6. 总览与详细复选框同时维护。总览完成数按已完成条目计，不用代码行数或主观百分比表示进度；新增、拆分条目时更新分母，保留历史 ID。
 7. 实际故障与新发现记录在关联条目和变更日志中。历史完成记录保留，回归问题新增子项或重新打开条目，并说明原因。
 8. 不把本计划当成后台自动监控：实时追踪指每次开发与验证事件发生后同步文档；没有开发活动时不产生虚构进度。
-9. 验证能力限制（本机工具链实测，2026-10-19）：`rustup component list --installed` 仅有 `cargo`/`rust-std`/`rustc`，**`rustfmt` 与 `clippy` 均未安装**，故 `cargo fmt --check` 与 `cargo clippy` 一律无法执行；此前各轮只记录了 fmt 缺失，clippy 从未进入验证集。影响：Rust 侧的格式与静态检查一直是空白，不能读作“已检查且通过”；解除条件为安装对应组件（属修改开发环境，需用户授权）。可用替代验证：`cargo test`、`cargo check`、`tsc --noEmit`、`git diff --check`。
+9. 验证能力（本机工具链实测，2026-10-21 更新）：`rustup component list --installed` 现有 `cargo`/`clippy`/`rust-std`/`rustc`/`rustfmt` 五个组件。**`cargo clippy` 已可用并清零**：首轮 42 个警告，其中 32 个机械问题（needless borrow、redundant closure、chunks_exact、inspect_err 等）由 `--fix` 处理，3 个 type_complexity 提取为命名别名，4 处同类型参数分组为结构体（`InstallRequest`、`RecoveryPaths`、`UninstallPathScope`/`UninstallTarget`、`InstallerUninstallTarget`），2 处 `set_readonly(false)` 属 Windows 语义必要用法并就地 `#[allow]` 说明理由。当前 `cargo clippy --offline --lib` 为 **0 警告**，应纳入常规验证集。**`cargo fmt` 仍未运行**：当前代码不完全符合 rustfmt 默认风格，首次格式化会产生覆盖整个 crate 的 diff，需单独决策并作为独立提交，在此之前不要把它读作「格式已检查」。
 
 ## 暂缓项与重新启动条件
 
