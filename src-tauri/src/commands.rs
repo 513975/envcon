@@ -1485,9 +1485,10 @@ pub async fn uninstall_env(
         ));
     }
     let mut result = if let Some(plan) = installer_plan {
+        let journal = backups.join("ownership/journal.json");
         execute_installer_uninstall_with_path(
-            root, env_type, name, base_preview, plan, crate::installer_uninstall::WindowsBackend,
-            &backups.join("ownership/journal.json"), &mut store,
+            InstallerUninstallTarget { root, env_type, name, journal: &journal },
+            base_preview, plan, crate::installer_uninstall::WindowsBackend, &mut store,
         ).await?
     } else {
         execute_uninstall_with_path(
@@ -1923,19 +1924,28 @@ async fn execute_uninstall_with_path(
     Ok(result)
 }
 
-async fn execute_installer_uninstall_with_path<B>(
+/// 原厂卸载所需的身份与定位信息。
+///
+/// `root` 与 `journal` 同为 `&Path`，`env_type` 与 `name` 一起标识目标；
+/// 逐个传参时把两个路径传反不会编译失败，只会让日志写错位置。
+struct InstallerUninstallTarget<'a> {
     root: PathBuf,
     env_type: EnvType,
     name: String,
+    journal: &'a Path,
+}
+
+async fn execute_installer_uninstall_with_path<B>(
+    target: InstallerUninstallTarget<'_>,
     expected: UninstallPreview,
     plan: crate::installer_uninstall::Plan,
     backend: B,
-    journal: &Path,
     store: &mut Result<impl crate::path_ownership::PathStore>,
 ) -> Result<UninstallResult>
 where
     B: crate::installer_uninstall::Backend + Send + 'static,
 {
+    let InstallerUninstallTarget { root, env_type, name, journal } = target;
     let (mut preview, cleanup_plan) = preview_uninstall_with_path(&root, env_type, &name, journal, store)?;
     validate_uninstall_execution_preview(&expected, &preview)?;
     preview.confirmed_legacy_links = expected.confirmed_legacy_links.clone();
@@ -5546,8 +5556,9 @@ mod tests {
             &fixture, crate::installer_uninstall::RegistrySnapshot::default(), true, 0,
         );
         let result = execute_installer_uninstall_with_path(
-            fixture.root.clone(), EnvType::Llvm, "fixture".into(), fixture.base.clone(),
-            fixture.plan.clone(), backend, &fixture.journal, &mut fixture.store,
+            InstallerUninstallTarget { root: fixture.root.clone(), env_type: EnvType::Llvm, name: "fixture".into(), journal: &fixture.journal },
+            fixture.base.clone(),
+            fixture.plan.clone(), backend, &mut fixture.store,
         ).await.unwrap();
 
         assert_eq!(result.status, UninstallResultStatus::VerifiedScopeRemoved);
@@ -5566,8 +5577,9 @@ mod tests {
         let mut fixture = installer_command_fixture(true);
         let (backend, runs) = installer_backend(&fixture, fixture.snapshot.clone(), false, 1);
         let result = execute_installer_uninstall_with_path(
-            fixture.root.clone(), EnvType::Llvm, "fixture".into(), fixture.base.clone(),
-            fixture.plan.clone(), backend, &fixture.journal, &mut fixture.store,
+            InstallerUninstallTarget { root: fixture.root.clone(), env_type: EnvType::Llvm, name: "fixture".into(), journal: &fixture.journal },
+            fixture.base.clone(),
+            fixture.plan.clone(), backend, &mut fixture.store,
         ).await.unwrap();
 
         assert_eq!(result.status, UninstallResultStatus::Partial);
@@ -5591,8 +5603,9 @@ mod tests {
             };
             let (backend, runs) = installer_backend(&fixture, after, remove_runtime, 0);
             let result = execute_installer_uninstall_with_path(
-                fixture.root.clone(), EnvType::Llvm, "fixture".into(), fixture.base.clone(),
-                fixture.plan.clone(), backend, &fixture.journal, &mut fixture.store,
+                InstallerUninstallTarget { root: fixture.root.clone(), env_type: EnvType::Llvm, name: "fixture".into(), journal: &fixture.journal },
+                fixture.base.clone(),
+                fixture.plan.clone(), backend, &mut fixture.store,
             ).await.unwrap();
             assert_eq!(result.status, UninstallResultStatus::Partial, "{mode}");
             assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -5615,8 +5628,9 @@ mod tests {
         );
         backend.before.records[0].uninstall_command.as_mut().unwrap().push_str(" /S");
         let result = execute_installer_uninstall_with_path(
-            fixture.root.clone(), EnvType::Llvm, "fixture".into(), fixture.base.clone(),
-            fixture.plan.clone(), backend, &fixture.journal, &mut fixture.store,
+            InstallerUninstallTarget { root: fixture.root.clone(), env_type: EnvType::Llvm, name: "fixture".into(), journal: &fixture.journal },
+            fixture.base.clone(),
+            fixture.plan.clone(), backend, &mut fixture.store,
         ).await.unwrap();
         assert_eq!(result.status, UninstallResultStatus::Partial);
         assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 0);
@@ -5632,8 +5646,9 @@ mod tests {
             &fixture, crate::installer_uninstall::RegistrySnapshot::default(), true, 0,
         );
         let result = execute_installer_uninstall_with_path(
-            fixture.root.clone(), EnvType::Llvm, "fixture".into(), fixture.base.clone(),
-            fixture.plan.clone(), backend, &fixture.journal, &mut fixture.store,
+            InstallerUninstallTarget { root: fixture.root.clone(), env_type: EnvType::Llvm, name: "fixture".into(), journal: &fixture.journal },
+            fixture.base.clone(),
+            fixture.plan.clone(), backend, &mut fixture.store,
         ).await.unwrap();
         assert_eq!(result.status, UninstallResultStatus::Partial);
         assert!(result.removed.iter().any(|item| item.resource == "原厂卸载运行时目录"));
