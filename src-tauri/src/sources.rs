@@ -1362,7 +1362,7 @@ async fn php_releases() -> Result<Vec<VersionInfo>> {
 fn parse_php_releases(html: &str) -> Result<Vec<VersionInfo>> {
     // href 形如 /downloads/releases/php-8.4.5-Win32-vs17-x64.zip
     let mut out: Vec<VersionInfo> = Vec::new();
-    for name in extract_all_between(&html, "href=\"", "\"") {
+    for name in extract_all_between(html, "href=\"", "\"") {
         let Some(file) = name.rsplit('/').next() else { continue };
         let Some(rest) = file.strip_prefix("php-") else { continue };
         // 仅取 Thread Safe x64 zip(排除 nts/源码/debug)

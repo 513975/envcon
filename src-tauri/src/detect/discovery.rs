@@ -56,7 +56,7 @@ fn registry_vars(hive: HKEY, key: &str) -> std::io::Result<HashMap<String, Regis
     for entry in key.enum_values() {
         let (name, value) = entry?;
         if !matches!(value.vtype, REG_SZ | REG_EXPAND_SZ) { continue; }
-        let units: Vec<u16> = value.bytes.chunks_exact(2)
+        let units: Vec<u16> = value.bytes.as_chunks::<2>().0.iter()
             .map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
         vars.insert(name.to_uppercase(), RegistryVar {
             value: String::from_utf16_lossy(&units).trim_end_matches('\0').into(),

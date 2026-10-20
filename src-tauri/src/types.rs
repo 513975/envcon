@@ -143,9 +143,11 @@ pub struct UninstallScopeItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum UninstallMode {
     /// Remove the environment content as well as its EnvCon records. This is
     /// the historical behaviour and stays the default.
+    #[default]
     Uninstall,
     /// Keep every file on disk and only drop EnvCon's management records: the
     /// current-version junction and any PATH entry this app can prove it wrote.
@@ -154,11 +156,6 @@ pub enum UninstallMode {
     Detach,
 }
 
-impl Default for UninstallMode {
-    fn default() -> Self {
-        Self::Uninstall
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

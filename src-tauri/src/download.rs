@@ -15,6 +15,12 @@ pub struct DownloadManager {
     pub active: Mutex<Vec<(u64, Arc<AtomicBool>)>>,
 }
 
+impl Default for DownloadManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DownloadManager {
     pub fn new() -> Self {
         Self {

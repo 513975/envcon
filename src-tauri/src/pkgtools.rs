@@ -1035,7 +1035,7 @@ pub(crate) fn path_integration_status_from_entries(
         &entries,
         expected,
         command,
-        |expected, command| command_resolution(expected, command),
+        command_resolution,
         Vec::new(),
     )
 }
@@ -1513,7 +1513,7 @@ pub async fn preview_tool_config(
     let berry = tool == "yarn"
         && version_output
             .as_deref()
-            .and_then(|value| display_version(value))
+            .and_then(display_version)
             .and_then(|value| value.split('.').next().map(str::to_owned))
             .and_then(|value| value.parse::<u32>().ok())
             .is_some_and(|major| major >= 2);
@@ -1542,9 +1542,8 @@ pub async fn preview_tool_config(
             })
             .collect::<Vec<_>>();
         let next = managers::configuration(tool, global_path, cache_path)
-            .map_err(|error| {
+            .inspect_err(|error| {
                 blocked.push(error.to_string());
-                error
             })
             .unwrap_or_default();
         (current, next)
@@ -1578,9 +1577,8 @@ pub async fn preview_tool_config(
             }
             None => Vec::new(),
         };
-        let next = tool_config_settings(tool, global_path, cache_path, berry).map_err(|error| {
+        let next = tool_config_settings(tool, global_path, cache_path, berry).inspect_err(|error| {
             blocked.push(error.to_string());
-            error
         });
         (
             current,

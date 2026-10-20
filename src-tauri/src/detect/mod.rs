@@ -106,7 +106,7 @@ async fn scan_category(root: &Path, env_type: EnvType) -> CategoryOverview {
       Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
       Err(e) => scan_warning = Some(format!("无法读取环境目录: {e}")),
     }
-    envs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    envs.sort_by_key(|a| a.name.to_lowercase());
 
     let current_error = if current.name.is_some() && !envs.iter().any(|env| env.is_current) {
         Some("current 链接目标不可访问，或未登记在此分类中".into())

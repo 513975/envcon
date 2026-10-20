@@ -219,7 +219,7 @@ pub(crate) fn is_reparse_path(path: &Path) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        return meta.file_type().is_symlink() || meta.file_attributes() & 0x400 != 0;
+        meta.file_type().is_symlink() || meta.file_attributes() & 0x400 != 0
     }
     #[cfg(not(windows))]
     {

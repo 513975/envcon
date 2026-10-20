@@ -114,6 +114,12 @@ pub struct TaskManager {
     targets: Arc<Mutex<HashSet<String>>>,
 }
 
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskManager {
     pub fn new() -> Self {
         Self {

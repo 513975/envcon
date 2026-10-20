@@ -3127,7 +3127,7 @@ fn preview_path_repair_with(
     let mut entry = String::new();
     for command in switch_commands(env_type) {
         let expected = env_type
-            .path_entries(&root)
+            .path_entries(root)
             .into_iter()
             .find(|candidate| {
                 crate::pkgtools::launcher_exists(candidate, command, &extensions)
@@ -3149,7 +3149,7 @@ fn preview_path_repair_with(
             &expected,
             &root.join("current").join(env_type.junction()),
         ) && !env_type
-            .path_entries(&root)
+            .path_entries(root)
             .iter()
             .any(|candidate| crate::detect::system::paths_eq(candidate, &expected))
         {
@@ -3950,7 +3950,7 @@ pub async fn apply_tool_config(
                 .to_string_lossy()
                 .into_owned();
             let backups = state.with_cfg(|c| c.backups_dir());
-            let added = pathman::integrate_entries(&[g.clone()], &backups)?;
+            let added = pathman::integrate_entries(std::slice::from_ref(&g), &backups)?;
             if !added.is_empty() {
                 applied.push(format!("已将 {g} 加入用户 PATH"));
             }

@@ -152,7 +152,7 @@ fn encode_reg_string(s: &str) -> Vec<u8> {
 /// 解码 UTF-16LE 注册表字符串(去尾部 null)
 fn decode_reg_string(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let s = String::from_utf16_lossy(&units);
@@ -160,10 +160,10 @@ fn decode_reg_string(bytes: &[u8]) -> String {
 }
 
 fn checked_path_string(bytes: &[u8]) -> Result<String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(crate::error::AppError::msg("PATH 注册表字符串字节长度无效"));
     }
-    let units: Vec<u16> = bytes.chunks_exact(2)
+    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter()
         .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]])).collect();
     let value = String::from_utf16(&units)
         .map_err(|_| crate::error::AppError::msg("PATH 包含无效 UTF-16，已停止写入"))?;

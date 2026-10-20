@@ -495,9 +495,9 @@ pub async fn preview(
         &tool,
         &run(
             &executable,
-            &scratch.path(),
+            scratch.path(),
             &tool,
-            Some(&scratch.path()),
+            Some(scratch.path()),
             &version_args,
             30,
         )
@@ -942,9 +942,9 @@ pub(crate) async fn scanned_cleanup_plan(
         &tool,
         &run(
             &executable,
-            &scratch.path(),
+            scratch.path(),
             &tool,
-            Some(&scratch.path()),
+            Some(scratch.path()),
             &args(&["--version"]),
             30,
         )
@@ -964,7 +964,7 @@ pub(crate) async fn scanned_cleanup_plan(
         cache_path: String::new(),
         packages: vec![],
     };
-    verify_cleanup_scope(&plan, &scratch.path()).await?;
+    verify_cleanup_scope(&plan, scratch.path()).await?;
     Ok(plan)
 }
 
@@ -972,7 +972,7 @@ pub(crate) async fn scanned_cleanup_candidates(
     plan: &Plan,
 ) -> Result<Vec<crate::old_packages::Candidate>> {
     let scratch = cleanup_scratch(&plan.tool, Path::new(&plan.destination))?;
-    verify_cleanup_scope(plan, &scratch.path()).await?;
+    verify_cleanup_scope(plan, scratch.path()).await?;
     let tool = plan.tool.clone();
     let source = PathBuf::from(&plan.source);
     tokio::task::spawn_blocking(move || {
@@ -1030,7 +1030,7 @@ pub(crate) async fn cleanup_candidates(
 ) -> Result<Vec<crate::old_packages::Candidate>> {
     crate::old_packages::verify_separate(Path::new(&plan.source), Path::new(&plan.destination))?;
     let scratch = cleanup_scratch(&plan.tool, Path::new(&plan.destination))?;
-    verify_cleanup_scope(plan, &scratch.path()).await?;
+    verify_cleanup_scope(plan, scratch.path()).await?;
     let old = installed_packages(&plan.tool, Path::new(&plan.source))?;
     let dest = Path::new(&plan.destination);
     let target_root = dest.to_path_buf();
@@ -1120,20 +1120,20 @@ pub(crate) async fn remove_old(
         return Err(AppError::msg("无效包名"));
     }
     let scratch = cleanup_scratch(&plan.tool, Path::new(&plan.destination))?;
-    let scope = verify_cleanup_scope(plan, &scratch.path()).await?;
+    let scope = verify_cleanup_scope(plan, scratch.path()).await?;
     if crate::package_managers::isolated(&plan.tool) {
         crate::package_managers::verify_cleanup_files(&plan.tool, &scope, &package.name)?;
         let request = crate::package_managers::commands::invocation(
             &plan.tool,
             &scope,
-            &scratch.path(),
+            scratch.path(),
             crate::package_managers::commands::Action::Remove(&package.name),
         )?;
         let mut cmd = command(
             Path::new(&plan.executable),
-            &scratch.path(),
+            scratch.path(),
             &plan.tool,
-            Some(&scratch.path()),
+            Some(scratch.path()),
             &request.arguments,
         );
         cmd.envs(request.environment);
@@ -1158,10 +1158,10 @@ pub(crate) async fn remove_old(
     }
     run(
         Path::new(&plan.executable),
-        &scratch.path(),
+        scratch.path(),
         &plan.tool,
-        Some(&scratch.path()),
-        &cleanup_args(&plan.tool, &scope, &scratch.path(), Some(&package.name)),
+        Some(scratch.path()),
+        &cleanup_args(&plan.tool, &scope, scratch.path(), Some(&package.name)),
         180,
     )
     .await?;
