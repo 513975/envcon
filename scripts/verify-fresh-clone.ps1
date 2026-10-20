@@ -41,7 +41,9 @@ $required = @(
     "tests/package-manager-update-ui.mjs",
     "tests/packages-ui.mjs",
     ".github/workflows/windows.yml",
-    "docs/release-process.md",
+    "docs/README.md",
+    "docs/guides/release-process.md",
+    "docs/guides/testing.md",
     "scripts/record-release.ps1",
     "scripts/verify-fresh-clone.ps1"
 )
