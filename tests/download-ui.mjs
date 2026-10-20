@@ -62,6 +62,39 @@ try {
   await page.getByText(/finished-while-away/).first().waitFor();
   await page.getByText(/failed-while-away: fixture failure/).first().waitFor();
   await page.getByText(/安装已取消/).first().waitFor();
+
+  // 剩余时间只在能真实计算时显示。fixture 的下载任务是
+  // downloaded=1, total=10, speed=1 → 还剩 9 字节 / 1 B/s ≈ 9 秒。
+  await page.getByText(/剩余约 9 秒/).first().waitFor();
+  // 安装阶段没有字节数，因此不得出现剩余时间——那是无法计算的情形。
+  const installingRow = page.getByText("Installing", { exact: true });
+  await installingRow.waitFor();
+  assert.equal(
+    await page.getByText(/剩余约/).count(),
+    1,
+    "only the downloading task may show an estimate",
+  );
+
+  // 纯函数的边界：不该给数字时一律返回 null，而不是编一个。
+  const etaCases = await page.evaluate(async () => {
+    const mod = await import("/src/lib/format.ts");
+    return {
+      unknownTotal: mod.formatEta(Number.NaN, 100),
+      zeroSpeed: mod.formatEta(1024, 0),
+      negativeRemaining: mod.formatEta(-1, 100),
+      absurdlySlow: mod.formatEta(1e9, 1),
+      almostDone: mod.formatEta(10, 100),
+      oneMinute: mod.formatEta(90, 1),
+      twoHours: mod.formatEta(7500, 1),
+    };
+  });
+  assert.equal(etaCases.unknownTotal, null, "no total means no estimate");
+  assert.equal(etaCases.zeroSpeed, null, "no speed means no estimate");
+  assert.equal(etaCases.negativeRemaining, null, "nothing remaining means no estimate");
+  assert.equal(etaCases.absurdlySlow, null, "beyond a day is not a useful number");
+  assert.equal(etaCases.almostDone, "即将完成");
+  assert.equal(etaCases.oneMinute, "剩余约 1 分 30 秒");
+  assert.equal(etaCases.twoHours, "剩余约 2 小时 5 分");
   await waitForRequest(1);
   await page.getByRole("button", { name: "Go", exact: true }).click();
   await waitForRequest(2);

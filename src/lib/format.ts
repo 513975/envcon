@@ -11,6 +11,37 @@ export function formatSpeed(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
+/**
+ * 剩余时间估算。只在**能真实计算**时返回结果，否则返回 null。
+ *
+ * 为什么不做平滑：调用方每秒拿到的是瞬时速度，用它算出的 ETA 会来回跳。
+ * 与其在这里假装精确，不如让调用方决定是否显示——本项目的一条既有原则是
+ * 不显示虚假百分比，剩余时间同理。
+ *
+ * 返回 null 的情形（都不应显示数字）：
+ *   - 总大小未知：分母不存在，任何数字都是编的
+ *   - 速度非正：还没开始传输，或连接刚断
+ *   - 已经下完：没有"剩余"
+ *   - 估算超过 24 小时：说明速度极低或刚开始，给一个大数只会误导
+ */
+export function formatEta(
+  remainingBytes: number,
+  bytesPerSec: number,
+): string | null {
+  if (!Number.isFinite(remainingBytes) || remainingBytes <= 0) return null;
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return null;
+  const seconds = remainingBytes / bytesPerSec;
+  if (!Number.isFinite(seconds) || seconds > 86400) return null;
+  if (seconds < 1) return "即将完成";
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `剩余约 ${h} 小时 ${m} 分`;
+  if (m > 0) return `剩余约 ${m} 分 ${s} 秒`;
+  return `剩余约 ${s} 秒`;
+}
+
 export function formatDate(date: string | null | undefined): string {
   if (!date) return "—";
   // A bare year plus time was previously misparsed by JS as January 1 of that year.

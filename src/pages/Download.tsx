@@ -20,7 +20,7 @@ import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { useInstallStore } from "../lib/installStore";
 import { useAppStore } from "../lib/store";
-import { formatBytes, formatSpeed, formatDate, cn } from "../lib/format";
+import { formatBytes, formatSpeed, formatEta, formatDate, cn } from "../lib/format";
 import {
   ALL_ENV_TYPES,
   ENV_TYPE_META,
@@ -253,12 +253,23 @@ export function Download() {
                       value={t.total ? t.downloaded / t.total : 0}
                       indeterminate={!t.total}
                     />
-                    <div className="mt-1 flex justify-between text-xs text-zinc-500">
+                    <div className="mt-1 flex justify-between gap-2 text-xs text-zinc-500">
                       <span>
                         {formatBytes(t.downloaded)}
                         {t.total ? ` / ${formatBytes(t.total)}` : ""}
                       </span>
-                      <span>{t.speed > 0 ? formatSpeed(t.speed) : "连接中…"}</span>
+                      <span className="truncate text-right">
+                        {t.speed > 0 ? formatSpeed(t.speed) : "连接中…"}
+                        {/* 剩余时间只在能真实计算时出现；总大小未知或速度为 0
+                            时不显示，避免给一个编出来的数字。 */}
+                        {(() => {
+                          const eta =
+                            t.total != null
+                              ? formatEta(t.total - t.downloaded, t.speed)
+                              : null;
+                          return eta ? ` · ${eta}` : "";
+                        })()}
+                      </span>
                     </div>
                   </>
                 ) : (
