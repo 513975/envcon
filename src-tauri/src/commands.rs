@@ -3506,11 +3506,13 @@ pub async fn start_install(
     state.tasks.start(
         app,
         cfg,
-        env_type,
-        version,
-        target_name,
-        source,
-        url,
+        crate::install::InstallRequest {
+            env_type,
+            version,
+            target_name,
+            source,
+            url,
+        },
     )
 }
 

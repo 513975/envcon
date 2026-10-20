@@ -144,18 +144,30 @@ impl TaskManager {
             .ok_or_else(|| AppError::msg(format!("任务 {id} 不存在")))?
             .request_cancel()
     }
+}
 
+/// 一次安装请求中由用户选择的字段。
+///
+/// `version`、`target_name` 与 `source` 都是 `String`，逐个传参时把版本号和
+/// 目标目录名传反不会编译失败，只会在磁盘上建出一个以版本号命名的目录。
+/// 收进结构体后调用点按字段名书写。
+pub struct InstallRequest {
+    pub env_type: EnvType,
+    pub version: String,
+    pub target_name: String,
+    pub source: String,
+    pub url: Option<String>,
+}
+
+impl TaskManager {
     /// 启动安装任务(spawn 到后台)
     pub fn start(
         &self,
         app: AppHandle,
         cfg: AppConfig,
-        env_type: EnvType,
-        version: String,
-        target_name: String,
-        source: String,
-        url: Option<String>,
+        request: InstallRequest,
     ) -> Result<u64> {
+        let InstallRequest { env_type, version, target_name, source, url } = request;
         // 预检
         crate::switcher::validate_name(&target_name)?;
         let root = cfg
