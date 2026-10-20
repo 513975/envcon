@@ -3390,6 +3390,8 @@ fn force_remove_dir_all(dir: &Path) -> Result<()> {
             if !is_reparse(&meta) {
                 let mut perms = meta.permissions();
                 if perms.readonly() {
+                    // 同 clear_readonly：只需清除只读位，不重写整个属性字。
+                    #[allow(clippy::permissions_set_readonly_false)]
                     perms.set_readonly(false);
                     let _ = std::fs::set_permissions(p, perms);
                 }

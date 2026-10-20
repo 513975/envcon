@@ -390,6 +390,9 @@ fn clear_readonly(path: &Path) -> std::io::Result<()> {
     let meta = std::fs::metadata(path)?;
     let mut perms = meta.permissions();
     if perms.readonly() {
+        // 只清除只读位，保留其余属性。clippy 建议的 PermissionsExt 在
+        // Windows 上要重写整个属性字，反而可能改动别的位。
+        #[allow(clippy::permissions_set_readonly_false)]
         perms.set_readonly(false);
         std::fs::set_permissions(path, perms)?;
     }
