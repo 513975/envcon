@@ -21,6 +21,7 @@ import { toast } from "../lib/toast";
 import { useInstallStore } from "../lib/installStore";
 import { useAppStore } from "../lib/store";
 import { formatBytes, formatSpeed, formatEta, formatDate, cn } from "../lib/format";
+import { explainError } from "../lib/errorInfo";
 import {
   ALL_ENV_TYPES,
   ENV_TYPE_META,
@@ -340,15 +341,53 @@ export function Download() {
         {loading || !sourcesReady ? (
           <Spinner />
         ) : error ? (
-          <Empty
-            title="版本列表获取失败"
-            desc={error}
-            action={
-              <Button size="sm" variant="primary" onClick={() => load(envType, source)}>
-                重试
-              </Button>
-            }
-          />
+          (() => {
+            const info = explainError(error);
+            return (
+              <div className="py-10 text-center">
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  版本列表获取失败
+                </p>
+                {/* 原因与影响分开写：用户先要知道「发生了什么」，
+                    再判断「这对我意味着什么」。 */}
+                <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400 max-w-md mx-auto">
+                  {info.cause}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500 max-w-md mx-auto">
+                  {info.impact}
+                </p>
+                <p className="mt-3 text-xs text-emerald-700 dark:text-emerald-400 max-w-md mx-auto">
+                  {info.action}
+                </p>
+                {/* 原始后端信息默认收起：它通常很长，但对排查不可替代，
+                    因此保留而不是丢弃。 */}
+                <details className="mt-4 max-w-md mx-auto text-left">
+                  <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                    后端详情
+                  </summary>
+                  <pre className="mt-2 max-h-40 overflow-auto rounded bg-zinc-50 p-2 text-[11px] leading-relaxed text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400 whitespace-pre-wrap break-all">
+                    {error}
+                  </pre>
+                </details>
+                <div className="mt-4 flex justify-center gap-2">
+                  <Button size="sm" variant="primary" onClick={() => load(envType, source)}>
+                    {info.retry ? "重试" : "重新加载列表"}
+                  </Button>
+                  {source !== "official" && (
+                    <Button size="sm" onClick={() => setSource("official")}>
+                      切换到官方来源
+                    </Button>
+                  )}
+                </div>
+                {!info.retry && (
+                  // 校验类错误原样重试没有意义，明确说出来比让用户反复点更有用。
+                  <p className="mt-2 text-[11px] text-zinc-400">
+                    此错误重试同一来源不会改变结果，请先刷新列表或更换来源。
+                  </p>
+                )}
+              </div>
+            );
+          })()
         ) : filtered.length === 0 ? (
           <Empty title="没有匹配的版本" />
         ) : (

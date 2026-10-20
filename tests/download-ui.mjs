@@ -95,6 +95,34 @@ try {
   assert.equal(etaCases.almostDone, "即将完成");
   assert.equal(etaCases.oneMinute, "剩余约 1 分 30 秒");
   assert.equal(etaCases.twoHours, "剩余约 2 小时 5 分");
+
+  // 错误分类只依据后端稳定前缀，认不出时如实说「未识别」而不是编一个原因。
+  const errorCases = await page.evaluate(async () => {
+    const mod = await import("/src/lib/errorInfo.ts");
+    return {
+      network: mod.explainError("网络错误: error sending request for url (https://x)"),
+      permission: mod.explainError("权限不足（退出码 5）"),
+      verify: mod.explainError("下载校验资料无效：SHA-256 必须是 64 位十六进制值"),
+      unknown: mod.explainError("something unexpected"),
+      empty: mod.explainError(""),
+    };
+  });
+  assert.equal(errorCases.network.kind, "network");
+  assert.equal(errorCases.network.retry, true, "a network error is worth retrying");
+  assert.equal(errorCases.permission.kind, "permission");
+  assert.equal(errorCases.verify.kind, "verification");
+  assert.equal(
+    errorCases.verify.retry,
+    false,
+    "retrying the same source cannot fix a checksum mismatch",
+  );
+  assert.equal(errorCases.unknown.kind, "unknown");
+  assert.equal(
+    errorCases.unknown.cause,
+    "未识别的错误。",
+    "an unrecognised error must not be given an invented cause",
+  );
+  assert.equal(errorCases.empty.kind, "unknown");
   await waitForRequest(1);
   await page.getByRole("button", { name: "Go", exact: true }).click();
   await waitForRequest(2);
