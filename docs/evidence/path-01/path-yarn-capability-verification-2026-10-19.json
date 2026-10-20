@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01-C/D: version-aware Yarn migration capability, plus PATH-01-j read-only command-resolution priority check",
+  "status": "implemented-and-isolated-ui-verified; real Yarn Berry install, real registry/new-terminal comparison and where.exe cross-check not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.8",
+  "sourceHashes": {
+    "src-tauri/src/migration.rs": "8c8d8903873845ad2cee4d32a819d4b822255fe83f535bfd795f7b1b56f485f8",
+    "src-tauri/src/commands.rs": "54f1e7157e32dff35210efe4fac48be0d03ffbdcd793ac843bc95c58343d46a7",
+    "src-tauri/src/pkgtools.rs": "f270662f271f507dc620c369d62e1b5ebf787c8388e81a2fb5eaf5bc50a17d91",
+    "src/components/ToolMigration.tsx": "acd84bfd291535c4a728a6180bf045aa4b7ac5e829523ccddfe6e16f8a47b29d",
+    "tests/packages-ui.mjs": "29a5a3f31425923558fa2c9140a6e7d29e6df94f0e295b13ecf98f8cf0ead4d9"
+  },
+  "implementation": [
+    "migration::Capabilities expresses version-dependent semantics the static catalog cannot hold; for_tool derives yarn_berry from a major version >= 2",
+    "migration::preview and migration::execute take Capabilities and refuse Yarn Berry global-kind migration before touching any directory",
+    "commands::preview_tool_migration and commands::migrate_tool_data resolve the version from the exact executable that will run, not from the catalog",
+    "ToolMigration hides the classic global-directory radio and explains why when the selected Yarn reports 2+",
+    "PATH-01-j CommandResolution/launcher_statuses resolve launchers read-only through system-then-user PATH order and report managed/shadowed/missing",
+    "apply_tool_config reports directory membership, resolved command target and any shadowed launcher inside the managed entry"
+  ],
+  "fixtures": [
+    "migration::tests::yarn_berry_never_migrates_global_folder_as_a_classic_install_root",
+    "migration::tests::capabilities_recognize_classic_and_berry_versions",
+    "pkgtools::tests::command_resolution_detects_shadowed_managed_entry_and_missing_command",
+    "pkgtools::tests::launcher_statuses_report_each_entry_and_skip_shadowed_ones",
+    "pkgtools::tests::registry_path_order_and_variable_expansion_match_a_new_terminal"
+  ],
+  "uiCoverage": {
+    "packages-ui": "yarn fixture reports 4.1.0; opening 迁移数据 shows only the cache kind, no 全局包目录 radio, and the Berry explanation; the scenario is part of the nine-suite run"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "235 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml migration::tests -- --test-threads=1",
+      "result": "9 passed / 0 failed / 240 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 657ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real Yarn Classic or Berry installation was configured; the Berry branch was exercised only through fixtures and the simulated UI",
+    "No real registry/PATH comparison or where.exe cross-check for command resolution",
+    "No packaging, tagging or release"
+  ],
+  "incident": "While bulk-editing migration.rs test calls, a PowerShell replacement with -NoNewline collapsed the file into one line. The file was removed and rebuilt from the content already read, then re-verified by the full Rust suite. No repository artifact of the collapsed state remains."
+}

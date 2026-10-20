@@ -14,7 +14,7 @@ try {
     window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (name, args) => {
       if (name === "query_scan") {
         if (args.cachedOnly) return null;
-        const env = name => ({ name, envType: "node", path: `D:/fixture/envs/nodes/${name}`, version: "24.0.0", sizeBytes: null, sizeComplete: false, status: "available", isCurrent: false, isExternalLink: false });
+        const env = name => ({ name, envType: "node", path: `D:/fixture/envs/nodes/${name}`, version: "24.0.0", sizeBytes: null, sizeComplete: false, status: "available", isCurrent: false, isLinkEntry: false, isExternalLink: false });
         const value = args.kind === "overview" ? { root: "D:/fixture", rootExists: true, dataDir: "D:/fixture/data", categories: [{ envType: "node", current: null, envs: [env("node-24"), env("node-22")] }] } : args.kind === "system" ? { tools: [], warnings: [] } : args.kind === "caches" ? [{ tool: "npm", name: "npm", path: "D:/fixture/cache/npm", exists: true, sizeBytes: null, sizeComplete: false }] : [];
         return { value, updatedAt: Date.now(), durationMs: 1, warning: null };
       }
@@ -43,7 +43,7 @@ try {
   await page.getByRole("button", { name: "统计 node-24 大小", exact: true }).click();
   await page.getByText("1 文件 / 1 目录", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "统计 node-22 大小", exact: true }).isDisabled(), true);
-  await page.getByRole("button", { name: "包管理器", exact: true }).click();
+  await page.locator("aside").getByRole("button", { name: "包管理器", exact: true }).click();
   await page.getByRole("tab", { name: "路径与迁移", exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "统计 npm 大小", exact: true }).isDisabled(), true);
   await page.getByRole("button", { name: "环境管理", exact: true }).click();
@@ -57,7 +57,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "tests/artifacts/sizes-mobile.png", fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-  await page.getByRole("button", { name: "包管理器", exact: true }).click();
+  await page.locator("aside").getByRole("button", { name: "包管理器", exact: true }).click();
   await page.getByRole("button", { name: "统计 npm 大小", exact: true }).click();
   assert.equal(await page.evaluate(() => window.sizeStarts.length), 3);
   await page.getByRole("button", { name: "取消大小统计", exact: true }).filter({ visible: true }).click();

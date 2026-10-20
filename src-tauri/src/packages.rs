@@ -213,7 +213,7 @@ pub async fn list_scope(
         warnings: vec![],
     };
     if crate::package_managers::isolated(tool) {
-        let (configured, _, error) = pkgtools::values(&inv, tool).await;
+        let (configured, _, _, error) = pkgtools::values(&inv, tool).await;
         let source = directory
             .clone()
             .or_else(|| configured.map(PathBuf::from))
@@ -391,6 +391,18 @@ fn global_rows(tool: &str, source: &Path) -> Result<Vec<InstalledPackage>> {
             path: path.map(|p| p.to_string_lossy().into()),
             detail: p.reason,
         })
+        .collect())
+}
+
+/// Read-only global package rows for a given root, without a manager launcher.
+/// Used by the configuration preview; it never installs, updates or deletes.
+pub(crate) fn global_package_rows(
+    tool: &str,
+    source: &Path,
+) -> Result<Vec<(String, Option<String>, Option<String>)>> {
+    Ok(global_rows(tool, source)?
+        .into_iter()
+        .map(|package| (package.name, package.version, package.detail))
         .collect())
 }
 

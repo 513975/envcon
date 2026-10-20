@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02: package-manager self-update gets a read-only preview before any command runs",
+  "status": "implemented-with-isolated-and-ui-fixtures; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "reviewFindings": {
+    "alreadyCovered": [
+      "IMP-02 line 324 (distinguish self-update from global package upgrade): pkgtools::self_update_command returns explicit reasons for pipx/Cargo/.NET and the UI disables the button, covered by the existing suite.",
+      "IMP-02 line 327 partial (no command success == updated): PackageManagerUpdateStatus already separates commandFailed, verificationFailed, versionChanged, versionUnchanged and versionUnknown."
+    ],
+    "realGap": "Clicking '更新当前工具' executed the update immediately. The user could not see which program and arguments would run, where the installation lived, or whether the command targets the same file or an interpreter, before the write happened. IMP-02 line 326 requires a preview of path, source and impact."
+  },
+  "implementation": {
+    "newCommand": "preview_package_manager_update -> PackageManagerUpdatePreview { tool, blocked, executablePath, currentVersion, updateProgram, updateArguments, runsSameFile, notes }",
+    "readOnly": "The preview resolves the invocation, reads --version (read-only) and derives the command. It never runs the updater and writes nothing.",
+    "sharedBlocker": "package_manager_update_blocker is called by both the preview and the real executor, so the preview cannot promise an update the executor would reject. It also refuses an unparseable yarn version instead of assuming Classic.",
+    "runsSameFile": "Computed by comparing the exact updater program with the resolved command, so pip is correctly reported as updating through its interpreter rather than replacing its own file.",
+    "explicitlyNoTargetVersion": "The preview states that the target version is unknown because these managers expose no remote latest-version query. It never guesses a number.",
+    "ui": "PackageManagers: the button now opens a preview dialog showing current version, installation path, the exact command line, and the notes. A blocked manager shows the reason and disables execution. Cancel leaves everything untouched.",
+    "adoptedBlockedReason": "The preview surfaces the pipx/Cargo/.NET reasons and the Yarn Berry rule in the same place."
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "268 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "commands": [
+        "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml update_preview -- --test-threads=1",
+        "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml update_blocker -- --test-threads=1"
+      ],
+      "result": "1 passed each"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 647ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/package-manager-update-ui.mjs",
+      "result": "PASS"
+    },
+    "uiSuite": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "no whitespace errors (only LF/CRLF notices)"
+    },
+    "newFixtures": [
+      "commands::tests::update_preview_describes_the_command_without_claiming_a_target_version",
+      "commands::tests::update_blocker_matches_the_executor_for_berry_yarn_only"
+    ],
+    "uiAssertionsAdded": [
+      "opening the preview performs zero update calls",
+      "the dialog shows the exact 'install --global npm@latest' command, the installation path and the current version",
+      "cancelling the dialog still performs zero update calls",
+      "four executions require four confirmations, and the cancelled preview is the only extra preview call",
+      "pipx never requests a preview because its button is disabled"
+    ]
+  },
+  "notes": [
+    "The preview runs one process (--version) so it can report the current version and apply the Yarn Berry rule. It does not run the updater.",
+    "The target version stays unknown by design; no remote latest-version API is consulted.",
+    "Rollback (IMP-02 line 327 'save a manifest and recovery plan before executing') is still not implemented: an update has no undo path here.",
+    "Downgrade/dependency-change limitations (line 328) remain undocumented in the UI."
+  ],
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "7e1f91f3b40de243c9e0ef0be11056f6726287e42a98104df46611d12eaeea94",
+    "src-tauri/src/lib.rs": "9ad1824a616acd458acba2e64b4743d0ae495910366311c370883c55b5886a13",
+    "src/lib/types.ts": "5367869df813e28037db41e99c4827c9c6167932374196ee12583b3e6823bf99",
+    "src/lib/api.ts": "2d018157fc40d52a86f5037e5fb8c7d60e42d03cbacfc80034cd7b69b6f8885d",
+    "src/pages/PackageManagers.tsx": "1e4336226f183aefb4f10e37860ffee1c5679e0b8c06bf9072245e3f86610ef8",
+    "tests/package-manager-update-ui.mjs": "e59956715dd8c4698bb1b081a5fb65807359ba724222a383cd3aa19c8db3b8c6"
+  },
+  "notVerified": [
+    "No real package manager was updated; the preview and execution paths are exercised through a mocked IPC layer and pure-function fixtures.",
+    "The preview's process call (--version) was not run against a real manager inside the test suite.",
+    "Windows real-machine behaviour for a manager that changes during the preview-to-confirm window is not covered.",
+    "No packaging, tagging or release."
+  ],
+  "limitations": [
+    "The preview and the execution are two separate calls; the manager could change between them. The executor re-reads the version and re-resolves the invocation, but there is no token binding the two.",
+    "Target version is always reported as unknown.",
+    "There is no update rollback."
+  ]
+}

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use tokio::process::Command;
 
-use crate::types::{EnvType, ExternalEnv, ScanReport};
+use crate::types::{EnvType, ExternalEnv, ScanReport, ScanRunStatus, ScanStatus, ToolScanSummary};
 use super::discovery::{self, Discovery};
 
 /// 工具定义:(展示名, 可执行名, 版本参数, 版本命令超时)
@@ -110,7 +110,7 @@ pub fn install_root_for(env_type: EnvType, exe: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     match dir_name.as_deref() {
         // exe 位于 bin\ / cmd\ 下:安装根目录一般是其父级
-        Some("bin") | Some("cmd") => {
+        Some("bin") | Some("cmd") | Some("scripts") => {
             if let Some(p) = dir.parent() {
                 candidates.push(p.to_path_buf());
             }
@@ -155,13 +155,9 @@ async fn rust_toolchain_executable(exe: &Path, discovery: &Discovery) -> Option<
 }
 
 fn scan_identity(tool: &str, path: &Path) -> PathBuf {
-    // Git for Windows exposes cmd/git.exe and bin/git.exe for the same installation.
-    let identity = if tool == "Git" {
-        install_root_for(EnvType::Git, path).unwrap_or_else(|| path.to_path_buf())
-    } else if tool == "Python" {
-        return path.parent().and_then(|p| p.canonicalize().ok())
-            .map(|p| p.join(path.file_name().unwrap())).unwrap_or_else(|| path.to_path_buf());
-    } else { path.to_path_buf() };
+    let identity = integrable_type(tool)
+        .and_then(|kind| install_root_for(kind, path))
+        .unwrap_or_else(|| path.to_path_buf());
     identity.canonicalize().unwrap_or(identity)
 }
 
@@ -176,17 +172,63 @@ pub(crate) fn path_key(p: &Path) -> String {
             .to_string()
 }
 
+fn canonicalize_nearest_existing(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let mut candidate = absolute.clone();
+    let mut suffix = Vec::new();
+    loop {
+        if let Ok(mut canonical) = candidate.canonicalize() {
+            for component in suffix.iter().rev() {
+                canonical.push(component);
+            }
+            return canonical;
+        }
+        let Some(name) = candidate.file_name() else {
+            return absolute;
+        };
+        suffix.push(name.to_os_string());
+        if !candidate.pop() {
+            return absolute;
+        }
+    }
+}
+
 pub(crate) fn paths_eq(a: &Path, b: &Path) -> bool {
-    path_key(a) == path_key(b)
+    path_key(&canonicalize_nearest_existing(a)) == path_key(&canonicalize_nearest_existing(b))
 }
 
 pub(crate) fn path_within(root: &Path, candidate: &Path) -> bool {
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let candidate = candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf());
+    let root = canonicalize_nearest_existing(root);
+    let candidate = canonicalize_nearest_existing(candidate);
     let root_key = path_key(&root);
     let candidate_key = path_key(&candidate);
     candidate_key == root_key
         || candidate_key.strip_prefix(&root_key).is_some_and(|rest| rest.starts_with('\\'))
+}
+
+pub(crate) fn is_reparse_path(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return meta.file_type().is_symlink() || meta.file_attributes() & 0x400 != 0;
+    }
+    #[cfg(not(windows))]
+    {
+        meta.file_type().is_symlink()
+    }
+}
+
+pub(crate) fn has_reparse_component(path: &Path) -> bool {
+    path.ancestors().any(is_reparse_path)
 }
 
 /// Refresh persisted PATH, then discover installed and selected project tools.
@@ -195,7 +237,12 @@ pub async fn scan_system(managed_root: Option<&Path>, integrated: &[PathBuf], pr
     let projects = projects.to_vec();
     let discovery = match tokio::task::spawn_blocking(move || discovery::discover(root.as_deref(), &projects)).await {
         Ok(value) => value,
-        Err(e) => return ScanReport { tools: vec![], warnings: vec![format!("扫描目录失败: {e}")] },
+        Err(e) => return ScanReport {
+            core_tools: unscanned_core_summaries(),
+            tools: vec![],
+            status: ScanRunStatus::Failed,
+            warnings: vec![format!("扫描目录失败: {e}")],
+        },
     };
     scan_discovered(managed_root, integrated, discovery).await
 }
@@ -224,14 +271,41 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                 }
                 let mut seen: Vec<PathBuf> = Vec::new();
                 let mut rows: Vec<(String, Result<String, String>, PathBuf, String, bool)> = Vec::new();
+                // Entrypoints that belong to an installation already selected but
+                // report a different version. They are not separate installations,
+                // yet silently dropping the discrepancy would misreport the install.
+                let mut conflicts: std::collections::HashMap<usize, Vec<crate::types::VersionConflict>> =
+                    std::collections::HashMap::new();
                 for (path, source, preferred) in paths {
                     let path = if tool == "Rust" {
                         rust_toolchain_executable(&path, discovery).await.unwrap_or(path)
                     } else { path };
                     let resolved = scan_identity(tool, &path);
                     let git_result = if tool == "Git" { Some(probe(tool, &path, &ver_args, timeout, discovery).await) } else { None };
-                    if let Some(existing) = seen.iter().enumerate().position(|(i, p)| paths_eq(p, &resolved)
-                        && git_result.as_ref().is_none_or(|result| rows.get(i).is_some_and(|r| &r.1 == result))) {
+                    if let Some(existing) = seen.iter().position(|p| paths_eq(p, &resolved)) {
+                        // Same installation, another launcher: probe it so a version
+                        // mismatch is reported instead of guessed away.
+                        let probe_result = match git_result {
+                            Some(result) => result,
+                            None => probe(tool, &path, &ver_args, timeout, discovery).await,
+                        };
+                        let selected = rows[existing].1.clone();
+                        let differs = match (&selected, &probe_result) {
+                            (Ok(a), Ok(b)) => a != b,
+                            (Ok(_), Err(_)) | (Err(_), Ok(_)) => true,
+                            (Err(_), Err(_)) => false,
+                        };
+                        if differs {
+                            let entry = conflicts.entry(existing).or_default();
+                            let path_text = path.to_string_lossy().into_owned();
+                            if !entry.iter().any(|item| item.path == path_text) {
+                                entry.push(crate::types::VersionConflict {
+                                    path: path_text,
+                                    version: probe_result.as_ref().ok().cloned(),
+                                    error: probe_result.as_ref().err().cloned(),
+                                });
+                            }
+                        }
                         // 同一文件从项目目录和 PATH 同时发现时，项目来源优先，
                         // 防止纳入管理资格依赖遍历顺序。
                         if source == "项目目录" {
@@ -240,18 +314,32 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                                 row.4 = false;
                             }
                         }
+                        // Git exposes several launchers under one install root. Keep one
+                        // installation record and prefer a working explicit launcher.
+                        if tool == "Git" && probe_result.is_ok() {
+                            if let Some(row) = rows.get_mut(existing).filter(|row| row.1.is_err()) {
+                                row.1 = probe_result;
+                                row.2 = path;
+                                row.3 = source;
+                                row.4 = row.4 || preferred;
+                            }
+                        }
                         continue;
                     }
                     seen.push(resolved);
                     let result = match git_result { Some(result) => result, None => probe(tool, &path, &ver_args, timeout, discovery).await };
                     rows.push((tool.to_string(), result, path, source, preferred));
                 }
-                rows
+                (rows, conflicts)
             }
         });
         let results = futures_util::future::join_all(futs).await;
 
-        for (tool, result, p, source, preferred) in results.into_iter().flatten() {
+        for (rows, conflicts) in results {
+            for (row_index, (tool, result, p, source, preferred)) in
+                rows.into_iter().enumerate()
+            {
+            let row_conflicts = conflicts.get(&row_index).cloned().unwrap_or_default();
             let healthy = result.is_ok();
             let install = integrable_type(&tool).and_then(|t| install_root_for(t, &p));
             let env_type = integrable_type(&tool).filter(|&_t| {
@@ -264,6 +352,7 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                         && !install.join("conda-meta").is_dir()
                 })
             });
+            let scan_status = status_for_probe(&result);
             let (version, error) = match result { Ok(v) => (Some(v), None), Err(e) => (None, Some(e)) };
             let path = p.to_string_lossy().to_string();
             let identity_path = p.canonicalize().ok().map(|v| v.to_string_lossy().to_string());
@@ -272,11 +361,13 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
                 version,
                 command: format!("\"{path}\""),
                 path: Some(path), source,
-                is_preferred: preferred, error,
+                is_preferred: preferred, error, scan_status,
                 env_type,
                 install_root: install.map(|v| v.to_string_lossy().to_string()),
                 identity_path,
+                version_conflicts: row_conflicts,
             });
+            }
         }
     }
     // Module invocation belongs to this interpreter even when no pip launcher exists.
@@ -286,17 +377,183 @@ async fn scan_discovered(managed_root: Option<&Path>, integrated: &[PathBuf], di
         let rows = futures_util::future::join_all(batch.iter().map(|(python, source)| async {
             let args = vec!["-m".into(), "pip".into(), "--version".into()];
             let result = probe("pip (Python 模块)", python, &args, Duration::from_secs(10), &discovery).await;
+            let scan_status = status_for_probe(&result);
             let (version, error) = match result { Ok(v) => (Some(v), None), Err(e) => (None, Some(e)) };
             let path = python.to_string_lossy().to_string();
             ExternalEnv { tool: "pip (Python 模块)".into(), version, path: Some(path.clone()),
                 command: format!("\"{path}\" -m pip"), source: source.clone(),
-                is_preferred: false, error, env_type: None,
+                is_preferred: false, error, scan_status, env_type: None,
                 install_root: python.parent().map(|p| p.to_string_lossy().to_string()),
-                identity_path: python.canonicalize().ok().map(|p| p.to_string_lossy().to_string()) }
+                identity_path: python.canonicalize().ok().map(|p| p.to_string_lossy().to_string()),
+                version_conflicts: Vec::new() }
         })).await;
         out.extend(rows);
     }
-    ScanReport { tools: out, warnings: discovery.warnings }
+
+    let mut warnings = discovery.warnings;
+    warnings.extend(uv_layout_warnings(managed_root, &discovery.environment));
+    // A same-installation version mismatch is a data-integrity observation, not a
+    // failure: report it so the scan is not presented as fully consistent.
+    for row in out.iter().filter(|row| !row.version_conflicts.is_empty()) {
+        let listed = row
+            .version_conflicts
+            .iter()
+            .take(3)
+            .map(|conflict| match (&conflict.version, &conflict.error) {
+                (Some(version), _) => format!("{} 报告 {version}", conflict.path),
+                (None, Some(error)) => format!("{} 无法读取版本（{error}）", conflict.path),
+                (None, None) => format!("{} 版本未知", conflict.path),
+            })
+            .collect::<Vec<_>>()
+            .join("；");
+        warnings.push(format!(
+            "{} 的同一安装存在版本不一致的入口：{}（共 {} 个）；已保留一条安装记录，未合并为不同版本",
+            row.tool,
+            listed,
+            row.version_conflicts.len()
+        ));
+    }
+    let status = if warnings.is_empty() && out.iter().all(|row| matches!(row.scan_status, ScanStatus::Available)) {
+        ScanRunStatus::Complete
+    } else {
+        ScanRunStatus::Partial
+    };
+    ScanReport {
+        core_tools: summarize_core_tools(&out),
+        tools: out,
+        status,
+        warnings,
+    }
+}
+
+fn uv_layout_warnings(
+    managed_root: Option<&Path>,
+    environment: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(value) = environment.get("UV_TOOL_DIR") {
+        let path = PathBuf::from(value);
+        if path.is_absolute() {
+            candidates.push(path);
+        }
+    }
+    if let Some(root) = managed_root {
+        candidates.push(root.join("globals/uv-global"));
+    }
+    if let Some(data) = environment.get("APPDATA") {
+        let path = PathBuf::from(data).join("uv/tools");
+        if path.is_absolute() {
+            candidates.push(path);
+        }
+    }
+    let mut seen: Vec<PathBuf> = Vec::new();
+    let mut warnings = Vec::new();
+    for path in candidates {
+        if seen
+            .iter()
+            .any(|entry| crate::detect::system::paths_eq(entry, &path))
+        {
+            continue;
+        }
+        seen.push(path.clone());
+        if !path.is_dir() || crate::detect::system::is_reparse_path(&path) {
+            continue;
+        }
+        match crate::package_managers::inspect_uv_layout(&path) {
+            Ok(layout) if layout.status != "clean" => {
+                let recoverable = layout
+                    .tools
+                    .iter()
+                    .filter(|tool| tool.needs_recovery && tool.recoverable)
+                    .count();
+                let blocked = layout
+                    .tools
+                    .iter()
+                    .filter(|tool| tool.needs_recovery && !tool.recoverable)
+                    .count();
+                warnings.push(format!(
+                    "uv 工具目录 {} 检测到旧嵌套布局：{} 个工具可规划恢复，{} 个需人工核对。请在包管理器页面确认后恢复；本次扫描未把它当作正常布局。",
+                    path.display(),
+                    recoverable,
+                    blocked
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => warnings.push(format!(
+                "无法检查 uv 旧布局 {}: {error}",
+                path.display()
+            )),
+        }
+    }
+    warnings
+}
+
+const CORE_TOOLS: &[(&str, &str)] = &[
+    ("Git", "Git"),
+    ("GitHub CLI", "GitHub CLI"),
+    ("Node.js", "Node.js"),
+    ("Python", "Python"),
+    ("Java", "JDK"),
+    ("Go", "Go"),
+    ("Rust", "Rust"),
+];
+
+fn unscanned_core_summaries() -> Vec<ToolScanSummary> {
+    CORE_TOOLS.iter()
+        .map(|(_, label)| ToolScanSummary {
+            tool: (*label).into(),
+            status: ScanStatus::Unscanned,
+            entry_count: 0,
+            detail: Some("扫描未完成，未取得工具状态".into()),
+        })
+        .collect()
+}
+
+fn summarize_core_tools(rows: &[ExternalEnv]) -> Vec<ToolScanSummary> {
+    CORE_TOOLS.iter().map(|(tool, label)| {
+        let entries: Vec<_> = rows.iter().filter(|row| row.tool == *tool).collect();
+        let status = if entries.is_empty() {
+            ScanStatus::NotDiscovered
+        } else if entries.iter().any(|row| row.scan_status == ScanStatus::Available) {
+            ScanStatus::Available
+        } else {
+            [
+                ScanStatus::PermissionDenied,
+                ScanStatus::TimedOut,
+                ScanStatus::StartFailed,
+                ScanStatus::CommandFailed,
+                ScanStatus::ParseFailed,
+            ].into_iter().find(|status| entries.iter().any(|row| row.scan_status == *status))
+                .unwrap_or(ScanStatus::NotDiscovered)
+        };
+        let detail = if status == ScanStatus::Available {
+            None
+        } else {
+            let errors: Vec<_> = entries.iter().filter_map(|row| row.error.as_deref()).take(3).collect();
+            if !errors.is_empty() {
+                Some(errors.join("；"))
+            } else if status == ScanStatus::NotDiscovered {
+                Some(
+                "在本次扫描范围（PATH、常见安装目录、受管目录及所选项目目录）内未发现；其他位置未作全盘扫描".into()
+                )
+            } else {
+                None
+            }
+        };
+        let entry_count = entries.iter().filter(|row| row.path.is_some()).count();
+        ToolScanSummary { tool: (*label).into(), status, entry_count, detail }
+    }).collect()
+}
+
+fn status_for_probe(result: &std::result::Result<String, String>) -> ScanStatus {
+    match result {
+        Ok(_) => ScanStatus::Available,
+        Err(error) if error.contains("权限不足") || error.contains("拒绝访问") => ScanStatus::PermissionDenied,
+        Err(error) if error.contains("超时") => ScanStatus::TimedOut,
+        Err(error) if error.starts_with("无法启动") => ScanStatus::StartFailed,
+        Err(error) if error.contains("退出码") => ScanStatus::CommandFailed,
+        Err(_) => ScanStatus::ParseFailed,
+    }
 }
 
 fn find_executable(dir: &Path, exe: &str, discovery: &Discovery) -> Option<PathBuf> {
@@ -332,13 +589,23 @@ async fn probe(tool: &str, exe: &Path, args: &[String], timeout: Duration, disco
     }
     let out = tokio::time::timeout(timeout, command.output()).await
         .map_err(|_| format!("版本探测超时（{} 秒）", timeout.as_secs()))?
-        .map_err(|e| format!("无法启动: {e}"))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                format!("权限不足，无法启动: {e}")
+            } else {
+                format!("无法启动: {e}")
+            }
+        })?;
     if !out.status.success() {
         let message = String::from_utf8_lossy(&out.stderr);
         let fallback = String::from_utf8_lossy(&out.stdout);
         let detail = if message.trim().is_empty() { fallback.as_ref() } else { message.as_ref() };
         let detail = if detail.trim().is_empty() { "命令未提供错误输出" } else { detail };
-        return Err(format!("命令退出码 {}: {}", out.status.code().unwrap_or(-1), detail.chars().take(800).collect::<String>().trim()));
+        let code = out.status.code().unwrap_or(-1);
+        if code == 5 || detail.to_lowercase().contains("access is denied") || detail.to_lowercase().contains("permission denied") {
+            return Err(format!("权限不足（退出码 {code}）: {}", detail.chars().take(800).collect::<String>().trim()));
+        }
+        return Err(format!("命令退出码 {code}: {}", detail.chars().take(800).collect::<String>().trim()));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -450,7 +717,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn git_entrypoints_merge_but_distinct_installs_and_failures_remain() {
+    async fn git_entrypoints_merge_distinct_installs_and_prefer_a_working_launcher() {
         let d = crate::test_support::TestDir::new();
         let first = d.path().join("git-one");
         let second = d.path().join("git-two");
@@ -469,15 +736,228 @@ mod tests {
         let git: Vec<_> = report.tools.iter().filter(|r| r.tool == "Git").collect();
         assert_eq!(git.len(), 2);
         assert!(git[0].is_preferred);
-        std::fs::write(first.join("cmd/git.cmd"), "@echo off\r\necho unavailable 1>&2\r\nexit /b 3\r\n").unwrap();
+        for folder in ["cmd", "bin"] {
+            std::fs::write(first.join(folder).join("git.cmd"), "@echo off\r\necho unavailable 1>&2\r\nexit /b 3\r\n").unwrap();
+        }
         let mut discovery = fixture();
         discovery.environment.insert("PATHEXT".into(), ".CMD;.EXE".into());
         discovery.path = vec![first.join("cmd"), first.join("bin")];
         let report = scan_discovered(None, &[], discovery).await;
         let git: Vec<_> = report.tools.iter().filter(|r| r.tool == "Git").collect();
-        assert_eq!(git.len(), 2);
+        assert_eq!(git.len(), 1);
         assert!(git[0].error.is_some());
-        assert!(git[1].error.is_none());
+        assert_eq!(git[0].scan_status, ScanStatus::CommandFailed);
+    }
+
+    #[tokio::test]
+    async fn core_summary_marks_only_scanned_range_without_claiming_global_absence() {
+        let report = scan_discovered(None, &[], Discovery {
+            environment: std::collections::HashMap::new(),
+            path: vec![],
+            directories: vec![],
+            warnings: vec![],
+        }).await;
+        assert!(report.tools.is_empty());
+        assert!(matches!(report.status, ScanRunStatus::Complete));
+        let git = report.core_tools.iter().find(|row| row.tool == "Git").unwrap();
+        assert!(matches!(git.status, ScanStatus::NotDiscovered));
+        assert_eq!(git.entry_count, 0);
+        assert!(git.detail.as_deref().unwrap().contains("扫描范围"));
+    }
+
+    #[tokio::test]
+    async fn scan_warns_about_legacy_uv_layouts_seen_in_the_effective_environment() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("uv-tools");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(root.join("cache")).unwrap();
+        let environment = std::collections::HashMap::from([
+            ("UV_TOOL_DIR".into(), root.to_string_lossy().into_owned()),
+            ("PATHEXT".into(), ".CMD;.EXE".into()),
+        ]);
+        let report = scan_discovered(None, &[], Discovery {
+            environment,
+            path: vec![],
+            directories: vec![],
+            warnings: vec![],
+        }).await;
+        assert!(matches!(report.status, ScanRunStatus::Partial));
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("uv 工具目录") && warning.contains("旧嵌套布局")));
+
+        let clean = dir.path().join("uv-clean");
+        std::fs::create_dir_all(clean.join("tool/Lib/site-packages")).unwrap();
+        let environment = std::collections::HashMap::from([
+            ("UV_TOOL_DIR".into(), clean.to_string_lossy().into_owned()),
+            ("PATHEXT".into(), ".CMD;.EXE".into()),
+        ]);
+        let report = scan_discovered(None, &[], Discovery {
+            environment,
+            path: vec![],
+            directories: vec![],
+            warnings: vec![],
+        }).await;
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains(&clean.to_string_lossy().to_string())));
+    }
+
+    #[tokio::test]
+    async fn same_installation_entrypoints_with_different_versions_are_reported() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("shared-node");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        // Two launchers under one install root report different versions.
+        std::fs::write(root.join("node.exe"), b"fixture marker").unwrap();
+        std::fs::write(root.join("node.cmd"), "@echo off\r\necho v22.1.0\r\n").unwrap();
+        std::fs::write(root.join("bin/node.cmd"), "@echo off\r\necho v20.0.0\r\n").unwrap();
+        let mut discovery = Discovery {
+            environment: std::collections::HashMap::from([("PATHEXT".into(), ".CMD;.EXE".into())]),
+            path: vec![root.clone()],
+            directories: vec![(root.join("bin"), "常见安装".into())],
+            warnings: vec![],
+        };
+        discovery.environment.insert("PATH".into(), String::new());
+        let report = scan_discovered(None, &[], discovery).await;
+
+        let nodes: Vec<_> = report.tools.iter().filter(|row| row.tool == "Node.js").collect();
+        // One installation record, as before.
+        assert_eq!(nodes.len(), 1, "same install must stay a single record");
+        let conflicts = &nodes[0].version_conflicts;
+        assert_eq!(conflicts.len(), 1, "the other launcher differs: {conflicts:?}");
+        assert!(conflicts[0].path.ends_with("bin\\node.cmd") || conflicts[0].path.ends_with("bin/node.cmd"));
+        assert_eq!(conflicts[0].version.as_deref(), Some("20.0.0"));
+        // The scan must not present itself as fully consistent.
+        assert!(matches!(report.status, ScanRunStatus::Partial));
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("版本不一致") && warning.contains("Node.js")));
+    }
+
+    #[tokio::test]
+    async fn identical_versions_across_entrypoints_produce_no_conflict() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("shared-node");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(root.join("node.exe"), b"fixture marker").unwrap();
+        std::fs::write(root.join("node.cmd"), "@echo off\r\necho v22.1.0\r\n").unwrap();
+        std::fs::write(root.join("bin/node.cmd"), "@echo off\r\necho v22.1.0\r\n").unwrap();
+        let mut discovery = Discovery {
+            environment: std::collections::HashMap::from([("PATHEXT".into(), ".CMD;.EXE".into())]),
+            path: vec![root.clone()],
+            directories: vec![(root.join("bin"), "常见安装".into())],
+            warnings: vec![],
+        };
+        discovery.environment.insert("PATH".into(), String::new());
+        let report = scan_discovered(None, &[], discovery).await;
+        let node = report.tools.iter().find(|row| row.tool == "Node.js").unwrap();
+        assert!(node.version_conflicts.is_empty(), "{:?}", node.version_conflicts);
+        assert!(!report.warnings.iter().any(|warning| warning.contains("版本不一致")));
+    }
+
+    #[tokio::test]
+    async fn core_tool_aliases_dedupe_by_installation_but_keep_distinct_roots() {
+        let dir = crate::test_support::TestDir::new();
+        let shared = dir.path().join("shared-node");
+        let separate = dir.path().join("separate-node");
+        for root in [&shared, &separate] {
+            std::fs::create_dir_all(root.join("bin")).unwrap();
+            std::fs::write(root.join("node.exe"), b"fixture marker").unwrap();
+            std::fs::write(root.join("node.cmd"), "@echo off\r\necho v22.1.0\r\n").unwrap();
+        }
+        std::fs::write(shared.join("bin/node.cmd"), "@echo off\r\necho v22.1.0\r\n").unwrap();
+        let mut discovery = Discovery {
+            environment: std::collections::HashMap::from([("PATHEXT".into(), ".CMD;.EXE".into())]),
+            path: vec![shared.clone()],
+            directories: vec![
+                (shared.join("bin"), "常见安装".into()),
+                (separate.clone(), "另一安装".into()),
+            ],
+            warnings: vec![],
+        };
+        discovery.environment.insert("PATH".into(), String::new());
+        let report = scan_discovered(None, &[], discovery).await;
+        let nodes: Vec<_> = report.tools.iter().filter(|row| row.tool == "Node.js").collect();
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.iter().all(|row| row.scan_status == ScanStatus::Available));
+        let summary = report.core_tools.iter().find(|row| row.tool == "Node.js").unwrap();
+        assert!(matches!(summary.status, ScanStatus::Available));
+        assert_eq!(summary.entry_count, 2);
+        assert!(nodes.iter().any(|row| row.install_root.as_deref() == Some(shared.to_string_lossy().as_ref())));
+        assert!(nodes.iter().any(|row| row.install_root.as_deref() == Some(separate.to_string_lossy().as_ref())));
+    }
+
+    #[test]
+    fn core_tool_install_identity_uses_canonical_install_roots() {
+        let dir = crate::test_support::TestDir::new();
+        let cases = [
+            ("Git", "gits", "cmd/git.exe", &["cmd/git.exe", "bin/git.exe"][..]),
+            ("GitHub CLI", "gh", "bin/gh.exe", &["bin/gh.exe"][..]),
+            ("Node.js", "node", "node.exe", &["node.exe", "bin/node.exe"][..]),
+            ("Python", "python", "python.exe", &["python.exe"][..]),
+            ("Java", "jdk", "bin/java.exe", &["bin/java.exe"][..]),
+            ("Go", "go", "bin/go.exe", &["bin/go.exe"][..]),
+            ("Rust", "rust", "bin/rustc.exe", &["bin/rustc.exe"][..]),
+        ];
+        for (tool, name, marker, aliases) in cases {
+            let root = dir.path().join(name);
+            std::fs::create_dir_all(root.join("bin")).unwrap();
+            if tool == "Git" {
+                std::fs::create_dir_all(root.join("cmd")).unwrap();
+                std::fs::write(root.join(marker), b"").unwrap();
+            } else if tool == "GitHub CLI" {
+                std::fs::create_dir_all(root.join("bin")).unwrap();
+                std::fs::write(root.join(marker), b"").unwrap();
+            } else if tool == "Python" || tool == "Node.js" {
+                std::fs::write(root.join(marker), b"").unwrap();
+            } else if tool == "Java" {
+                std::fs::write(root.join("bin/java.exe"), b"").unwrap();
+                std::fs::write(root.join("bin/javac.exe"), b"").unwrap();
+            } else if tool == "Go" {
+                std::fs::write(root.join("bin/go.exe"), b"").unwrap();
+            } else {
+                std::fs::write(root.join("bin/rustc.exe"), b"").unwrap();
+                std::fs::write(root.join("bin/cargo.exe"), b"").unwrap();
+                std::fs::create_dir_all(root.join("lib/rustlib")).unwrap();
+            }
+            let expected = root.canonicalize().unwrap();
+            let identities: Vec<_> = aliases.iter().map(|alias| scan_identity(tool, &root.join(alias))).collect();
+            assert!(identities.iter().all(|identity| paths_eq(identity, &expected)), "{tool}: {identities:?}");
+        }
+    }
+
+    #[test]
+    fn path_comparisons_normalize_case_trailing_separators_and_junctions() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("Globals/uv-global");
+        let target = dir.path().join("Globals/uv-global-bin");
+        let link = dir.path().join("Links/UV-BIN");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        junction::create(&target, &link).unwrap();
+
+        let upper_root = PathBuf::from(format!("{}\\", root.to_string_lossy().to_uppercase()));
+        let upper_root_again = PathBuf::from(format!("{}\\\\", root.to_string_lossy().to_uppercase()));
+        assert!(paths_eq(&root, &upper_root));
+        assert!(paths_eq(&upper_root, &upper_root_again));
+        assert!(paths_eq(&target, &link));
+        assert!(path_within(&root, &root.join("missing/child")));
+        assert!(!path_within(&root, &target));
+    }
+
+    #[test]
+    fn probe_failures_map_to_structured_scan_statuses() {
+        assert!(matches!(status_for_probe(&Ok("1.2.3".into())), ScanStatus::Available));
+        assert!(matches!(status_for_probe(&Err("权限不足（退出码 5）".into())), ScanStatus::PermissionDenied));
+        assert!(matches!(status_for_probe(&Err("无法启动: missing".into())), ScanStatus::StartFailed));
+        assert!(matches!(status_for_probe(&Err("命令退出码 1: bad".into())), ScanStatus::CommandFailed));
+        assert!(matches!(status_for_probe(&Err("版本命令输出无法解析".into())), ScanStatus::ParseFailed));
+        assert!(matches!(status_for_probe(&Err("版本探测超时（5 秒）".into())), ScanStatus::TimedOut));
     }
 
     #[tokio::test]

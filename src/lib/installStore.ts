@@ -8,6 +8,8 @@ interface InstallState {
   tasks: Record<number, InstallTask>;
   apply: (t: InstallTask) => void;
   remove: (id: number) => void;
+  /** Hide a finished task locally without discarding the backend record. */
+  dismiss: (id: number) => void;
   init: () => Promise<void>;
 }
 
@@ -21,11 +23,31 @@ export const useInstallStore = create<InstallState>((set) => ({
       delete tasks[id];
       return { tasks };
     }),
+  dismiss: (id) =>
+    set((s) => {
+      const tasks = { ...s.tasks };
+      const task = tasks[id];
+      // A running task must never be hidden by a stale timer.
+      if (task && (task.status === "downloading" || task.status === "installing")) {
+        return { tasks };
+      }
+      delete tasks[id];
+      return { tasks };
+    }),
   init: async () => {
     try {
       const list = await api.installTasks();
-      set({
-        tasks: Object.fromEntries(list.map((t) => [t.id, t])),
+      // Merge instead of replacing: a task finished while this request was in
+      // flight must not be dropped from the store.
+      set((s) => {
+        const tasks = { ...s.tasks };
+        for (const task of list) {
+          const existing = tasks[task.id];
+          if (!existing || existing.status !== "done" || task.status !== "done") {
+            tasks[task.id] = task;
+          }
+        }
+        return { tasks };
       });
     } catch (e) {
       toast.error("读取安装任务失败", String(e));

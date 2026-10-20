@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3-h / UNINST-01 production installer-uninstall execution chain and isolated fixtures",
+  "status": "implemented-and-isolated-ui-verified; real installer execution and Windows VM acceptance not verified",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "7a61d2a3205fda87245a5af28b96488fbca540e8f584d39546439bc7e3b0cf70",
+    "src-tauri/src/installer_uninstall.rs": "ac84d30fa75a9d18cedb90ab4cc60b4daa484e86286eee991303b8371d1c5b05",
+    "src-tauri/src/reinstall_process.rs": "a7f02dd86c6ffed0b80b6a388169d82c1e4d88803830b8b338ac3a2cd8ad1bd1",
+    "src/pages/Environments.tsx": "1f6d9c7d7cdbb6db78425b39de6d134cfbfb40e846cec5d03d961eed7cb26429",
+    "tests/release-052-ui.mjs": "55cdef96767ec6e491ff6babadc877ac6bb0b6d0515518926ff1f4934e2522cd",
+    "ROADMAP.md": "a075d46865cff731e9ee0379de6a661d43de5abc39fed70120eb391482a2afed"
+  },
+  "implementation": [
+    "ready installer plans run the exact registered EXE with a fixed argument vector; no shell or msiexec guessing",
+    "production runner uses a 15-minute timeout and kill-on-close Job Object for descendant processes",
+    "execute re-reads the registry and compares the complete plan plus the uninstaller SHA-256 immediately before starting",
+    "EnvCon-owned current Junction is removed and verified before the original uninstaller runs",
+    "post-execution checks require both the matching registration and the selected runtime directory to be absent",
+    "nonzero exit, 3010, residual registration/runtime, recheck failure, Junction failure and PATH write failure are reported as partial",
+    "ready plans are explicitly rejected by the recursive-directory removal path",
+    "PATH cleanup is attempted only after the installer scope is fully verified; shared or unconfirmed entries remain retained"
+  ],
+  "fixtures": [
+    "commands::tests::installer_ready_preview_uses_original_entry_and_rejects_directory_fallback",
+    "commands::tests::installer_success_removes_registration_runtime_junction_and_owned_path",
+    "commands::tests::installer_command_failure_keeps_runtime_path_and_never_recursively_deletes",
+    "commands::tests::installer_success_exit_still_requires_registration_and_runtime_absence",
+    "commands::tests::installer_preflight_change_blocks_command_and_keeps_directory",
+    "commands::tests::installer_path_cleanup_failure_is_partial_after_verified_original_uninstall",
+    "commands::tests::installer_current_junction_removal_failure_is_reported_before_command",
+    "reinstall_process::tests::blocking_timeout_terminates_descendant_processes",
+    "installer_uninstall::tests::execution_rechecks_plan_and_binary_before_calling_any_runner",
+    "installer_uninstall::tests::successful_exit_is_insufficient_without_both_registration_and_runtime_removal"
+  ],
+  "commands": [
+    {
+      "command": "cargo test --offline --lib installer -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "21 passed; 0 failed; 217 filtered out"
+    },
+    {
+      "command": "cargo test --offline --lib reinstall_process::tests::blocking_timeout_terminates_descendant_processes -- --exact --nocapture",
+      "workingDirectory": "src-tauri",
+      "result": "1 passed; 0 failed; 237 filtered out"
+    },
+    {
+      "command": "npm run verify (ENVCON_PLAYWRIGHT_MODULE=Codex runtime Playwright module)",
+      "workingDirectory": "workspace root",
+      "result": "Rust 225 passed; 0 failed; 13 ignored; 1708-module production build; two read-state tests and nine UI suites PASS"
+    },
+    {
+      "command": "npm run build",
+      "workingDirectory": "workspace root",
+      "result": "1708 modules transformed; built in 730ms"
+    },
+    {
+      "command": "cargo check --offline",
+      "workingDirectory": "src-tauri",
+      "result": "0 errors; 1 existing dead-code warning (path_ownership::preview_cleanup)"
+    },
+    {
+      "command": "git diff --check",
+      "workingDirectory": "workspace root",
+      "result": "exit code 0"
+    },
+    {
+      "command": "cargo fmt --check",
+      "workingDirectory": "src-tauri",
+      "result": "not executable: cargo-fmt.exe is not installed for stable-x86_64-pc-windows-msvc"
+    }
+  ],
+  "verifiedInIsolation": [
+    "exact ready registration and action are shown; recursive directory removal is rejected",
+    "successful command plus absent registration and absent runtime produces verifiedInstallerScopeRemoved",
+    "command failure leaves the runtime directory in place and performs no recursive cleanup",
+    "exit code 0 alone is insufficient when the registration or runtime remains",
+    "registry changes between preview and execution block the command",
+    "PATH write failure after verified installer removal returns partial and preserves the PATH entry",
+    "blocking process runner terminates the descendant process tree on timeout"
+  ],
+  "notVerified": [
+    "running a real Python or LLVM original uninstaller",
+    "Windows VM clean install, uninstall, residual-file behavior and directory-external side effects",
+    "real user PATH or registry mutation",
+    "packaging, signing and publishing"
+  ],
+  "blockedBy": [
+    "no usable Windows VM/authorized real-uninstall test environment",
+    "R0 external validation and R0-R2 stage gates remain open",
+    "code signing and formal release upload require external credentials/authorization"
+  ]
+}

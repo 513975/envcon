@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 350: a failed version probe now reports why it failed, instead of only that it failed",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "gapClosed": "The scan reported 版本探测失败，无法确认环境可用性 for every probe failure. run_capture_with_env already distinguished timeout, launch failure and non-zero exit with stderr, but probe_version returned Option and discarded all of it. A user with a broken environment could not tell a missing binary from a hung process from a CLI that exited with an error.",
+  "implementation": {
+    "VersionProbe": "New struct { version: Option<String>, reason: Option<String> } where exactly one side is populated, so a caller can never be told both ok and why-not.",
+    "probe_version_with_reason": "Reason-aware entry point. probe_version is kept as a thin Option-shaped wrapper so existing callers (install.rs, commands.rs) are untouched and cannot change behaviour.",
+    "probe_simple": "Generic single-command probe that names the entry it tried: a missing file yields 缺少可执行文件：<path>, a failed launch or timeout yields <label> 失败：<reason from run_capture>, and unparseable output yields <label> 的输出没有可识别版本：<snippet>.",
+    "coverage": "Python, Node, Zig, Deno, Bun, Php, Llvm, Git, Gh and Mingw run through probe_simple and therefore report real reasons. Jdk, Go, Rust, Maven, Gradle and Adb keep the original file-parsing or multi-attempt probes and report 未取得版本；此类型目前不提供结构化原因 — an honest absence rather than a fabricated guess.",
+    "snippet": "Failure output is flattened to one line and capped at 120 characters so a multi-line stderr never floods the status text.",
+    "scanWiring": "scan_category formats status_detail as 版本探测失败：<reason> when a reason exists, and keeps 版本探测失败，无法确认环境可用性 otherwise. The structural failure branch is unchanged."
+  },
+  "fixtures": [
+    {
+      "name": "detect::probe::tests::failed_probes_report_a_reason_instead_of_a_bare_verdict",
+      "asserts": [
+        "a missing node.exe names the exact path in the reason",
+        "a present but unrunnable node.exe reports node --version 失败 from the launch failure rather than a guess",
+        "version and reason are mutually exclusive",
+        "Maven, whose probe parses files, says 不提供结构化原因 instead of inventing one"
+      ]
+    },
+    {
+      "name": "detect::probe::tests::probe_version_keeps_its_option_contract",
+      "asserts": [
+        "probe_version still returns Some for a valid ADB source.properties",
+        "probe_version still returns None for an empty Node directory"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "296 passed / 0 failed / 14 ignored",
+      "note": "run standalone so the exit code is cargo test's own"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml detect::probe -- --test-threads=1",
+      "result": "5 passed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors, 0 warnings"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/detect/probe.rs src-tauri/src/detect/mod.rs",
+      "result": "exit 0, CRLF notice only"
+    }
+  },
+  "sourceHashes": {
+    "src-tauri/src/detect/probe.rs": "9194211e3c84a49ee3da4a14d10bd6e1562d0351db9d73940d4a92f9e733cdeb",
+    "src-tauri/src/detect/mod.rs": "668a0dfbbd45c50d3b099364aacac5af03341adb5ea61b272a0b980304ad93e9"
+  },
+  "notVerified": [
+    "No real failing installation was probed: both fixtures synthesize the failure (absent file, non-executable file)",
+    "The timeout branch of run_capture_with_env is exercised elsewhere (detect::system::tests::reports_start_failure_timeout_and_empty_output) but not through probe_simple's label formatting",
+    "No UI fixture asserts the new status_detail text; the environments page already renders statusDetail"
+  ],
+  "limitations": [
+    "Six environment types still report no structured reason because their probes parse files or try several commands; saying so is deliberate",
+    "The reason is shown as free text in status_detail, not as a structured field a UI could filter on",
+    "Item 350 stays unchecked: the remaining gaps are a dedicated re-detect action and a repair path for corrupted plain directories",
+    "No packaging, tagging or release"
+  ]
+}

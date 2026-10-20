@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use super::{AppError, DownloadSpec, InstallMethod, Result, VersionInfo};
+use super::{AppError, DownloadSpec, InstallMethod, Result, VerificationInfo, VersionInfo};
 
 const REPOSITORY: &str = "https://dl.google.com/android/repository/";
 
@@ -81,6 +81,13 @@ fn parse_repository(xml: &str) -> Result<Vec<VersionInfo>> {
                 version: version.clone(), date: None, size_bytes: Some(file.size),
                 note: Some("Android SDK Platform Tools（ADB / Fastboot）；Google 当前稳定版索引，非完整历史归档".into()),
                 url: Some(url),
+                // Google's repository index publishes a SHA-1 for this archive,
+                // not a SHA-256. The download verifier only accepts SHA-256, so
+                // the asset stays explicitly unverified instead of being checked
+                // against a weaker algorithm without saying so.
+                verification: VerificationInfo::Unverified {
+                    reason: "Google 索引仅提供 SHA-1 校验值；当前只核对 SHA-256，故标为未验证".into(),
+                },
             });
         }
     }
@@ -99,7 +106,12 @@ pub(super) fn download_spec(version: &str, hint: Option<&str>) -> Result<Downloa
     if url != expected {
         return Err(AppError::msg("ADB 下载链接与所选版本不匹配，请刷新 Google 官方版本列表"));
     }
-    Ok(DownloadSpec { url: url.into(), method: InstallMethod::Unzip { strip_top: true } })
+    Ok(DownloadSpec {
+        url: url.into(),
+        method: InstallMethod::Unzip { strip_top: true },
+        verification: VerificationInfo::default(),
+        expected_size: None,
+    })
 }
 
 #[cfg(test)]

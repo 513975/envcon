@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "ASMT-04 post-switch read-only command/environment diagnosis",
+  "status": "implemented-and-isolated-ui-verified; real switch on a live environment and new-terminal resolution not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "1681b0389afe8024d1f800ea65e3259c00e68bf3a155673b6cd08d2e71ab767b",
+    "src-tauri/src/pkgtools.rs": "e2be7b470f5b07b242b1d71410a684e1a0849b3ff999e26f1081fe64126aaab4",
+    "src/pages/Environments.tsx": "adfb16d64632bb2d1740ec3b7caf61170412c7f1a408c415f048176e226c1c0f",
+    "src/lib/types.ts": "a83ba9db93d16ee0cdb3980861289db1133a9b2ad62a2ba11d4ba3c9d7a998fa",
+    "src/lib/api.ts": "7c96d79e842b97d9e52f4b4c57b4620772eaa8ced547c5d1e4d9701d9c4718eb",
+    "tests/release-052-ui.mjs": "f4e0828adf26273e8e3a5838105acf36931c1ed8fcafb117e7af85fa05194d4e"
+  },
+  "implementation": [
+    "switch_env now returns SwitchDiagnosis instead of unit, so a switch can be reported as done-but-ineffective",
+    "diagnose_switch reads the new current junction target and probes the environment version without executing the switched tool",
+    "each environment type maps to the commands a terminal would resolve (java/javac, python/pip, node/npm, go, rustc/cargo, mvn, gradle, php, clang, zig, deno, bun, git, gh, gcc, adb)",
+    "the expected entry directory is the first declared PATH entry that actually contains the launcher, falling back to the first declared entry",
+    "resolution reuses the read-only merged-PATH resolver already used by the package-manager preview, so both features share one rule",
+    "pathStatus distinguishes not-in-path, shadowed and requires-new-terminal; an empty registry read reports unknown",
+    "retained/notes explain that an already-open terminal keeps the old environment and that the diagnosis writes nothing",
+    "the environments page shows the resolved target, per-command status and a shadowed-command warning; a shadowed or missing command degrades the toast to 命令生效待确认 instead of plain success"
+  ],
+  "fixtures": [
+    "commands::tests::switch_diagnosis_lists_commands_for_every_environment_type",
+    "commands::tests::switch_diagnosis_resolution_distinguishes_shadowed_and_missing_commands"
+  ],
+  "uiCoverage": {
+    "release-052-ui": "switching an LLVM environment asserts the returned current target and 命令解析：clang 命中受管入口; a shadowed fixture asserts the degraded 命令生效待确认 toast and the 被靠前安装覆盖 marker"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "250 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml switch_diagnosis -- --test-threads=1",
+      "result": "2 passed / 0 failed / 262 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 693ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real environment was switched on this host; the diagnosis ran only through fixtures and a simulated UI backend",
+    "Version probing of a real junction target was not exercised",
+    "No new terminal was opened to confirm the reported resolution order",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "The diagnosis does not start the switched command; a launcher that exists but cannot run is still reported as managed",
+    "Shell aliases, cmd built-ins and Windows App Paths are not modelled",
+    "The version string comes from the existing probe, so an unparseable tool leaves version null without failing the switch"
+  ]
+}

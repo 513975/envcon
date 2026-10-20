@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01 batch affected-package display, plus R3-b read-only Python per-user package scope",
+  "status": "implemented-and-isolated-ui-verified; real manager installation, real user base and real configuration write not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "616e066f984ebf783426487738d122b1b78bafdd1bcf86365be62f1cbb9790b9",
+    "src/pages/PackageManagers.tsx": "0da8525f099abd11b21313b13a0b9f647480eb94b6c6319a2d642952d55da9cb",
+    "tests/packages-ui.mjs": "da28d3fa4f54aa6bb31c4c334298df7cb3bdbec0fb9c4bcdcb04a0372a6285a9"
+  },
+  "implementation": [
+    "the batch preview dialog renders each writable tool's affected packages grouped under that tool, with name, version and an '入口可能失效' marker plus a per-tool unresolved count",
+    "a writable tool with no packages shows its note instead of an empty block, so an empty read is not silently omitted",
+    "commands::PythonUserScope reads the per-user install location read-only: PYTHONUSERBASE (process or user registry) with an APPDATA/Python fallback",
+    "a relative or unresolvable user base is reported as a reason rather than guessed",
+    "each versioned site-packages under the user base has its .dist-info/.egg-info entries counted; no Python process is executed",
+    "more than one versioned site-packages marks the location as shared by multiple interpreters",
+    "an unreadable versioned directory yields packages=None with the underlying error, never a fabricated zero",
+    "the uninstall preview's retained Python item now carries the resolved path, the distribution count and the shared-location warning",
+    "python_user_package_scope_at accepts a resolved base so fixtures never depend on the host environment"
+  ],
+  "fixtures": [
+    "commands::tests::python_user_scope_counts_distributions_without_claiming_ownership",
+    "commands::tests::python_user_scope_reports_unresolvable_or_relative_bases_instead_of_guessing",
+    "commands::tests::python_user_scope_does_not_report_an_empty_read_as_zero_when_unreadable"
+  ],
+  "uiCoverage": {
+    "batchPackages": "packages-ui asserts 受影响的全局包, the eslint row marked as possibly unresolved, and the 2 个可能不再解析 total inside the batch dialog",
+    "singlePackages": "the previously added single-tool assertions still pass"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "248 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml python_user_scope -- --test-threads=1",
+      "result": "3 passed / 0 failed / 259 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 703ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real Python per-user installation was scanned; the user base was supplied from temporary fixtures",
+    "The shared-location flag is inferred from the number of versioned directories, not from interpreter registration",
+    "No real package-manager configuration was written; no packaging, tagging or release"
+  ],
+  "limitations": [
+    "The user-level package count covers .dist-info/.egg-info entries only; pipx venvs and external virtual environments are still listed as retained without enumeration",
+    "The uninstall preview reports a count, not the package names, for user-level packages",
+    "User-level packages remain non-removable by design; only the reporting changed"
+  ]
+}

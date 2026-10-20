@@ -10,7 +10,7 @@ try {
   await page.addInitScript(() => {
     window.scans = [];
     window.waiting = {};
-    const overview = name => ({ root: "D:/fixture", rootExists: true, dataDir: "D:/fixture/data", categories: [{ envType: "node", current: null, envs: [{ name, envType: "node", path: "D:/fixture/node", version: "24.0.0", sizeBytes: null, sizeComplete: false, status: "available", isCurrent: false, isExternalLink: false }] }] });
+    const overview = name => ({ root: "D:/fixture", rootExists: true, dataDir: "D:/fixture/data", categories: [{ envType: "node", current: null, envs: [{ name, envType: "node", path: "D:/fixture/node", version: "24.0.0", sizeBytes: null, sizeComplete: false, status: "available", isCurrent: false, isLinkEntry: false, isExternalLink: false }] }] });
     const result = value => ({ value, updatedAt: Date.now() - 40_000, durationMs: 2, warning: null });
     window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (name, args) => {
       if (name === "query_scan") {
@@ -32,7 +32,7 @@ try {
   await page.getByText("cached-node", { exact: true }).waitFor();
   assert.equal(await page.getByText("正在核对最新结果...", { exact: true }).count() > 0, true);
   assert.equal(await page.evaluate(() => window.scans.filter(s => s.kind === "overview" && !s.cachedOnly).length), 1);
-  await page.getByRole("button", { name: "包管理器", exact: true }).click();
+  await page.getByRole("group", { name: "扫描分类", exact: true }).getByRole("button", { name: "包管理器", exact: true }).click();
   await page.getByRole("button", { name: "环境管理", exact: true }).click();
   await page.evaluate(() => window.waiting.overview());
   await page.getByText("fresh-node", { exact: true }).waitFor();

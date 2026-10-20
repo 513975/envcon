@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 / R2 item 325: diagnose the actual installation shape before offering a package-manager self-update",
+  "status": "implemented-and-isolated-verified; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "4e5f6ecb6113e6826c192d028502ff4d7d851cba5f378c381fe23caa41f1cc93"
+  },
+  "gapClosed": "ROADMAP R2 item 325 previously recorded: 按实际安装方式诊断只覆盖 npm prefix 与 pip 解释器两类，其余管理器未逐项诊断",
+  "implementation": {
+    "channelModel": "UpdateChannel distinguishes Standalone, Corepack and PythonPackage, derived from evidence next to the resolved command rather than from the static catalog",
+    "corepack": "A npm/pnpm/yarn command file whose body names corepack is treated as a Corepack shim; self-update is refused because Corepack pins the active version",
+    "pythonPackage": "A uv binary that sits beside pip.exe with an interpreter one level up is treated as pip-installed; uv self update is refused because it would overwrite files pip owns",
+    "evidenceRule": "An unreadable shim is not evidence of anything: the checker falls back to Standalone rather than guessing, so a locked or missing file never fabricates a blocker",
+    "wiring": "The check runs at the top of self_update_command, so both the preview and the executor refuse with the same reason and the preview can never promise a blocked update"
+  },
+  "defectsFixed": [
+    "The first version of the pip-installed uv check looked for python.exe beside uv.exe, but pip installs it into <Python>/Scripts with the interpreter one level up. The fixture caught the miss and the check now looks in both places."
+  ],
+  "fixtures": [
+    {
+      "name": "pkgtools::tests::corepack_and_pip_installed_managers_refuse_self_update_with_a_specific_reason",
+      "asserts": [
+        "a pnpm.cmd whose body names corepack reports UpdateChannel::Corepack and is refused with a Corepack-specific reason",
+        "a real pnpm bundle at a standalone path reports Standalone and still yields `self-update`",
+        "a missing shim is not treated as Corepack evidence (falls back to Standalone)",
+        "a uv.exe beside pip.exe with the interpreter one level up reports PythonPackage and is refused with the `pip install --upgrade uv` suggestion",
+        "a standalone uv keeps `self update`"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "278 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml corepack_and_pip_installed -- --test-threads=1",
+      "result": "1 passed"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real Corepack-managed or pip-installed manager exists in this environment, so both branches were exercised only through fixtures",
+    "The Corepack shim heuristic reads the launcher body; a shim that invokes corepack indirectly (through another wrapper) would not be detected",
+    "npm and yarn already validate their own prefix before this change; only the channel check was added on top"
+  ],
+  "limitations": [
+    "composer and bun have no installation-shape check yet: both are still treated as Standalone",
+    "The check inspects files only; it never runs `corepack which` or queries the interpreter, so it cannot see a shim replaced after resolution",
+    "A refusal is reported through the existing blocked path, so the UI text is a plain reason rather than a dedicated installation-shape badge",
+    "No packaging, tagging or release"
+  ]
+}

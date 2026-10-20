@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 357: map the eight required uninstall scenarios to the fixtures that already cover them, and record what remains genuinely uncovered",
+  "status": "review-only; no code changed in this round",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "baseline": {
+    "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+    "result": "292 passed / 0 failed / 14 ignored",
+    "purpose": "Confirm the coverage map below describes a green baseline"
+  },
+  "coverageMap": [
+    {
+      "scenario": "环境内 pip 包",
+      "fixtures": [
+        "commands::tests::uninstall_preview_separates_owned_python_packages_from_unverified_external_data",
+        "commands::tests::uninstall_python_lib_link_preserves_external_packages"
+      ],
+      "note": "site-packages is counted and removed with the interpreter directory; a Lib junction is treated as a link whose external target is retained"
+    },
+    {
+      "scenario": "--user 包",
+      "fixtures": [
+        "commands::tests::python_user_scope_counts_distributions_without_claiming_ownership",
+        "commands::tests::python_user_scope_does_not_report_an_empty_read_as_zero_when_unreadable",
+        "commands::tests::python_user_scope_reports_unresolvable_or_relative_bases_instead_of_guessing"
+      ],
+      "note": "read-only enumeration; never removed with an environment"
+    },
+    {
+      "scenario": "外部 venv",
+      "fixtures": [
+        "commands::tests::uninstall_preview_separates_owned_python_packages_from_unverified_external_data"
+      ],
+      "note": "the fixture creates project/.venv beside the managed root and asserts keep.txt survives the uninstall"
+    },
+    {
+      "scenario": "共享缓存",
+      "fixtures": [
+        "commands::tests::uninstall_preview_separates_owned_python_packages_from_unverified_external_data"
+      ],
+      "note": "the same fixture creates a pip-cache directory and asserts keep.txt survives, so a cache shared with other interpreters is never removed with one environment"
+    },
+    {
+      "scenario": "安装器登记",
+      "fixtures": [
+        "installer_uninstall::tests::exact_path_match_preserves_other_versions_and_normalizes_case",
+        "installer_uninstall::tests::duplicate_registration_or_incomplete_enumeration_never_selects_an_arbitrary_uninstaller",
+        "installer_uninstall::tests::execution_rechecks_plan_and_binary_before_calling_any_runner",
+        "installer_uninstall::tests::llvm_parent_fallback_is_exact_and_does_not_accept_shell_commands",
+        "installer_uninstall::tests::postcheck_detects_registration_reappearing_under_a_different_identity",
+        "installer_uninstall::tests::python_requires_provider_version_path_consistency_and_exact_bundle_cache",
+        "installer_uninstall::tests::redirected_locations_and_executables_are_not_matched",
+        "installer_uninstall::tests::successful_exit_is_insufficient_without_both_registration_and_runtime_removal",
+        "installer_uninstall::tests::unrelated_msi_components_are_not_bundle_candidates_but_conflicting_bundles_block"
+      ],
+      "note": "nine fixtures cover exact matching, duplicate/conflicting bundles, pre-execution rechecks and post-execution re-verification"
+    },
+    {
+      "scenario": "PATH 混合条目",
+      "fixtures": [
+        "commands::tests::uninstall_path_all_environment_types_remove_only_verified_entries",
+        "commands::tests::uninstall_path_keeps_user_entries_shared_versions_and_external_current",
+        "commands::tests::uninstall_path_unknown_source_is_unverified_and_never_written",
+        "commands::tests::uninstall_legacy_path_requires_exact_confirmation_and_records_user_consent",
+        "commands::tests::uninstall_legacy_path_all_types_keep_unselected_and_remove_only_confirmed_strings",
+        "commands::tests::uninstall_legacy_path_duplicate_aliases_cannot_be_confirmed_or_removed",
+        "commands::tests::uninstall_legacy_path_shared_or_changed_after_preview_is_preserved",
+        "commands::tests::uninstall_legacy_path_rechecks_source_history_even_when_path_value_is_unchanged",
+        "commands::tests::uninstall_legacy_path_rejects_duplicate_foreign_and_rewritten_confirmations",
+        "commands::tests::uninstall_legacy_path_write_or_recheck_failure_is_audited_as_partial",
+        "path_ownership::tests::tracked_cleanup_preserves_unowned_segments_and_shared_entries",
+        "path_ownership::tests::legacy_cleanup_binds_journal_snapshot_and_does_not_claim_readded_entries"
+      ],
+      "note": "owned entries need no confirmation, unknown-origin entries need per-entry consent, and user/shared/foreign entries are preserved"
+    },
+    {
+      "scenario": "链接纳管",
+      "fixtures": [
+        "commands::tests::uninstall_external_link_removes_link_but_verifies_target_retained",
+        "commands::tests::uninstall_internal_link_is_not_reported_as_external_and_preserves_target",
+        "commands::tests::uninstall_inactive_alias_preserves_current_entry_to_same_target",
+        "commands::tests::uninstall_nested_reparse_point_never_removes_its_external_target",
+        "commands::tests::uninstall_unowned_links_block_removal_without_claiming_legacy_ownership",
+        "link_ownership::tests::owned_link_removal_verifies_object_and_preserves_target",
+        "link_ownership::tests::replacement_with_same_target_and_retargeted_links_are_not_owned",
+        "link_ownership::tests::missing_pending_corrupt_or_redirected_receipts_never_authorize_removal",
+        "link_ownership::tests::legacy_confirmation_removes_only_the_previewed_object_without_claiming_creation"
+      ],
+      "note": "removal acts on the handle opened with FILE_FLAG_OPEN_REPARSE_POINT, so a target is never traversed"
+    },
+    {
+      "scenario": "失败恢复",
+      "fixtures": [
+        "commands::tests::uninstall_reports_partial_failure_when_a_managed_file_is_locked",
+        "commands::tests::uninstall_path_failed_write_or_recheck_reports_partial",
+        "commands::tests::uninstall_path_directory_failure_keeps_path_without_attempt",
+        "commands::tests::uninstall_path_stale_preview_prevents_directory_removal",
+        "commands::tests::uninstall_preview_must_match_again_before_any_removal",
+        "commands::tests::uninstall_replaced_link_or_switched_current_invalidates_preview",
+        "path_ownership::tests::write_or_recheck_failure_never_creates_verified_ownership",
+        "path_ownership::tests::interrupted_journal_commit_and_writer_lock_preserve_unverified_state"
+      ],
+      "note": "every failure path reports Partial and keeps unremoved resources; none silently reports success"
+    }
+  ],
+  "conclusion": {
+    "scenariosRequired": 8,
+    "scenariosWithFixtures": 8,
+    "claim": "只移除所选且可证明归属的资源 is asserted in each row above: every fixture that removes something also asserts what must survive.",
+    "itemRemainsUncheckedBecause": [
+      "All fixtures use temporary directories; no real uninstaller ran and no real registry or PATH was written",
+      "The RTK/VM acceptance that item 357 inherits from UNINST-01 is still blocked on an unavailable Windows VM",
+      "Coverage is by fixture, not by a single enumerated checklist file; this document is that checklist, not a substitute for real-environment verification"
+    ]
+  },
+  "notVerified": [
+    "No real installation was uninstalled in this or any prior round",
+    "Scenario coverage was established by reading fixture bodies, not by mutation testing the production paths",
+    "No packaging, tagging or release"
+  ]
+}

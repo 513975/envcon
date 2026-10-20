@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-20",
+  "scope": "R0 / 隔离 Windows 安装冒烟（Windows Sandbox 一次性虚拟机）",
+  "status": "passed",
+  "summary": "EnvCon 0.5.5 在一次性 Windows Sandbox（Hyper-V 隔离的 Windows 11 Enterprise 10.0.26100）中完成 NSIS 静默安装、启动、主窗口创建、Junction 语义验证、静默卸载与注册表清理，10/10 检查通过。这是在无独立 Windows VM 主机上满足 R0「一次性 Windows VM 冒烟」门槛的可复核证据。",
+  "environment": {
+    "host": {
+      "os": "Windows 11 专业版",
+      "build": "26300",
+      "sandboxFeature": "Containers-DisposableClientVM",
+      "sandboxFeatureStateBefore": 2,
+      "sandboxFeatureStateAfter": 1,
+      "hypervisorPlatformState": 1,
+      "restartRequiredAndPerformed": true,
+      "stateArchive": "C:\\ProgramData\\EnvConVerify\\sandbox-state.json"
+    },
+    "guest": {
+      "caption": "Microsoft Windows 11 Enterprise",
+      "version": "10.0.26100",
+      "build": "26100",
+      "architecture": "64-bit",
+      "computerName": "CB94ECE3-92CF-4",
+      "account": "WDAGUtilityAccount",
+      "networking": "disabled",
+      "vgpu": "disabled",
+      "memoryInMB": 4096
+    }
+  },
+  "artifacts": {
+    "installer": {
+      "path": "scripts/hyperv/sandbox-payload/EnvCon_0.5.5_x64-setup.exe",
+      "bytes": 3160169,
+      "sha256": "4f2ad2bb41e4e122f78c75a8197d133491a5970f9f052782d57c3f5a4d777be2",
+      "identicalToBuildOutput": true
+    },
+    "verificationScript": {
+      "path": "scripts/hyperv/guest-verify.ps1",
+      "sha256": "7183a80d84f2e7886ec2d1dfd7b156def392cd03fca990ba4f9081679bd7f995"
+    },
+    "sandboxConfig": {
+      "path": "scripts/hyperv/envcon-verify.wsb",
+      "sha256": "17f93b681fb7420886bf477fd83c429f97b47303ee8ab6683868b44e83fcbf54"
+    },
+    "report": {
+      "path": "scripts/hyperv/sandbox-payload/report.json",
+      "bytes": 2693,
+      "sha256": "9a724afa64d279ac117fd4101912ee8a90955fb3510312f6e7ef7741211978a2",
+      "startedAt": "2026-10-20T04:21:51.4282962+08:00",
+      "finishedAt": "2026-10-20T04:22:09.9921150+08:00",
+      "durationSeconds": 18.6
+    }
+  },
+  "findings": [
+    {
+      "id": "R0-SANDBOX-01",
+      "result": "pass",
+      "check": "webview2-runtime",
+      "detail": "version 155.0.4283.62",
+      "meaning": "Tauri 依赖的 WebView2 运行时在干净 Windows 上已存在，应用窗口具备创建前提。"
+    },
+    {
+      "id": "R0-SANDBOX-02",
+      "result": "pass",
+      "check": "silent-install",
+      "detail": "installer exited 0",
+      "meaning": "NSIS 安装包在无交互、无网络条件下完成安装，说明安装包自包含。"
+    },
+    {
+      "id": "R0-SANDBOX-03",
+      "result": "pass",
+      "check": "binary-installed",
+      "detail": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\EnvCon\\EnvCon.exe",
+      "meaning": "可执行文件落在按用户安装路径，无需管理员权限即可写入。"
+    },
+    {
+      "id": "R0-SANDBOX-04",
+      "result": "pass",
+      "check": "app-launch",
+      "detail": "process alive, main window created",
+      "meaning": "进程在 12 秒观察窗口内存活且创建了主窗口，排除启动即崩溃与无窗口后台退出。"
+    },
+    {
+      "id": "R0-SANDBOX-05",
+      "result": "pass",
+      "check": "junction-create",
+      "detail": "current\\node -> C:\\Users\\WDAGUtilityAccount\\EnvConVerifyRoot\\envs\\nodes\\node-fixture",
+      "meaning": "受管目录的 current Junction 可在真实 NTFS 上创建并读回目标。"
+    },
+    {
+      "id": "R0-SANDBOX-06",
+      "result": "pass",
+      "check": "junction-remove-keeps-target",
+      "detail": "payload.bin survived junction removal",
+      "meaning": "按句柄删除链接不会递归删除目标内容，与隔离夹具结论一致。"
+    },
+    {
+      "id": "R0-SANDBOX-07",
+      "result": "pass",
+      "check": "managed-root-cleanup",
+      "detail": "root removed",
+      "meaning": "受管根目录可被完整清理，无残留占用。"
+    },
+    {
+      "id": "R0-SANDBOX-08",
+      "result": "pass",
+      "check": "uninstall-entry",
+      "detail": "EnvCon 0.5.5",
+      "meaning": "安装器在注册表写入可识别的卸载登记项，名称与版本正确。"
+    },
+    {
+      "id": "R0-SANDBOX-09",
+      "result": "pass",
+      "check": "silent-uninstall",
+      "detail": "uninstaller exited 0",
+      "meaning": "静默卸载流程可无人值守完成。"
+    },
+    {
+      "id": "R0-SANDBOX-10",
+      "result": "pass",
+      "check": "uninstall-cleans-registry",
+      "detail": "uninstall entry removed",
+      "meaning": "卸载后不遗留注册表登记项，未在系统里留下僵尸条目。"
+    }
+  ],
+  "verification": {
+    "sandboxRun": {
+      "result": "10 passed / 0 failed / 0 skipped",
+      "executedBy": "user-launched .wsb, automated LogonCommand",
+      "reportSource": "guest-verify.ps1 写入映射目录，回传至主机 sandbox-payload/report.json"
+    },
+    "scripts": {
+      "guestVerifySyntax": "PowerShell Parser 解析通过",
+      "wsbXml": "XML 合法，schema 元素全部有效，HostFolder 实际存在"
+    }
+  },
+  "notVerified": [
+    "16 类工具的真实下载与安装（本次只验证 EnvCon 自身安装包）",
+    "真实用户 PATH 写入与注册表环境变量修改",
+    "十种包管理器的真实版本读取与自更新（仍为 0/10）",
+    "覆盖升级（在同一系统上从旧版本升级）",
+    "代码签名验证",
+    "多用户/管理员与非管理员权限差异"
+  ],
+  "limitations": [
+    "Windows Sandbox 每次启动都是全新系统，因此本次无法覆盖「安装后重启再启动」「覆盖升级」这类需要持久状态的场景",
+    "沙盒内 Networking 被显式禁用，若安装包暗中依赖下载会暴露；本次通过说明安装包自包含，但不覆盖运行期联网功能",
+    "沙盒账户 WDAGUtilityAccount 属受限账户，未覆盖管理员上下文下的路径与注册表行为",
+    "报告由被测环境内的脚本自行产出，脚本与安装包哈希已记录，但脚本本身未做签名，不构成防篡改认证",
+    "host 上曾同时存在 Gen1/Gen2 Hyper-V 虚拟机尝试，Gen 2 因 UEFI 引导失败（SCSI DVD boot loader failed）未建成；Gen 1 可引导到安装界面但未完成安装。本证据来自 Windows Sandbox，不依赖上述虚拟机"
+  ],
+  "conclusion": {
+    "r0InstallSmokeGate": "closed",
+    "reason": "R0 验收要求「对可安全运行的安装方式做一次性 Windows VM 冒烟」。Windows Sandbox 本质是 Hyper-V 隔离的一次性 Windows 虚拟机，本次运行满足该门槛，且报告含沙盒专有账户与随机计算机名，可证明非伪造。",
+    "stillOpenInR0": "十种包管理器的真实版本与自更新结果仍为 0/10，R0 总体验收因此未完成，但「安装冒烟」这一阻塞项已解除。",
+    "doesNotClose": [
+      "R1 / DL-VERIFY-01（依赖 R0 关闭）",
+      "R2 / SCAN-CORE-01（依赖 R0/R1）",
+      "R3 / UNINST-01（需真实 PATH 与真实卸载器）"
+    ]
+  }
+}

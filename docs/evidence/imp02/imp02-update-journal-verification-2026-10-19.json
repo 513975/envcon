@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 line 327: write a durable pre-update inventory before the package-manager updater runs",
+  "status": "implemented-with-isolated-fixtures; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "reviewFindings": {
+    "reusedInfrastructure": "Followed the existing ownership journal conventions: schema version field, deny_unknown_fields, a reparse-component check before writing, and write-then-rename.",
+    "scopeDecided": "These managers expose no supported way to reinstall an exact previous version, so a real rollback plan cannot be built. The honest deliverable is an audit trail written before the command runs, plus an explicit statement that it is not a rollback."
+  },
+  "implementation": {
+    "newModule": "src-tauri/src/update_journal.rs",
+    "recordShape": "UpdateRecord { status, tool, executablePath, beforeVersion, afterVersion, program, arguments, attempt }",
+    "lifecycle": [
+      "record_planned is written before the updater runs; if it cannot be written the update is cancelled rather than run unaudited",
+      "record_outcome attaches the result to the exact attempt token; completed / unverified / failed are distinct",
+      "an unknown or already-settled attempt token is an error, never a silent no-op"
+    ],
+    "whyAttemptToken": "Without it, two overlapping updates of the same manager could settle the wrong record. The token is generated per call and matched on update.",
+    "outcomeMapping": {
+      "versionChanged / versionUnchanged": "completed",
+      "verificationFailed / versionUnknown": "unverified",
+      "commandFailed": "failed"
+    },
+    "unverifiedIsItsOwnState": "A command that exited 0 but whose version could not be read is recorded as unverified, not as success.",
+    "bounds": "MAX_RECORDS = 50; the oldest records are dropped first.",
+    "refusesRedirectedJournal": "A junction or symlink at the journal path is refused before any write, so the record cannot be redirected outside the backups directory.",
+    "failureVisibility": "If settling the record fails after the command ran, the error is attached to the returned result instead of being swallowed."
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "273 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml update_journal:: -- --test-threads=1",
+      "result": "5 passed / 0 failed"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 684ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> 九套测试",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "no whitespace errors (only LF/CRLF notices)"
+    },
+    "newFixtures": [
+      "update_journal::tests::planned_record_survives_a_process_that_never_reports_back",
+      "update_journal::tests::outcome_attaches_to_the_exact_attempt_only",
+      "update_journal::tests::unverified_outcome_stays_distinct_from_success_and_failure",
+      "update_journal::tests::records_are_bounded_and_schema_mismatch_is_refused",
+      "update_journal::tests::redirected_journal_is_refused_before_any_write"
+    ]
+  },
+  "sourceHashes": {
+    "src-tauri/src/update_journal.rs": "1ca6b143e22d4a5b57dc4df888b0c6fc6836383c573298b955b4f0e8cd76502b",
+    "src-tauri/src/lib.rs": "ca44b6093533d06ab9594b69aedbcda232e2ffa48b70028c51cfe62c87f8e648",
+    "src-tauri/src/commands.rs": "67d5cc80d4da200cb211a217b38c4ee68bad15641deed0a8eee28e0ffee1ac14"
+  },
+  "notVerified": [
+    "No real package manager was updated, so no real journal was produced by the production command path; the module is exercised directly and the wiring is compile-checked.",
+    "Crash-during-update was simulated by leaving a record in the planned state, not by killing a real process.",
+    "The journal is not surfaced anywhere in the UI yet.",
+    "No packaging, tagging or release."
+  ],
+  "limitations": [
+    "This is an audit trail, not a rollback: there is no supported command to return to the recorded previous version.",
+    "The record is pruned at 50 entries, so an older attempt can disappear.",
+    "The journal records what was about to run; it cannot prove the updater did what it claimed."
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01 batch configuration preview for 一键配置全部: per-tool read-only diffs, blocked tools excluded from the write set",
+  "status": "implemented-and-isolated-ui-verified; real manager configuration write and real registry comparison not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.8",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "cb5212f3d2e8e072c91b473c7ea634d85ede67775b5ceec72cce0dad0ea56d73",
+    "src-tauri/src/commands.rs": "3fdbe835436a8865c1124529781a9bb14b99c4113a24311c153070e4a382fd63",
+    "src-tauri/src/lib.rs": "ccf558b7f57d4d868765ed2d132b038ba3ef2b23efefac4c07ab297e89215f54",
+    "src/pages/PackageManagers.tsx": "5196f451d3c7deacc7d2d12fb58cec0bc8d6c4cb7e68b94a396b7d8ee119d73f",
+    "src/lib/types.ts": "86e8b979eca86667e2b2c713a5de41ded7dde8c560e7ae766e3cf85f7a335263",
+    "src/lib/api.ts": "d58945c029eb29489249fb25759ecedf0f1e8071b4ced3b602ddbd333272fd55",
+    "tests/packages-ui.mjs": "e62bdd18c808f846d284585a8974cb746ac36befc1fecb2b08cb749f00718806"
+  },
+  "implementation": [
+    "pkgtools::preview_tool_configs evaluates every requested tool with the same single-tool checks and returns items plus explicit ready/blocked tool lists",
+    "ToolConfigRequest carries tool/globalPath/cachePath; every manager id is validated before any manager query runs",
+    "a tool with blocking reasons never contributes change rows; its changes are cleared and changedCount is 0 so batch totals cannot overstate pending work",
+    "a preview error for one tool is recorded as a blocked entry instead of aborting the whole batch",
+    "ToolConfigPreview gains changedCount, counting only rows whose value actually differs from the current value",
+    "the UI 一键配置全部 button now opens a read-only batch dialog listing per-tool changes, skipped tools and their reasons before any write",
+    "confirming writes only the tools listed in preview.ready, then reports written/skipped/failed counts separately"
+  ],
+  "fixtures": [
+    "pkgtools::tests::config_preview_counts_only_rows_that_actually_change",
+    "pkgtools::tests::batch_preview_separates_ready_and_blocked_tools_without_writing",
+    "pkgtools::tests::batch_preview_leaves_target_directories_untouched"
+  ],
+  "uiCoverage": {
+    "previewBeforeWrite": "一键配置全部 calls preview_tool_configs and leaves the apply_tool_config count unchanged until 写入可用项 is pressed",
+    "blockedToolSkipped": "the pip fixture is blocked in the batch preview, is shown as 跳过 with its reason, and is never passed to apply_tool_config after confirmation",
+    "diffSummary": "per-tool 2 项变化 rows are asserted in the batch dialog"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "242 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml pkgtools::tests -- --test-threads=1",
+      "result": "19 passed / 0 failed / 237 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 845ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real package-manager configuration was changed; batch preview ran through fixtures and a simulated UI backend",
+    "The current-value side depends on each manager's own query commands and was not compared against real installations",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "The batch preview does not enumerate the concrete global packages that a reconfiguration would affect",
+    "Unchanged rows are still listed; the dialog labels counts but does not visually diff each row",
+    "A blocked tool is skipped silently beyond the dialog and toast summary; there is no per-tool retry action"
+  ]
+}

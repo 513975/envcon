@@ -6,8 +6,11 @@ import {
   History,
   RotateCcw,
   Package,
+  RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { PageShell } from "../components/layout/PageShell";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -17,6 +20,7 @@ import { ConfirmDialog } from "../components/ui/Modal";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { APP_VERSION } from "../lib/version";
+import type { AppUpdateStatus } from "../lib/types";
 import { useAppStore } from "../lib/store";
 import { cn } from "../lib/format";
 
@@ -34,6 +38,8 @@ export function Settings() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRecovery, setConfirmRecovery] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const refreshOverview = useAppStore((s) => s.refreshOverview);
 
   const load = async () => {
@@ -119,6 +125,27 @@ export function Settings() {
       toast.error("配置恢复失败", String(e));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const checkUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      setUpdateStatus(await api.checkAppUpdate());
+    } catch (e) {
+      setUpdateStatus({
+        status: "error",
+        currentVersion: APP_VERSION,
+        latestVersion: null,
+        releaseName: null,
+        releaseUrl: null,
+        notes: null,
+        publishedAt: null,
+        assets: [],
+        error: String(e),
+      });
+    } finally {
+      setCheckingUpdate(false);
     }
   };
 
@@ -275,14 +302,47 @@ export function Settings() {
       </Card>
 
       {/* 关于 */}
-      <Card className="mt-5 p-4 flex items-center gap-3">
-        <div className="size-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-          <Package className="size-4 text-white" />
+      <Card className="mt-5 p-4">
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+            <Package className="size-4 text-white" />
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-bold">EnvCon v{APP_VERSION}</div>
+            <div className="text-xs text-zinc-400">Windows 开发环境一站式管理工具 · Tauri 2</div>
+          </div>
+          <Button size="sm" onClick={checkUpdate} loading={checkingUpdate}>
+            <RefreshCw className="size-3.5" />
+            检查更新
+          </Button>
         </div>
-        <div className="flex-1">
-          <div className="text-sm font-bold">EnvCon v{APP_VERSION}</div>
-          <div className="text-xs text-zinc-400">Windows 开发环境一站式管理工具 · Tauri 2</div>
-        </div>
+        {updateStatus && (
+          <div role="status" className="mt-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 px-3 py-2.5 text-xs">
+            {updateStatus.status === "updateAvailable" ? (
+              <div className="space-y-1.5">
+                <div className="font-medium text-emerald-700 dark:text-emerald-400">
+                  可更新到 v{updateStatus.latestVersion}
+                </div>
+                {updateStatus.notes && <div className="whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">{updateStatus.notes}</div>}
+                {updateStatus.releaseUrl && (
+                  <Button size="sm" onClick={() => openUrl(updateStatus.releaseUrl!).catch((e) => toast.error("打开失败", String(e)))}>
+                    <ExternalLink className="size-3.5" />
+                    打开发布页
+                  </Button>
+                )}
+              </div>
+            ) : updateStatus.status === "upToDate" ? (
+              <span className="text-zinc-600 dark:text-zinc-300">已是最新版本（v{updateStatus.latestVersion ?? APP_VERSION}）。</span>
+            ) : updateStatus.status === "noRelease" ? (
+              <span className="text-zinc-600 dark:text-zinc-300">当前发布渠道还没有可用版本。</span>
+            ) : updateStatus.status === "unknownVersion" ? (
+              <span className="text-amber-700 dark:text-amber-400">发布版本 v{updateStatus.latestVersion} 无法与当前版本比较。</span>
+            ) : (
+              <span className="text-red-700 dark:text-red-400">检查失败：{updateStatus.error ?? "未知错误"}</span>
+            )}
+            <div className="mt-1.5 text-zinc-400">只检查发布信息，不会自动下载或安装。发布页中的校验值需在下载后另行核对。</div>
+          </div>
+        )}
       </Card>
     </PageShell>
   );

@@ -56,7 +56,121 @@ export interface ManagedEnv {
   statusDetail: string | null;
   sizeComplete: boolean;
   identityPath: string;
+  isLinkEntry: boolean;
   isExternalLink: boolean;
+}
+
+export interface UninstallScopeItem {
+  resource: string;
+  path: string | null;
+  details: string;
+  count: number | null;
+}
+
+/** One command a new terminal should resolve after switching environments. */
+export interface SwitchCommandDiagnosis {
+  command: string;
+  status: "managed" | "shadowed" | "missing";
+  expected: string;
+  resolved: string | null;
+  detail: string;
+}
+
+/** Read-only diagnosis returned by switch_env; nothing is executed or written. */
+export interface SwitchDiagnosis {
+  envType: string;
+  name: string;
+  currentTarget: string | null;
+  version: string | null;
+  commands: SwitchCommandDiagnosis[];
+  pathStatus: "active" | "requires-new-terminal" | "not-in-path" | "shadowed" | "unknown";
+  pathDetail: string;
+  retained: string[];
+  notes: string[];
+}
+
+/** Read-only repair preview for a shadowed command after switching. */
+export interface PathRepairPreview {
+  envType: string;
+  entry: string;
+  shadowing: string[];
+  /** `reorder` when only ordering changes, `manual` when the user must act, `none` when clean. */
+  mode: "reorder" | "manual" | "none";
+  expectedPath: string;
+  resultingPath: string;
+  summary: string;
+  notes: string[];
+  blocked: string[];
+  plan: {
+    expectedPath: string;
+    entry: string;
+    shadowing: string[];
+    resultingPath: string;
+  } | null;
+  manualEntries: string[];
+}
+
+/** Outcome of a repair, recomputed from the live PATH after the write. */
+export interface PathRepairResult {
+  applied: NonNullable<PathRepairPreview["plan"]>;
+  verified: boolean;
+  userPath: string;
+  commands: SwitchCommandDiagnosis[];
+  problems: string[];
+  requestedPath: string;
+  requiresNewTerminal: boolean;
+}
+
+export interface UninstallPreview {  installerPlan?: {
+    state: string;
+    installPath: string;
+    envType: EnvType;
+    invocation: {
+      registrationId: string;
+      executable: string;
+      arguments: string[];
+      fileSha256: string;
+    } | null;
+    assessments: { registrationId: string; state: string; details: string }[];
+    errors: string[];
+    registryFingerprint: string;
+  } | null;
+  pathSnapshotHash?: string | null;
+  currentLinkSnapshotHash?: string | null;
+  legacyLinks?: UninstallScopeItem[];
+  confirmedLegacyLinks?: string[];
+  legacyPathEntries?: UninstallScopeItem[];
+  confirmedLegacyPathEntries?: string[];
+  name: string;
+  envType: EnvType;
+  isCurrent: boolean;
+  isLinkEntry: boolean;
+  isExternalLink: boolean;
+  snapshotHash: string | null;
+  removable: UninstallScopeItem[];
+  retained: UninstallScopeItem[];
+  unverified: UninstallScopeItem[];
+  blocked: UninstallScopeItem[];
+  scopeComplete: boolean;
+  /** 卸载会删除内容；停用只解除管理、保留全部文件。 */
+  mode?: "uninstall" | "detach";
+}
+
+export interface UninstallActionItem {
+  resource: string;
+  path: string | null;
+  details: string;
+}
+
+export type UninstallResultStatus = "verifiedScopeRemoved" | "partial";
+
+export interface UninstallResult {
+  name: string;
+  status: UninstallResultStatus;
+  removed: UninstallActionItem[];
+  retained: UninstallScopeItem[];
+  unverified: UninstallScopeItem[];
+  failed: UninstallActionItem[];
 }
 
 export interface CategoryOverview {
@@ -77,6 +191,85 @@ export interface Overview {
   categories: CategoryOverview[];
 }
 
+/** 只读清单中的一条环境记录；路径是本机绝对路径，不是可移植备份。 */
+export interface ManifestEntry {
+  envType: EnvType;
+  name: string;
+  path: string;
+  identityPath: string;
+  version: string | null;
+  status: string;
+  isCurrent: boolean;
+  isLinkEntry: boolean;
+  isExternalLink: boolean;
+}
+
+export interface EnvironmentManifest {
+  schemaVersion: number;
+  generatedAt: string;
+  root: string | null;
+  portable: boolean;
+  dataDir: string;
+  entries: ManifestEntry[];
+  /** 读取者必须先了解的跨机器限制，不是免责声明。 */
+  compatibility: string[];
+  notes: string[];
+}
+
+/** 清单条目与本机现状的比对结论，每条记录只落入其中一类。 */
+export type ManifestComparisonKind =
+  | "unchanged"
+  | "added"
+  | "missing"
+  | "changed";
+
+export interface ManifestComparisonRow {
+  envType: EnvType;
+  name: string;
+  kind: ManifestComparisonKind;
+  /** 清单一侧；`added` 时为 null。 */
+  recordedVersion: string | null;
+  recordedPath: string | null;
+  recordedStatus: string | null;
+  /** 本机一侧；`missing` 时为 null。 */
+  currentVersion: string | null;
+  currentPath: string | null;
+  currentStatus: string | null;
+  /** 差异字段名，仅在 `changed` 时非空。 */
+  differences: string[];
+}
+
+export interface ManifestComparisonSummary {
+  unchanged: number;
+  added: number;
+  missing: number;
+  changed: number;
+}
+
+/** 只读比对结果：不含任何恢复指令，不能据此创建环境。 */
+export interface ManifestComparison {
+  schemaVersion: number;
+  recordedGeneratedAt: string;
+  recordedPortable: boolean;
+  recordedRoot: string | null;
+  currentRoot: string | null;
+  sameRoot: boolean;
+  rows: ManifestComparisonRow[];
+  summary: ManifestComparisonSummary;
+  limitations: string[];
+}
+
+/** 单个环境的按需重新读取结果；只读，不修改任何目录。 */
+export interface EnvironmentRedetect {
+  envType: EnvType;
+  name: string;
+  path: string;
+  version: string | null;
+  status: string;
+  statusDetail: string | null;
+  isCurrent: boolean;
+}
+
 /** 系统散装环境 */
 export interface ExternalEnv {
   tool: string;
@@ -86,15 +279,43 @@ export interface ExternalEnv {
   command: string;
   isPreferred: boolean;
   error: string | null;
+  scanStatus?: ScanStatus;
   /** 可纳入管理的环境类型(结构不兼容时为 null) */
   envType: EnvType | null;
   installRoot: string | null;
   identityPath: string | null;
+  /** Same-installation entrypoints that reported a different version. */
+  versionConflicts?: VersionConflict[];
 }
+
+export interface VersionConflict {
+  path: string;
+  version: string | null;
+  error: string | null;
+}
+
+export type ScanStatus =
+  | "unscanned"
+  | "available"
+  | "notDiscovered"
+  | "permissionDenied"
+  | "startFailed"
+  | "commandFailed"
+  | "parseFailed"
+  | "timedOut";
 
 export interface ScanReport {
   tools: ExternalEnv[];
+  coreTools: ToolScanSummary[];
+  status: "complete" | "partial" | "failed";
   warnings: string[];
+}
+
+export interface ToolScanSummary {
+  tool: string;
+  status: ScanStatus;
+  entryCount: number;
+  detail: string | null;
 }
 
 export interface PathState {
@@ -135,7 +356,14 @@ export interface VersionInfo {
   note: string | null;
   /** 直链下载地址(GitHub/Adoptium 等源使用) */
   url?: string | null;
+  verification?: VerificationInfo;
 }
+
+export type VerificationInfo =
+  | { status: "trustedSha256"; expected: string; source: string }
+  | { status: "checksumFile"; url: string; filename: string; source: string }
+  | { status: "invalid"; reason: string }
+  | { status: "unverified"; reason: string };
 
 /** 下载源 */
 export interface SourceInfo {
@@ -156,18 +384,216 @@ export interface ToolConfig {
   tool: string;
   name: string;
   available: boolean;
+  /** 当前选中可执行文件返回的版本号 */
+  version: string | null;
   executablePath: string | null;
   error: string | null;
   globalPath: string | null;
   cachePath: string | null;
   defaultGlobal: string | null;
   defaultCache: string | null;
+  /** Manager-specific command entry for the selected global root. */
+  commandPath: string | null;
+  /** Whether commandPath came from the manager or was derived from the declared layout. */
+  commandPathSource: "queried" | "layout" | null;
+  /** Read-only warning about a legacy layout that needs recovery first. */
+  layoutWarning: string | null;
+  /** Runtime reason this installation cannot use its own self-update. */
+  selfUpdateBlocker: string | null;
+}
+
+/** One `key → value` change with its previous value, shown before writing. */
+export interface ToolConfigChange {
+  key: string;
+  role: "global" | "command" | "cache" | "configuration";
+  current: string | null;
+  next: string;
+}
+
+/** Read-only configuration diff; applying it is a separate call. */
+export interface ToolConfigPreview {
+  tool: string;
+  available: boolean;
+  blocked: string[];
+  warnings: string[];
+  changes: ToolConfigChange[];
+  commandEntry: string;
+  commandEntryChanged: boolean;
+  entryInPath: boolean;
+  commandStatus: "managed" | "shadowed" | "missing" | "unknown";
+  commandDetail: string;
+  movesExistingPackages: boolean;
+  notes: string[];
+  /** Rows whose value actually differs from the current value. */
+  changedCount: number;
+  /** Existing global packages read from the current root before writing. */
+  affectedPackages: AffectedPackages;
+}
+
+export interface AffectedPackage {
+  name: string;
+  version: string | null;
+  status: "kept" | "unresolved";
+  detail: string | null;
+}
+
+export interface AffectedPackages {
+  packages: AffectedPackage[];
+  unresolvedCount: number;
+  note: string;
+}
+
+/** Batch result for "configure everything"; blocked tools are skipped. */
+export interface ToolConfigBatchPreview {
+  items: ToolConfigPreview[];
+  ready: string[];
+  blocked: string[];
+  totalChanges: number;
+  movesExistingPackages: boolean;
+}
+
+export interface UvToolLayout {
+  name: string;
+  version: string | null;
+  directory: string;
+  receiptStatus: string;
+  receiptSha256: string | null;
+  requirement: string | null;
+  entrypoints: string[];
+  entrypointSnapshots: UvEntrypointSnapshot[];
+  needsRecovery: boolean;
+  recoverable: boolean;
+  issues: string[];
+}
+
+export interface UvEntrypointSnapshot {
+  path: string;
+  sha256: string | null;
+  legacy: boolean;
+}
+
+export interface UvLegacyLayout {
+  toolRoot: string;
+  legacyBin: string;
+  legacyCache: string;
+  nestedBinExists: boolean;
+  nestedCacheExists: boolean;
+  proposedBin: string;
+  proposedCache: string;
+  status: "clean" | "legacy" | "legacy-partial" | "legacy-empty";
+  tools: UvToolLayout[];
+  issues: string[];
+}
+
+export interface UvRecoveryItem {
+  name: string;
+  version: string;
+  status:
+    | "recovered"
+    | "recovered-with-residue"
+    | "failed"
+    | "retained";
+  detail: string | null;
+  removedEntrypoints: string[];
+  newEntrypoints: string[];
+}
+
+export interface UvRecoveryReport {
+  status: "complete" | "partial" | "failed";
+  items: UvRecoveryItem[];
+  retained: string[];
+  layout: UvLegacyLayout;
+}
+
+export interface UpdateCapabilities {
+  /** 此入口只安装 latest，不接受版本参数 */
+  latestOnly: boolean;
+  /** 管理器确实支持的指定版本命令；null 表示没有可背书的单行命令 */
+  manualPinnedCommand: string | null;
+}
+
+export interface PackageManagerUpdatePreview {
+  tool: string;
+  blocked: string | null;
+  executablePath: string | null;
+  currentVersion: string | null;
+  updateProgram: string | null;
+  updateArguments: string[];
+  runsSameFile: boolean | null;
+  capabilities: UpdateCapabilities;
+  notes: string[];
+}
+
+export interface PackageManagerUpdateBatchPreview {
+  items: PackageManagerUpdatePreview[];
+  ready: string[];
+  blocked: string[];
+}
+
+export type PackageManagerBatchOutcome =
+  | "updated"
+  | "unchanged"
+  | "unverified"
+  | "failed"
+  | "skipped";
+
+export interface PackageManagerBatchItem {
+  tool: string;
+  outcome: PackageManagerBatchOutcome;
+  result: PackageManagerUpdateResult | null;
+  skippedReason: string | null;
+}
+
+export interface PackageManagerBatchResult {
+  items: PackageManagerBatchItem[];
+  retryable: string[];
+}
+
+export interface PackageManagerUpdateRecord {
+  status: "planned" | "completed" | "unverified" | "failed";
+  tool: string;
+  executablePath: string;
+  beforeVersion: string | null;
+  afterVersion: string | null;
+  program: string;
+  arguments: string[];
+  attempt: string;
+}
+
+export interface PackageManagerUpdateResult {
+  status:
+    | "commandFailed"
+    | "verificationFailed"
+    | "versionChanged"
+    | "versionUnchanged"
+    | "versionUnknown";
+  tool: string;
+  executablePath: string;
+  beforeVersion: string | null;
+  afterVersion: string | null;
+  versionChanged: boolean | null;
+  output: string;
+  error: string | null;
 }
 
 export interface PackageList {
   tool: string; executable: string; scope: string; source: string | null;
   packages: { name: string; version: string | null; path: string | null; detail: string | null }[];
   warnings: string[];
+}
+
+export interface PackageScanProblem {
+  kind:
+    | "permission-denied"
+    | "not-found"
+    | "unreadable"
+    | "entry-unreadable"
+    | "package-list-failed"
+    | "link-skipped"
+    | "depth-limit"
+    | "limit-reached";
+  path: string | null;
+  detail: string;
 }
 
 export interface PackageScanStatus {
@@ -179,6 +605,8 @@ export interface PackageScanStatus {
   warningCount: number;
   skippedProjects: number;
   roots: string[];
+  problems: PackageScanProblem[];
+  permissionDenied: number;
 }
 
 export interface MigrationPlan {
@@ -232,6 +660,18 @@ export interface OldPackageCleanupPreview {
 export interface OldPackageCleanupResult {
   report: string;
   items: { name: string; version: string; status: string; detail: string | null }[];
+}
+
+export interface AppUpdateStatus {
+  status: "upToDate" | "updateAvailable" | "noRelease" | "unknownVersion" | "error";
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseName: string | null;
+  releaseUrl: string | null;
+  notes: string | null;
+  publishedAt: string | null;
+  assets: { name: string; size: number; digest: string | null }[];
+  error: string | null;
 }
 
 export interface Settings {

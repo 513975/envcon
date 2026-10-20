@@ -18,4 +18,4 @@ EnvCon 0.5.5 起将 ADB 作为 Android SDK Platform Tools 环境管理。它与�
 
 切换会更新 `current\adb`，将该目录加入用户 PATH 后，新终端会使用当前版本。已经运行的 ADB server 不会因切换目录自动重启；版本未生效或卸载提示文件占用时，先执行 `adb kill-server`，再重新打开终端或重试卸载。
 
-使用 Android SDK Platform Tools 需遵守 Google Android SDK 许可条款。0.5.5 EXE 与 NSIS 安装包已在本地构建，版本及哈希见 [构建记录](release-0.5.5.md)；未正式发布 GitHub Release。
+使用 Android SDK Platform Tools 需遵守 Google Android SDK 许可条款。0.5.5 EXE 与 NSIS 安装包已在本地构建，版本及哈希见 [构建记录](../releases/release-0.5.5.md)；未正式发布 GitHub Release。

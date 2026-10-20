@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-06: install task outcome survives a page switch",
+  "status": "implemented-and-ui-verified; real long-running install not exercised",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/install.rs": "91e031cd6f1acbf79eb2e186c1a00a4c2d0ff6e17998f0a713b9e2f2bcfbfd46",
+    "src/lib/installStore.ts": "9bc6b8edbc389efc8df10f2396eec9a68f287103387cba24bdf6005e79d4d48b",
+    "src/pages/Download.tsx": "566a0d9c3bbf51317ed499fcd6013d2f5a7693a1aec33110d21473e5c152433d",
+    "tests/download-ui.mjs": "6cc5d207ef760816166eb9946c2515627f9aa9f62fc94f1e94b87e1d619d5f00"
+  },
+  "reviewFindings": {
+    "installTasks": "gap: a successful task was removed from the backend two seconds after finishing, so leaving the page lost the outcome",
+    "scanTasks": "covered: package scan keeps a snapshot with running/done/partial/canceled/error and a cancel flag",
+    "migrationUpdateDelete": "already synchronous requests with immediate results; no background task store to lose",
+    "unifiedContract": "deferred: statuses are still strings for scan/reinstall and an enum for install; a shared contract is a refactor, not a defect fix"
+  },
+  "implementation": [
+    "the backend now keeps a finished install task for FINISHED_TASK_TTL_SECS (30 minutes) instead of 2 seconds",
+    "error and canceled tasks were already retained; they now share the same window",
+    "installStore gains dismiss(), which hides a finished task locally without discarding the backend record",
+    "dismiss refuses to remove a task that is still downloading or installing, so a stale timer cannot hide a running job",
+    "init merges the backend snapshot instead of replacing the map, so a task finishing during the request is not dropped",
+    "Download.tsx uses dismiss() for the post-toast cleanup and reports canceled tasks that completed elsewhere"
+  ],
+  "uiCoverage": {
+    "download-ui": "the fixture snapshot now includes done, error and canceled tasks that finished elsewhere; the test asserts all three are reported once on first entry, then that returning to the page does not repeat the toast, and existing cancel-button assertions still pass"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "262 passed / 0 failed / 14 ignored"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 695ms"
+    },
+    "targeted": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/download-ui.mjs",
+      "result": "PASS"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real multi-minute install was run to observe the retention window",
+    "The app was not restarted between the start and the page switch; recovery was exercised through the snapshot path",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "A finished task disappears after 30 minutes even if never viewed",
+    "Task state is in memory, so an app restart still loses finished outcomes",
+    "Scan and reinstall tasks keep their own status vocabularies; unifying them remains open work"
+  ]
+}

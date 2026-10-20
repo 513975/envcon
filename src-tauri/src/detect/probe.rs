@@ -7,6 +7,70 @@ use crate::types::EnvType;
 
 /// 探测环境目录的版本号。优先免进程方式(读文件),否则带超时执行命令。
 pub async fn probe_version(env_type: EnvType, dir: &Path) -> Option<String> {
+    probe_version_with_reason(env_type, dir).await.version
+}
+
+/// 探测结果：要么拿到版本，要么说明**为什么没拿到**。
+///
+/// The scan used to report only `版本探测失败`, which leaves a user unable to
+/// tell a wrong CLI argument from a slow binary from a file it could not read.
+/// The reasons here come from the same code path that failed, so they cannot
+/// drift from what actually happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionProbe {
+    pub version: Option<String>,
+    /// Present only when `version` is `None`.
+    pub reason: Option<String>,
+}
+
+pub async fn probe_version_with_reason(env_type: EnvType, dir: &Path) -> VersionProbe {
+    // Types that run a single CLI command get a real reason from the failing
+    // call itself. The rest fall back to an honest "no structured reason",
+    // which is better than inventing one that was never observed.
+    let attempt: Result<String, String> = match env_type {
+        EnvType::Python => {
+            probe_simple(&dir.join("python.exe"), &["--version"], Duration::from_secs(3), "python --version").await
+        }
+        EnvType::Node => {
+            probe_simple(&dir.join("node.exe"), &["--version"], Duration::from_secs(3), "node --version").await
+        }
+        EnvType::Zig => {
+            probe_simple(&dir.join("zig.exe"), &["version"], Duration::from_secs(3), "zig version").await
+        }
+        EnvType::Deno => {
+            probe_simple(&dir.join("deno.exe"), &["--version"], Duration::from_secs(3), "deno --version").await
+        }
+        EnvType::Bun => {
+            probe_simple(&dir.join("bun.exe"), &["--version"], Duration::from_secs(3), "bun --version").await
+        }
+        EnvType::Php => {
+            probe_simple(&dir.join("php.exe"), &["-v"], Duration::from_secs(3), "php -v").await
+        }
+        EnvType::Llvm => {
+            probe_simple(&dir.join("bin").join("clang.exe"), &["--version"], Duration::from_secs(3), "clang --version").await
+        }
+        EnvType::Git => {
+            probe_simple(&dir.join("cmd").join("git.exe"), &["--version"], Duration::from_secs(5), "git --version").await
+        }
+        EnvType::Gh => {
+            probe_simple(&dir.join("bin").join("gh.exe"), &["--version"], Duration::from_secs(5), "gh --version").await
+        }
+        EnvType::Mingw => {
+            probe_simple(&dir.join("bin").join("gcc.exe"), &["--version"], Duration::from_secs(5), "gcc --version").await
+        }
+        other => probe_version_legacy(other, dir)
+            .await
+            .ok_or_else(|| "未取得版本；此类型目前不提供结构化原因（可能来自文件解析或多次尝试）".to_string()),
+    };
+    match attempt {
+        Ok(version) => VersionProbe { version: Some(version), reason: None },
+        Err(reason) => VersionProbe { version: None, reason: Some(reason) },
+    }
+}
+
+/// The original per-type probes, unchanged. Kept separate so the reason-aware
+/// path above can exist without pretending the remaining types report reasons.
+async fn probe_version_legacy(env_type: EnvType, dir: &Path) -> Option<String> {
     match env_type {
         EnvType::Jdk => probe_jdk(dir).await,
         EnvType::Python => probe_cmd(&dir.join("python.exe"), &["--version"]).await,
@@ -25,6 +89,35 @@ pub async fn probe_version(env_type: EnvType, dir: &Path) -> Option<String> {
         EnvType::Mingw => probe_mingw(dir).await,
         EnvType::Adb => probe_adb(dir).await,
     }
+}
+
+/// 把失败片段压成一行短文本，避免把整段输出塞进界面。
+fn snippet(raw: &str) -> String {
+    let flat = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() {
+        return "命令没有输出".into();
+    }
+    if flat.chars().count() > 120 {
+        return format!("{}…", flat.chars().take(120).collect::<String>());
+    }
+    flat
+}
+
+/// 一个可执行文件 + 一条命令的通用探测，失败时点名是哪个入口。
+async fn probe_simple(
+    exe: &Path,
+    args: &[&str],
+    timeout: Duration,
+    label: &str,
+) -> Result<String, String> {
+    if !exe.exists() {
+        return Err(format!("缺少可执行文件：{}", exe.display()));
+    }
+    let output = run_capture(exe, args, timeout)
+        .await
+        .map_err(|reason| format!("{label} 失败：{reason}"))?;
+    version_token(&output)
+        .ok_or_else(|| format!("{label} 的输出没有可识别版本：{}", snippet(&output)))
 }
 
 /// Platform Tools release, not the ADB protocol version (usually 1.0.41).
@@ -317,5 +410,61 @@ mod tests {
         let version = version_file.lines().map(str::trim).find(|line| !line.is_empty())
             .and_then(|line| line.strip_prefix("go")).and_then(version_token);
         assert_eq!(version.as_deref(), Some("1.24.0"));
+    }
+
+    /// A failed probe must say *why*, not just that it failed. The reason comes
+    /// from the same call that failed, so it cannot drift from what happened.
+    #[tokio::test]
+    async fn failed_probes_report_a_reason_instead_of_a_bare_verdict() {
+        use crate::types::EnvType;
+
+        // Missing executable: the reason names the exact path.
+        let dir = crate::test_support::TestDir::new();
+        let probe = super::probe_version_with_reason(EnvType::Node, dir.path()).await;
+        assert_eq!(probe.version, None);
+        let reason = probe.reason.expect("a missing entry must be explained");
+        assert!(reason.contains("缺少可执行文件"), "unexpected: {reason}");
+        assert!(reason.contains("node.exe"), "reason must name the entry: {reason}");
+
+        // Present but not runnable: the reason comes from the launch failure,
+        // not from a guess about why the version is absent.
+        std::fs::write(dir.path().join("node.exe"), b"not a real executable").unwrap();
+        let probe = super::probe_version_with_reason(EnvType::Node, dir.path()).await;
+        assert_eq!(probe.version, None);
+        let reason = probe.reason.expect("an unrunnable entry must be explained");
+        assert!(reason.contains("node --version 失败"), "unexpected: {reason}");
+
+        // A version and a reason are mutually exclusive: one of them is always
+        // None, so a caller can never be told both "ok" and "why not".
+        let ok = super::VersionProbe { version: Some("22.0.0".into()), reason: None };
+        assert!(ok.reason.is_none());
+
+        // Types handled by the file-parsing probes report no structured reason.
+        // They must say so rather than invent one.
+        let other = crate::test_support::TestDir::new();
+        let probe = super::probe_version_with_reason(EnvType::Maven, other.path()).await;
+        assert_eq!(probe.version, None);
+        let reason = probe.reason.expect("failure must still be explained");
+        assert!(
+            reason.contains("不提供结构化原因"),
+            "must not fabricate a reason: {reason}"
+        );
+    }
+
+    /// `probe_version` stays the Option-shaped API for existing callers, so the
+    /// reason-aware path cannot accidentally change their behaviour.
+    #[tokio::test]
+    async fn probe_version_keeps_its_option_contract() {
+        let dir = crate::test_support::TestDir::new();
+        std::fs::write(dir.path().join("source.properties"), "Pkg.Revision = 36.0.2\n").unwrap();
+        assert_eq!(
+            super::probe_version(crate::types::EnvType::Adb, dir.path()).await.as_deref(),
+            Some("36.0.2")
+        );
+        let empty = crate::test_support::TestDir::new();
+        assert_eq!(
+            super::probe_version(crate::types::EnvType::Node, empty.path()).await,
+            None
+        );
     }
 }

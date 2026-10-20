@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R2 / SCAN-CORE-01: package scan IO failures get structured classification instead of only free-text warnings",
+  "status": "implemented-with-isolated-fixtures; real permission-denied directory not exercised on the host",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "reviewFindings": {
+    "scopeChecked": "R2 (SCAN-CORE-01) and PATH-01 pending sub-items were re-read against the existing implementation before choosing work.",
+    "alreadyCovered": [
+      "R2-a..R2-f are complete: statuses, identity dedup, Rust fixtures, entrypoint version conflicts, conflict UI.",
+      "PATH-01 line 162 ('npm/.NET entry overlapping root') is a 2026-10-17 note already superseded by PATH-01-c: command_entry_policy returns ToolRoot for npm/dotnet and validate_layout explicitly allows that overlap for ToolRoot and FixedSubdirectory policies.",
+      "PATH-01 line 152 (real uv recovery, real manager versions) needs a real uv install; it cannot be isolated."
+    ],
+    "realGap": "package_scan wrote every IO failure as an untyped Chinese string. A caller could not tell 'permission denied' from 'the directory vanished' or 'package list failed' without parsing prose, and there was no counter for how much of the scanned range was inaccessible."
+  },
+  "implementation": {
+    "newType": "ScanProblem { kind, path, detail } with kinds permission-denied, not-found, unreadable, entry-unreadable, package-list-failed, link-skipped, depth-limit, limit-reached",
+    "snapshotFields": ["problems: Vec<ScanProblem>", "permissionDenied: usize"],
+    "classification": "classify_io_kind maps std::io::ErrorKind to permission-denied / not-found / unreadable; Windows access-denied surfaces as PermissionDenied and a removed path as NotFound.",
+    "wiring": [
+      "root canonicalize failure -> classify_io_kind",
+      "read_dir failure -> classify_io_kind",
+      "directory entry iteration failure -> entry-unreadable",
+      "symlink_metadata failure -> classify_io_kind",
+      "skipped link directory -> link-skipped",
+      "depth >= 64 -> depth-limit",
+      "directory or time limit -> limit-reached",
+      "package list read failure -> package-list-failed"
+    ],
+    "invariants": [
+      "problems and warnings are appended from the same event, so the legacy free-text view and the structured view cannot disagree.",
+      "permissionDenied counts only permission-denied kinds; it is never inferred from the warning count.",
+      "Both lists are capped at MAX_PROBLEMS (80) while warningCount keeps growing, so the UI can still report dropped diagnostics.",
+      "Root discovery problems (no accessible root, thread panic, discovery warnings) stay free-text warnings: they are not about a specific unreadable path, so they have no kind to claim."
+    ],
+    "ui": "OldPackageScan shows an explicit amber notice when permissionDenied > 0, stating those locations were not scanned and that absence there does not mean no package is installed.",
+    "types": "PackageScanProblem added and PackageScanStatus extended with problems/permissionDenied."
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "266 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml package_scan::tests -- --test-threads=1",
+      "result": "4 passed / 0 failed / 1 ignored"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 705ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "no whitespace errors (only LF/CRLF notices)"
+    },
+    "newFixtures": [
+      "package_scan::tests::io_failures_are_classified_instead_of_only_free_text",
+      "package_scan::tests::permission_denied_is_counted_separately_and_problems_stay_bounded"
+    ]
+  },
+  "sourceHashes": {
+    "src-tauri/src/package_scan.rs": "fbfa96c5b94c74ae4efdd8fe4ccdca1173194faf2c5cd4ec9521efdc318ea3b3",
+    "src/lib/types.ts": "bf5c4b26d3014fbec4f56edff4f58c1ea07d3bcf4d156b50af5989da1d9eff94",
+    "src/components/OldPackageScan.tsx": "e7b9aaa962afd5a1b897804c88dfa22bc4585d6b0a1489e677924197732d219e"
+  },
+  "notVerified": [
+    "No real access-denied directory was scanned on this host; the permission branch is proven by classify_io_kind applied to a constructed PermissionDenied error, not by an actual ACL denial.",
+    "No UI assertion covers the new permission notice: the only suite that drives the '旧包扫描' tab (tests/package-scan-ui.mjs) is git-ignored and already fails at an unrelated older assertion (line 61, 'bun：已安装且可用'), so it is not a usable gate.",
+    "R2 still cannot close: Windows real-machine consistency and R0/R1 gates remain open."
+  ],
+  "limitations": [
+    "Kind names are a closed set; a future failure mode needs both a new kind and a fixture.",
+    "The structured list is capped like the free-text list, so a tree with more than 80 failures reports the rest only as a count.",
+    "Root discovery warnings stay free-text on purpose."
+  ]
+}

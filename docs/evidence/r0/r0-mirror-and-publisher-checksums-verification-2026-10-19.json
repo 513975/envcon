@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R0 mirror-vs-official byte comparison for every environment type that has both sources, plus verification of publisher checksum files for the four assets previously recorded as having none",
+  "status": "mirror-comparison-complete; publisher checksums adopted for Rust and PHP, documented as unusable for Maven and ADB",
+  "owner": "Codex",
+  "targetVersion": "0.5.6",
+  "network": {
+    "status": "available",
+    "downloadRoot": "%TEMP%\\mirror-audit",
+    "note": "All downloads went to a temporary directory. No installer ran, nothing was extracted into the managed root, and no workspace file outside src-tauri/src and docs was written by the comparison itself."
+  },
+  "mirrorComparison": {
+    "method": "Download the same version from the official URL and the mirror URL used by SOURCE_MIRROR, then compare SHA-256 of the complete file.",
+    "environmentsWithBothSources": 6,
+    "compared": 6,
+    "identical": 6,
+    "different": 0,
+    "unavailable": 0,
+    "results": [
+      {
+        "tool": "Node",
+        "version": "v26.12.0",
+        "official": "https://nodejs.org/dist/v26.12.0/node-v26.12.0-win-x64.zip",
+        "mirror": "https://npmmirror.com/mirrors/node/v26.12.0/node-v26.12.0-win-x64.zip",
+        "sha256": "50efaf01a08c520b4bbe499c09a8c5a5c370002c419c0d9da2c6815d3066a453",
+        "bytes": 41895610,
+        "match": true
+      },
+      {
+        "tool": "Go",
+        "version": "go1.27.2",
+        "official": "https://go.dev/dl/go1.27.2.windows-amd64.zip",
+        "mirror": "https://golang.google.cn/dl/go1.27.2.windows-amd64.zip",
+        "sha256": "1314008898bd40df77af4b014f777f08873dbdfbcd3d92308728ee03304fe04f",
+        "bytes": 79008081,
+        "match": true
+      },
+      {
+        "tool": "Gradle",
+        "version": "9.8.1",
+        "official": "https://services.gradle.org/distributions/gradle-9.8.1-bin.zip",
+        "mirror": "https://mirrors.cloud.tencent.com/gradle/gradle-9.8.1-bin.zip",
+        "sha256": "dce76f55f8e251a3a1f130eb120f30b3d271de2b76c9b0729d316b5a1b6dc01f",
+        "bytes": 151620101,
+        "match": true
+      },
+      {
+        "tool": "Maven",
+        "version": "3.10.0",
+        "official": "https://dlcdn.apache.org/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.zip",
+        "mirror": "https://mirrors.huaweicloud.com/apache/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.zip",
+        "sha256": "1f6d9909266510f039f59aa0e13dcd2c66da85f043e56276e41f2918f8bddaff",
+        "bytes": 10102082,
+        "match": true
+      },
+      {
+        "tool": "Python",
+        "version": "3.15.0",
+        "official": "https://www.python.org/ftp/python/3.15.0/python-3.15.0-amd64.exe",
+        "mirror": "https://mirrors.huaweicloud.com/python/3.15.0/python-3.15.0-amd64.exe",
+        "sha256": "67d9a63eb145a34aa939f02eadbf8c57f21fcdd6decb901ccac578d2d1f01d6f",
+        "bytes": 45383680,
+        "match": true
+      },
+      {
+        "tool": "Jdk",
+        "version": "25.0.4.1+1",
+        "official": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_x64_windows_hotspot_25.0.4.1_1.zip",
+        "mirror": "https://mirrors.tuna.tsinghua.edu.cn/Adoptium/25/jdk/x64/windows/OpenJDK25U-jdk_x64_windows_hotspot_25.0.4.1_1.zip",
+        "sha256": "00c847d804f4a78e9f04f2683faf14fed898535b177b7fc704486cb0284e9283",
+        "bytes": 141167264,
+        "match": true,
+        "note": "The Tsinghua mirror only carries majors 25/21/17/11/8, matching jdk_tuna(); the audited official JDK 27 asset has no mirror counterpart to compare."
+      }
+    ]
+  },
+  "publisherChecksums": {
+    "method": "Locate a publisher-published checksum file, read its value, and recompute the matching digest over the previously downloaded official asset.",
+    "previouslyRecordedAsNone": 4,
+    "publisherChecksumActuallyExists": 4,
+    "adoptedInCode": 2,
+    "results": [
+      {
+        "tool": "Rust",
+        "asset": "rustup-init.exe",
+        "checksumUrl": "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe.sha256",
+        "algorithm": "sha256",
+        "publisherValue": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
+        "localValue": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
+        "matches": true,
+        "adopted": true
+      },
+      {
+        "tool": "Php",
+        "asset": "php-8.5.11-Win32-vs17-x64.zip",
+        "checksumUrl": "https://windows.php.net/downloads/releases/sha256sum.txt",
+        "algorithm": "sha256",
+        "publisherValue": "c83d5a1e0d760fb026ce695d8a70a73a4c81ac224b3e5c425406b23a7d53e1de",
+        "localValue": "c83d5a1e0d760fb026ce695d8a70a73a4c81ac224b3e5c425406b23a7d53e1de",
+        "matches": true,
+        "adopted": true
+      },
+      {
+        "tool": "Maven",
+        "asset": "apache-maven-3.10.0-bin.zip",
+        "checksumUrl": "https://dlcdn.apache.org/maven/maven-3/3.10.0/binaries/apache-maven-3.10.0-bin.zip.sha512",
+        "algorithm": "sha512",
+        "publisherValue": "22d31676d5b92ed53308c19ecded3245d0efd0cddfec51ec7bab62f4f13ad70ddddceff8e62940e0e8e2421f3cde8106737f4becec0aa034ffeff2a754e88337",
+        "localSha512Matches": true,
+        "adopted": false,
+        "reason": "The download verifier only accepts SHA-256; the row now states that Apache offers SHA-512, so the asset is explicitly unverified rather than undocumented."
+      },
+      {
+        "tool": "Adb",
+        "asset": "platform-tools_r37.0.1-win.zip",
+        "checksumSource": "https://dl.google.com/android/repository/repository2-3.xml",
+        "algorithm": "sha1",
+        "publisherValue": "e03e78b1d80b396f1c3358e31251cb31740e1110",
+        "localValue": "e03e78b1d80b396f1c3358e31251cb31740e1110",
+        "matches": true,
+        "adopted": false,
+        "reason": "Google publishes only SHA-1 in its SDK repository index; verifying a weaker digest would overstate assurance. The row states the reason instead."
+      }
+    ]
+  },
+  "codeChanges": {
+    "defectsFixed": [
+      "download_spec_with_verification unconditionally overwrote every branch's verification and expected_size, so any per-branch decision (or the caller's digest) was discarded; a branch that decided now keeps its decision.",
+      "Rust's official branch hard-coded VerificationInfo::default(), discarding the publisher checksum even when resolved.",
+      "Rust's mirror branch would have inherited the official digest; it now states that the mirror copy was not proven byte-identical."
+    ],
+    "adoptedSources": [
+      "rust_channels() attaches rustup-init.exe.sha256 for stable/beta/nightly",
+      "parse_php_releases attaches windows.php.net/downloads/releases/sha256sum.txt with the exact archive filename"
+    ],
+    "explicitUnverifiedReasons": [
+      "Maven rows: Apache only publishes SHA-512",
+      "ADB rows: Google only publishes SHA-1"
+    ],
+    "newConstant": "VerificationInfo::DEFAULT_UNVERIFIED_REASON distinguishes an untouched default from a deliberate unverified decision."
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "264 passed / 0 failed / 14 ignored"
+    },
+    "sourcesSuite": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml sources::tests -- --test-threads=1",
+      "result": "20 passed / 0 failed / 3 ignored"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors, 1 pre-existing path_ownership::preview_cleanup dead-code warning"
+    },
+    "newFixtures": [
+      "sources::tests::rust_uses_the_publisher_checksum_for_the_official_lead_binary_only",
+      "sources::tests::php_and_maven_state_why_their_publisher_checksum_cannot_be_used"
+    ]
+  },
+  "notVerified": [
+    "Mirror behaviour over time: a mirror can diverge after this audit; the comparison is a snapshot, not a guarantee.",
+    "No mirror download was executed through the application's own download path, only through direct HTTP fetches.",
+    "Windows VM installation remains unverified, so R0 cannot be closed.",
+    "No packaging, tagging or release."
+  ],
+  "limitations": [
+    "The JDK comparison used major 25 because the mirror does not carry major 27.",
+    "Comparing official and mirror bytes proves they agree now, not that either is authentic; publisher checksums remain the authenticity anchor.",
+    "Maven and ADB stay unverified by design until the verifier supports SHA-512 and a deliberate decision about SHA-1 is recorded."
+  ]
+}

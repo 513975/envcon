@@ -1,0 +1,47 @@
+name: Windows verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run Rust library tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      # UI fixtures launch the installed Microsoft Edge channel; no browser
+      # download is required. Keep Playwright out of package.json so local
+      # verification can use a provided runtime module.
+      - name: Install Playwright
+        run: npm install --no-save --no-package-lock playwright@1.62.1
+
+      - name: Run full verification
+        run: npm run verify

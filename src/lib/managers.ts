@@ -6,6 +6,7 @@ export type ManagerDefinition = {
   family: "node" | "python" | "native";
   adapter: "nodeCli" | "pythonPip" | "isolated";
   reinstall: "global" | "venv";
+  selfUpdate: boolean;
   globalConfig: boolean;
   cacheConfig: boolean;
   migrateGlobal: boolean;

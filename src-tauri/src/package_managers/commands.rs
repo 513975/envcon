@@ -23,14 +23,17 @@ pub fn environment(tool: &str, scope: &Path, workspace: &Path) -> BTreeMap<Strin
         put(key, scope.to_path_buf());
     }
     if let Some(key) = super::bin_env(tool) {
-        put(key, workspace.join("bin"));
+        put(key, super::bin_path(tool, scope));
     }
     if let Some(key) = super::cache_env(tool) {
-        put(key, workspace.join("cache"));
+        put(key, super::cache_path(tool, scope));
     }
     match tool {
+        "pnpm" => {
+            put("PNPM_HOME", super::bin_path(tool, scope));
+        }
         "pipx" => {
-            put("UV_CACHE_DIR", workspace.join("cache"));
+            put("UV_CACHE_DIR", super::cache_path(tool, workspace));
             put("PIPX_MAN_DIR", workspace.join("man"));
             put("PIPX_LOG_DIR", workspace.join("logs"));
             put("PIPX_TRASH_DIR", workspace.join("trash"));

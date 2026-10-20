@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R2/SCAN-CORE-01: same-installation entrypoints with conflicting versions",
+  "status": "implemented-and-isolated-verified; real host scan not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "sourceHashes": {
+    "src-tauri/src/detect/system.rs": "29cbea6ae4077bbcf9a56b31e3549095689d20f22097b2ce015997b53cac8bb1",
+    "src-tauri/src/types.rs": "7096365ca5f8394abca03ce0c122bcc48e7b159b7b878d3ae3b37ebc65eae330"
+  },
+  "reviewFindings": {
+    "entryVersionMismatch": "gap: one installation kept a single record and silently dropped a second launcher whose probe reported a different version",
+    "nonExecutablePathEntry": "covered: find_executable only accepts an existing file with an allowed extension, and a launcher that cannot start maps to StartFailed with the error text",
+    "permissionDeniedDirectory": "covered: PermissionDenied is produced both for a spawn failure and for exit code 5 or an access-denied message, and has a dedicated fixture"
+  },
+  "implementation": [
+    "ExternalEnv gains version_conflicts: the launchers of the same installation whose reported version differs from the selected record",
+    "each duplicate launcher is now probed instead of being dropped unexamined",
+    "a conflict records the launcher path plus either its version or the probe error",
+    "conflicts are collected per selected row so they survive the per-batch dedup",
+    "scan_discovered adds one warning per affected tool naming up to three conflicting entrypoints and the total count",
+    "the report status becomes Partial when any such conflict exists, so the scan is not presented as fully consistent",
+    "version_conflicts is empty for identical versions and for the pip-module row"
+  ],
+  "fixtures": [
+    "detect::system::tests::same_installation_entrypoints_with_different_versions_are_reported",
+    "detect::system::tests::identical_versions_across_entrypoints_produce_no_conflict"
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "262 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml detect::system::tests -- --test-threads=1",
+      "result": "20 passed / 1 ignored / 255 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real host installation with genuinely divergent launcher versions was scanned",
+    "The UI does not yet render version_conflicts; only the warning text surfaces them",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "A conflict is recorded only for launchers sharing the same resolved install identity; separate installs remain separate rows",
+    "Both probes run, so a scan costs one extra process per duplicate launcher",
+    "A launcher whose probe fails is counted as a conflict rather than an installation failure"
+  ]
+}

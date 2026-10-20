@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 347: the uninstall preview now also reports directories another process holds open, separately from locked files",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "gapClosed": "Item 347 records that only file locks were detected. A directory another program holds open blocks deletion just as a locked file does, but the preview said nothing about it: the user saw only 目录树未能完整读取，不能确认影响范围 with no cause, or got no warning at all and watched the deletion fail.",
+  "implementation": {
+    "directory_blocks_deletion": "Same rule as the file probe: open with DELETE access and share_mode(7), close immediately, and count only ERROR_SHARING_VIOLATION as a block. FILE_FLAG_BACKUP_SEMANTICS is required because opening a directory with DELETE access fails with access-denied without it, which would be indistinguishable from a permissions problem.",
+    "LOCKED_DIR_RESOURCE": "A distinct resource name (目录占用) rather than reusing 文件占用, because the remedy differs: a locked file is usually closed from the file, while an open directory is usually another program's working directory.",
+    "traversal": "Directories are probed during the existing inventory walk, sampled under the same LOCK_PROBE_LIMIT as files so a large tree is not probed entry by entry.",
+    "twoReportPaths": "Observed live during this round: a handle that permits no sharing at all blocks read_dir itself, so the walk returns Err and the observation must be reported from the error branch; a handle that allows read/write but refuses deletion lets the walk complete and is reported on the success branch. Both branches now name the directory, so the cause is stated instead of a bare 'could not read'.",
+    "equality": "LOCKED_DIR_RESOURCE is stripped alongside LOCK_RESOURCE before comparing a stored preview with a fresh observation, so a program opening a folder between preview and execution cannot make a valid preview look stale."
+  },
+  "fixtures": [
+    {
+      "name": "commands::tests::uninstall_preview_reports_an_open_directory_separately_from_a_locked_file",
+      "asserts": [
+        "a tree nobody holds produces no 目录占用 entry, so the preview does not invent one",
+        "a handle opened with share_mode(3) (read/write allowed, delete refused) is seen by directory_blocks_deletion as a real block rather than a permissions problem",
+        "the preview names the specific folder (cache) so the user knows what to close",
+        "the details mention 工作目录, the remedy that differs from a locked file",
+        "the entry carries count 1",
+        "the scope stays complete: a directory lock is reported, not used to block the preview",
+        "the directory lock is not misreported under the file-lock resource name",
+        "releasing the handle removes the entry from the next preview"
+      ]
+    },
+    {
+      "name": "commands::tests::an_exclusively_held_directory_is_named_even_when_the_walk_fails",
+      "asserts": [
+        "a handle opened with share_mode(0) really does make the traversal fail, asserted by scope_complete staying false rather than assumed",
+        "the 受管目录树 blocked entry is still present, so the failure is reported at all",
+        "the blocking directory is named (cache) in the blocked list, which is the whole point of the change",
+        "the entry carries count 1",
+        "releasing the handle makes the scope readable again, proving the failure was the handle and not a persistent condition"
+      ]
+    }
+  ],
+  "discoveredDuringWork": {
+    "finding": "A fully exclusive directory handle (share_mode 0) makes read_dir fail, so inventory_managed_tree returns Err and the walk stops before the success-branch reporting runs.",
+    "howEstablished": "A temporary diagnostic printed `DIAG blocks=true inv_ok=false dirs=2 locked_dirs=[\"cache\"]`, which proved the probe itself works while the traversal fails.",
+    "consequence": "The reporting was moved into the error branch as well, and the fixture switched to share_mode(3), which models the ordinary open-working-directory case instead of the extreme one. Recording this because the first version of the code would have silently dropped the observation in exactly the case that matters most."
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "299 passed / 0 failed / 14 ignored",
+      "note": "run standalone so the exit code is cargo test's own"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml uninstall_preview_reports_an_open_directory -- --test-threads=1",
+      "result": "1 passed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors, 0 warnings"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/commands.rs",
+      "result": "exit 0, CRLF notice only"
+    }
+  },
+  "uiAssertions": [
+    "a preview with no observed directory lock must not render a 目录占用 entry",
+    "a preview reporting a directory lock renders the entry with the specific folder (cache) and the 工作目录 remedy",
+    "the count renders as （1 项） rather than being swallowed",
+    "the entry lands in the 未验证/不自动处理 section and never in 将移除, so a lock is never mistaken for something the delete will handle"
+  ],
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "6a51349e39b06fe573817ec9373d7e13bdc721139148d2efa964bb6fd44d6d81",
+    "tests/release-052-ui.mjs": "dc237143a9b96cc7901b594376ed06c84a753eef3b64f533605108ff850cba4c"
+  },
+  "notVerified": [
+    "No real program held a real environment directory; both the blocking and the reported cases use synthetic handles",
+    "The two report paths are covered separately: the success branch by the share_mode(3) fixture, the error branch by the share_mode(0) fixture that asserts scope_complete stays false"
+  ],
+  "limitations": [
+    "Only sharing violations count, so a directory held open in a way that still permits DELETE is not reported — that is deliberate, since guessing would produce false alarms",
+    "Directories are sampled under LOCK_PROBE_LIMIT together with files; a tree with more than 200 entries is not fully probed and the preview says it sampled",
+    "No process identification: the preview names the directory, not the program holding it",
+    "Item 347 stays unchecked: mapped executable images and permission-problem cases remain undetected",
+    "No packaging, tagging or release"
+  ]
+}

@@ -57,6 +57,11 @@ static SCANNED: Mutex<BTreeMap<String, (Preview, SourcePlan)>> = Mutex::new(BTre
 static SERIAL: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn verify_separate(source: &Path, destination: &Path) -> Result<()> {
+    if crate::detect::system::has_reparse_component(source)
+        || crate::detect::system::has_reparse_component(destination)
+    {
+        return Err(AppError::msg("新旧目录不能是符号链接或 Junction"));
+    }
     let source_real = source.canonicalize()?;
     let dest_real = destination.canonicalize()?;
     if !crate::detect::system::paths_eq(source, &source_real)
@@ -296,6 +301,65 @@ pub async fn execute(tool: String, token: String, names: Vec<String>) -> Result<
     .map_err(|e| AppError::msg(format!("清理任务异常: {e}")))?
 }
 
+/// How many cleanup reports to keep. Older ones are removed after a new report
+/// is written; this bounds a directory that would otherwise grow forever.
+pub const RETAIN_REPORTS: usize = 20;
+
+/// Delete the oldest cleanup reports so at most `retain` remain.
+///
+/// Only files this module created (`envcon-cleanup-*.json`) are considered:
+/// anything else in the directory, including a user's own notes, is left
+/// untouched. Returns how many files were actually removed.
+pub fn prune_reports(dir: &Path, retain: usize) -> Result<usize> {
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    // A redirected directory could make this delete files outside the reports
+    // folder, so refuse rather than guess.
+    if crate::detect::system::has_reparse_component(dir) {
+        return Err(AppError::msg("清理报告目录被重定向，已跳过保留期限清理"));
+    }
+    let mut reports: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("envcon-cleanup-") || !name.ends_with(".json") {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        // An unreadable timestamp sorts before every known time, so such a file
+        // is pruned first rather than being kept forever.
+        reports.push((
+            meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+            path,
+        ));
+    }
+    if reports.len() <= retain {
+        return Ok(0);
+    }
+    reports.sort();
+    let stale = reports.len() - retain;
+    let mut removed = 0;
+    for (_, path) in reports.into_iter().take(stale) {
+        if std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 fn write_report(file: &mut std::fs::File, result: &CleanupResult) -> Result<()> {
     let json = serde_json::to_vec_pretty(result)?;
     file.rewind()?;
@@ -352,4 +416,94 @@ mod tests {
         assert!(verify_separate(&link, &new).is_err());
         std::fs::remove_dir(link).unwrap();
     }
+
+    #[test]
+    fn rejects_cleanup_roots_with_redirected_ancestors() {
+        let dir = crate::test_support::TestDir::new();
+        let redirected_parent = dir.path().join("redirected-parent");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(redirected_parent.join("source")).unwrap();
+        std::fs::create_dir_all(outside.join("destination")).unwrap();
+        let source_link = dir.path().join("source-parent");
+        junction::create(&redirected_parent, &source_link).unwrap();
+
+        assert!(verify_separate(
+            &source_link.join("source"),
+            &outside.join("destination")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn cleanup_report_pruning_keeps_the_newest_and_leaves_foreign_files_alone() {
+        let dir = crate::test_support::TestDir::new();
+        let reports = dir.path().join("cleanup-reports");
+        std::fs::create_dir_all(&reports).unwrap();
+
+        // Ten reports created with deliberately increasing mtimes so the
+        // ordering is deterministic rather than depending on filesystem tick.
+        for index in 0..10 {
+            let path = reports.join(format!("envcon-cleanup-{index}.json"));
+            std::fs::write(&path, "{}").unwrap();
+            set_mtime(&path, 1_700_000_000 + index);
+        }
+        // Files this module did not create must survive pruning.
+        std::fs::write(reports.join("notes.txt"), "keep me").unwrap();
+        std::fs::write(reports.join("envcon-cleanup-notjson.md"), "keep me").unwrap();
+        std::fs::write(reports.join("other-report.json"), "keep me").unwrap();
+
+        assert_eq!(prune_reports(&reports, 4).unwrap(), 6);
+        let mut remaining: Vec<String> = std::fs::read_dir(&reports)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        remaining.sort();
+        // The four newest reports survive; the six oldest are gone.
+        assert_eq!(
+            remaining
+                .iter()
+                .filter(|name| name.starts_with("envcon-cleanup-") && name.ends_with(".json"))
+                .count(),
+            4
+        );
+        assert!(remaining.contains(&"envcon-cleanup-9.json".to_string()));
+        assert!(remaining.contains(&"envcon-cleanup-6.json".to_string()));
+        assert!(!remaining.contains(&"envcon-cleanup-5.json".to_string()));
+        assert!(remaining.contains(&"notes.txt".to_string()));
+        assert!(remaining.contains(&"envcon-cleanup-notjson.md".to_string()));
+        assert!(remaining.contains(&"other-report.json".to_string()));
+
+        // The bound is inclusive: exactly `retain` files are a no-op.
+        assert_eq!(prune_reports(&reports, 4).unwrap(), 0);
+        // A missing directory is not an error and removes nothing.
+        assert_eq!(prune_reports(&dir.path().join("absent"), 4).unwrap(), 0);
+    }
+
+    #[test]
+    fn pruning_refuses_a_redirected_report_directory() {
+        let dir = crate::test_support::TestDir::new();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        for index in 0..3 {
+            std::fs::write(outside.join(format!("envcon-cleanup-{index}.json")), "{}").unwrap();
+        }
+        let redirected = dir.path().join("cleanup-reports");
+        junction::create(&outside, &redirected).unwrap();
+
+        // Deleting through a junction would remove files outside the reports
+        // folder, so the whole prune is refused instead.
+        assert!(prune_reports(&redirected, 1).is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 3);
+    }
+}
+
+/// Force a file's modification time so ordering fixtures do not depend on
+/// filesystem timestamp granularity.
+#[cfg(test)]
+fn set_mtime(path: &Path, secs: u64) {
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    file.set_times(std::fs::FileTimes::new().set_modified(time))
+        .unwrap();
 }

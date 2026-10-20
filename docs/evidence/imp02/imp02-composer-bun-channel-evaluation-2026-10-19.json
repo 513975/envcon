@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 / R2 item 325 follow-up: evaluate whether composer and bun have reliable installation-shape evidence, and lock the decision not to guess",
+  "status": "evaluated-and-decided; no new heuristic added",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "d09bcb64d0d2bf7e15f3e6ce436af572996987508fb7957d5aba528bf06f266f"
+  },
+  "question": "Can composer and bun be classified into UpdateChannel by filesystem evidence, the way Corepack shims and pip-installed uv already are?",
+  "findings": [
+    {
+      "tool": "composer",
+      "candidateEvidence": "A composer.bat whose body references composer.phar",
+      "whyRejected": "The launcher proves only that this copy wraps composer.phar. It does not prove which installer created it, so the same file shape occurs for the standalone installer, a manual phar download, and a package-manager install. Treating it as a distinct channel would mean inventing a rule with no negative case.",
+      "decision": "Stay Standalone"
+    },
+    {
+      "tool": "bun",
+      "candidateEvidence": "Install path shape, or a sibling shim directory",
+      "whyRejected": "Every Windows bun distribution writes the same static bun.exe; scoop and winget add their own shim outside the install directory and leave no marker next to the binary. Nothing beside the resolved command distinguishes them, and a false positive would disable an update that actually works.",
+      "decision": "Stay Standalone"
+    }
+  ],
+  "principle": "This checker refuses only on a positive, verifiable signal. Absence of evidence is not evidence of a different installer, so an unknown shape stays Standalone instead of being guessed at.",
+  "implementation": "A comment at the catch-all arm records why these two tools have no shape check, so the omission is deliberate and documented rather than an oversight.",
+  "fixtures": [
+    {
+      "name": "pkgtools::tests::composer_and_bun_stay_standalone_because_no_reliable_evidence_exists",
+      "asserts": [
+        "a composer.bat wrapping composer.phar still reports Standalone with no blocker and yields `self-update`",
+        "a bun.exe with interpreter-looking files beside it still reports Standalone with no blocker and yields `upgrade`",
+        "the second case deliberately places python.exe and pip.exe next to bun.exe to prove the uv rule does not leak into bun"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "281 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml composer_and_bun_stay_standalone -- --test-threads=1",
+      "result": "1 passed"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/pkgtools.rs",
+      "result": "exit 0, CRLF notice only"
+    }
+  },
+  "notVerified": [
+    "No real composer or bun installation was inspected on this host; the decision rests on the installers' documented behaviour, not on observed files",
+    "No UI change: both tools keep the existing 'conditionally supported' wording",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "If a future bun or composer installer starts writing a marker next to the binary, this evaluation must be revisited",
+    "The Corepack heuristic still cannot see a shim that invokes corepack through another wrapper",
+    "IMP-02 item 325 remains unchecked: two of ten managers still lack runtime shape diagnosis, by decision rather than by omission"
+  ]
+}

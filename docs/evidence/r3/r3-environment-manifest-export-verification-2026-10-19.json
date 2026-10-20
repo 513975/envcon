@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 349: export a read-only environment manifest, and state its cross-machine limits as facts",
+  "status": "implemented-and-isolated-verified; no environment created, moved or restored",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "8c8640d8b37eac1d0b64f6e702ed4ca3e02228fa6804306b5d4a7b72552dffd7",
+    "src-tauri/src/types.rs": "f8e92a4790d88ec52563c6946de7aca35f367933fc07a30e43ee27857a34180d",
+    "src-tauri/src/lib.rs": "58593d4330e7244b53da0e3d66ee74f275d459cf05db207a3e1e6bf565472dfe",
+    "src/lib/api.ts": "78b275188795059f7112c37ec5c12cbb9bcff7ddbbc563165f0fddee4cf60763",
+    "src/lib/types.ts": "028baab2ed7a50601b599555ff6bcb46b6f67baf4dde86a7833439db60041d00",
+    "src/pages/Environments.tsx": "55daa78ba992c862cf4e8422e19169093cd2ea2fb8dd6b60030d543347d9656f",
+    "tests/release-052-ui.mjs": "f44f247139e88360329a102b99fe350f4998e660e557bb9077a99502e9d6aae9"
+  },
+  "gapClosed": "ROADMAP R3 item 349 asked for environment export/import/backup/restore. Before this round the app could export nothing at the environment level: only the settings file and PATH had backup mechanisms, so a user had no way to record what was installed.",
+  "implementation": {
+    "manifestTypes": "ManifestEntry and EnvironmentManifest live in types:: and serialize camelCase. An entry records name, type, absolute path, resolved identity, version, status and the link/current flags — nothing that would let a reader recreate an environment.",
+    "pureBuilder": "build_manifest(&Overview, token) is filesystem- and clock-free, so the mapping, the ordering and the compatibility wording are covered by fixtures instead of only through IPC.",
+    "deterministicOrder": "Entries are sorted by (env type, lowercased name) so two exports of the same state produce identical bytes and diff cleanly.",
+    "limitsAsFacts": "compatibility carries four standing limits plus two conditional ones (portable mode, no configured root). The 'empty list does not mean nothing is installed' wording appears only when no root is configured, because that is when it is true.",
+    "pathGuard": "validate_manifest_target rejects relative paths, non-.json extensions and paths without a parent, before any write happens.",
+    "atomicWrite": "The file is written through config::atomic_write, which writes a sibling temp file and replaces on success, so a half-written manifest never appears at the target path.",
+    "ui": "The environments page gains a 导出清单 button that opens a save dialog and reports the written path plus the 'this is not a restorable backup' caveat."
+  },
+  "fixtures": [
+    {
+      "name": "commands::tests::manifest_records_every_entry_and_states_its_portability_limits",
+      "asserts": [
+        "entries from every category are kept (3 of 3, none dropped)",
+        "link/current flags survive into the manifest",
+        "entries are sorted deterministically",
+        "the standing limits mention 本机绝对路径 and 不是可还原的备份",
+        "the portable-mode limit is absent when not portable",
+        "the notes state that no one-click restore exists"
+      ]
+    },
+    {
+      "name": "commands::tests::manifest_flags_portable_mode_and_a_missing_root",
+      "asserts": [
+        "an empty category list yields no entries but still explains why",
+        "portable mode adds its own limit",
+        "a missing root adds 不代表本机没有安装, so an empty manifest is never read as 'nothing installed'"
+      ]
+    },
+    {
+      "name": "commands::tests::manifest_target_must_be_an_absolute_json_path",
+      "asserts": [
+        "relative paths are refused",
+        ".txt and extension-less targets are refused",
+        "an absolute .json path is accepted"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "290 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml manifest -- --test-threads=1",
+      "result": "4 passed (3 new fixtures; the name also matches one prior fixture)"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 524ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- ROADMAP.md src-tauri/src/commands.rs src-tauri/src/types.rs src-tauri/src/lib.rs src/lib/api.ts src/lib/types.ts src/pages/Environments.tsx",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "notVerified": [
+    "The export command itself was exercised only through its pure builder and path guard; no real file was written from the UI on this host",
+    "The UI fixture proves the button calls the export exactly once and that cancelling the save dialog exports nothing, but the click still targets the mock",
+    "No import path exists to test, by design"
+  ],
+  "limitations": [
+    "Export only. Import, restore and cross-machine migration are not implemented: paths are machine-bound, so a restore would need a target-resolution step this round deliberately does not design",
+    "The manifest records what the overview already scanned; an environment whose scan failed appears with its status rather than with richer diagnostics",
+    "Item 349 also mentions backup/restore parity with the existing settings and PATH backups; that parity is not attempted here",
+    "IMP item 349 stays unchecked",
+    "No packaging, tagging or release"
+  ]
+}

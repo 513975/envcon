@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 350: a broken environment now says which entry is missing, instead of only that the structure is incomplete",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/detect/mod.rs": "f10423242d250df6a15dff81a5dcf5b5d70424636e75ca082777d47550bdd983"
+  },
+  "gapClosed": "looks_like returned only a bool and the scan turned a false into 目录结构不完整或缺少必要可执行文件. A user staring at a broken environment could not tell whether one binary was missing (repairable) or the directory was simply wrong, because the app never named the entry it was looking for.",
+  "implementation": {
+    "reasonFunction": "structure_problem(env_type, root) -> Option<String> names the missing entry. looks_like is now defined as structure_problem(...).is_none(), so the boolean verdict and the explanation cannot drift apart.",
+    "multiEntryTypes": "Types with alternatives keep their semantics: Maven/Gradle accept either .cmd or .bat and say so when both are absent; Rust accepts cargo-home/bin/rustc.exe or a Rust toolchain directory; Adb defers to the existing installation probe.",
+    "scanWiring": "scan_category keeps the reason instead of collapsing it, and the broken status_detail becomes 目录结构不完整：<reason>. A directory whose structure is fine but whose version probe fails still gets the separate 版本探测失败 message, so the two failure modes stay distinguishable."
+  },
+  "fixtures": [
+    {
+      "name": "detect::tests::structure_problem_names_the_missing_entry",
+      "asserts": [
+        "an empty directory names node.exe",
+        "writing node.exe clears the problem and looks_like becomes true",
+        "a JDK with java.exe but no javac.exe names bin/javac.exe specifically",
+        "adding javac.exe clears it and looks_like agrees"
+      ]
+    },
+    {
+      "name": "detect::tests::looks_like_and_structure_problem_never_disagree",
+      "asserts": [
+        "for every one of the 16 environment types, looks_like(empty dir) equals structure_problem(empty dir).is_none()"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "292 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml detect::tests -- --test-threads=1",
+      "result": "2 passed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors, 1 pre-existing path_ownership::preview_cleanup dead-code warning"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/detect/mod.rs",
+      "result": "exit 0, CRLF notice only"
+    }
+  },
+  "notVerified": [
+    "No UI fixture asserts the new status_detail text is rendered; the environments page already displays statusDetail, but the wording itself is only covered by the Rust fixtures",
+    "No real broken installation was inspected on this host; every case used a temporary directory",
+    "The repairable/not-repairable decision is left to the user: this round names the missing entry but offers no automated repair action"
+  ],
+  "limitations": [
+    "Item 350's 're-detect' affordance is still not a dedicated action: the overview re-reads structure and version on every scan, so a user must refresh rather than click a per-environment repair button",
+    "Only the structure reason improved. A directory that passes structure but fails the version probe still says 版本探测失败 without the probe's stderr detail",
+    "Corrupted plain directories still have no repair path beyond deleting them; this round only makes the diagnosis specific",
+    "IMP item 350 stays unchecked",
+    "No packaging, tagging or release"
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R0 execution item 4: per-manager applicability matrix for the ten package managers — catalog capability, isolated fixture coverage, and explicit skip reasons",
+  "status": "offline-matrix-complete; real installed-manager versions and real self-update results remain unverified",
+  "owner": "Codex",
+  "targetVersion": "0.5.6",
+  "fixtureRun": {
+    "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml package_managers:: -- --test-threads=1",
+    "result": "16 passed / 0 failed / 260 filtered out",
+    "scope": "catalog validation, directory roles, manager-specific entry layouts, uv legacy layout, pnpm/Yarn entry separation, npm cache overlap, dotnet source rules, composer repository rules, native command binding"
+  },
+  "managers": [
+    {
+      "id": "npm",
+      "family": "node",
+      "adapter": "nodeCli",
+      "capabilities": { "selfUpdate": true, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::tests::every_manager_has_explicit_roles_and_rejects_config_cache_overlap",
+        "package_managers::native::tests::npm_reinstall_cache_and_config_must_not_overlap_prefix"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "requires a real npm installation and a real global update; not performed on the host"
+    },
+    {
+      "id": "pnpm",
+      "family": "node",
+      "adapter": "nodeCli",
+      "capabilities": { "selfUpdate": true, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::native::tests::pnpm_and_yarn_classic_keep_package_store_and_command_prefixes_separate",
+        "package_managers::tests::role_model_preserves_manager_specific_entry_layouts"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "requires a real pnpm installation and `pnpm self-update`; the command may be unsupported depending on install method"
+    },
+    {
+      "id": "yarn",
+      "family": "node",
+      "adapter": "nodeCli",
+      "capabilities": { "selfUpdate": true, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::native::tests::pnpm_and_yarn_classic_keep_package_store_and_command_prefixes_separate",
+        "migration::tests::yarn_berry_never_migrates_global_folder_as_a_classic_install_root",
+        "migration::tests::capabilities_recognize_classic_and_berry_versions"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "Classic and Berry have different semantics; no real Yarn installation was used, and Berry global migration is intentionally refused"
+    },
+    {
+      "id": "pip",
+      "family": "python",
+      "adapter": "pythonPip",
+      "capabilities": { "selfUpdate": true, "globalConfig": false, "cacheConfig": true, "migrateGlobal": false },
+      "fixtures": [
+        "package_managers::tests::capabilities_keep_install_roots_separate_from_runtime_homes",
+        "pip_reinstall::tests::rejects_duplicate_distribution_metadata_and_existing_destination"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "global install root is intentionally unsupported; updating pip requires the owning interpreter, which was not exercised on a real installation"
+    },
+    {
+      "id": "bun",
+      "family": "node",
+      "adapter": "isolated",
+      "capabilities": { "selfUpdate": true, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::tests::every_manager_has_explicit_roles_and_rejects_config_cache_overlap",
+        "package_managers::native::tests::isolated_manager_roles_are_siblings_and_reject_nested_aliases"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "requires a real Bun installation and `bun upgrade`"
+    },
+    {
+      "id": "uv",
+      "family": "python",
+      "adapter": "isolated",
+      "capabilities": { "selfUpdate": true, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::native::tests::uv_legacy_layout_is_read_only_and_classifies_recovery",
+        "package_managers::native::tests::uv_cleanup_accepts_declared_sibling_or_legacy_entry_only",
+        "uv_recovery::tests::* (5 fixtures)"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "real uv recovery and `uv tool list` require a real uv installation; legacy layout handling is fixture-only"
+    },
+    {
+      "id": "pipx",
+      "family": "python",
+      "adapter": "isolated",
+      "capabilities": { "selfUpdate": false, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::tests::catalog_is_unique_and_identifiers_are_validated",
+        "package_managers::native::tests::damaged_python_tool_receipts_stay_visible_and_custom_arguments_are_blocked"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-applicable",
+      "skipReason": "pipx has no general self-update command by design; this is reported in the UI rather than executed"
+    },
+    {
+      "id": "cargo",
+      "family": "native",
+      "adapter": "isolated",
+      "capabilities": { "selfUpdate": false, "globalConfig": true, "cacheConfig": false, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::native::tests::cleanup_rejects_external_locations_and_cargo_launcher_traversal",
+        "package_managers::tests::capabilities_keep_install_roots_separate_from_runtime_homes"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-applicable",
+      "skipReason": "Cargo ships with the Rust toolchain and has no separate self-update; cache configuration is intentionally unsupported"
+    },
+    {
+      "id": "composer",
+      "family": "native",
+      "adapter": "isolated",
+      "capabilities": { "selfUpdate": true, "globalConfig": true, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::native::tests::composer_keeps_direct_requirements_and_blocks_custom_repositories",
+        "package_managers::tests::role_model_preserves_manager_specific_entry_layouts"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-run",
+      "skipReason": "requires a real Composer installation and `composer self-update`"
+    },
+    {
+      "id": "dotnet",
+      "family": "native",
+      "adapter": "isolated",
+      "capabilities": { "selfUpdate": false, "globalConfig": false, "cacheConfig": true, "migrateGlobal": true },
+      "fixtures": [
+        "package_managers::native::tests::dotnet_requires_verified_source_and_rejects_duplicate_versions",
+        "package_managers::tests::capabilities_keep_install_roots_separate_from_runtime_homes"
+      ],
+      "isolatedResult": "pass",
+      "realVersionRead": "not-run",
+      "realSelfUpdate": "not-applicable",
+      "skipReason": ".NET CLI is shipped with the SDK and has no self-update; global path configuration is intentionally unsupported"
+    }
+  ],
+  "summary": {
+    "managersCovered": 10,
+    "isolatedFixturesPass": 10,
+    "realVersionRead": 0,
+    "realSelfUpdateExecuted": 0,
+    "selfUpdateUnsupportedByDesign": 3
+  },
+  "notes": [
+    "This matrix records isolated applicability and explicit skip reasons only; it is not a real-environment acceptance for R0 item 4.",
+    "Real manager version reads and self-update results still require an isolated Windows environment where an update is safe to run.",
+    "The catalog expresses globalConfig/cacheConfig/migrateGlobal/selfUpdate statically; version-dependent behaviour (Yarn Classic vs Berry) is resolved at runtime instead.",
+    "No manager configuration was written and no global package was changed while producing this matrix."
+  ]
+}

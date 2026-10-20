@@ -12,6 +12,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
+    io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -143,7 +144,7 @@ fn command(
     }
     let mut path = vec![executable.parent().unwrap().to_path_buf()];
     if let Some(dest) = dest {
-        path.push(dest.join("bin"));
+        path.push(crate::package_managers::bin_path(tool, dest));
     }
     path.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
@@ -159,11 +160,18 @@ fn command(
                 tool, dest, dest,
             ));
         }
-        cmd.env("NPM_CONFIG_CACHE", dest.join("cache"));
-        cmd.env("NPM_CONFIG_USERCONFIG", dest.join(".envcon-user.npmrc"));
-        cmd.env("NPM_CONFIG_GLOBALCONFIG", dest.join(".envcon-global.npmrc"));
+        cmd.env(
+            "NPM_CONFIG_CACHE",
+            crate::package_managers::cache_path(tool, dest),
+        );
+        let config = crate::package_managers::config_path(tool, dest);
+        cmd.env("NPM_CONFIG_USERCONFIG", config.join(".envcon-user.npmrc"));
+        cmd.env(
+            "NPM_CONFIG_GLOBALCONFIG",
+            config.join(".envcon-global.npmrc"),
+        );
         if tool == "pnpm" {
-            cmd.env("PNPM_HOME", dest.join("bin"));
+            cmd.env("PNPM_HOME", crate::package_managers::bin_path(tool, dest));
         }
     }
     cmd
@@ -207,24 +215,100 @@ fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|s| (*s).into()).collect()
 }
 
-fn prepare_configs(dest: &Path) -> Result<()> {
-    std::fs::create_dir(dest.join("bin"))?;
+fn create_destination_layout(tool: &str, dest: &Path) -> Result<Vec<PathBuf>> {
+    let bin = bin_path(tool, dest);
+    let cache = crate::package_managers::cache_path(tool, dest);
+    let config = crate::package_managers::config_path(tool, dest);
+    crate::package_managers::validate_layout(
+        tool,
+        Some(dest),
+        Some(&bin),
+        Some(&cache),
+        Some(&config),
+    )?;
+    let mut roles = vec![
+        crate::package_managers::prefix_path(tool, dest),
+        bin,
+        cache,
+        config,
+    ];
+    if tool == "composer" {
+        roles.push(dest.join("vendor"));
+    }
+    roles.sort_by_key(|path| path.components().count());
+    roles.dedup_by(|a, b| crate::detect::system::paths_eq(a, b));
+    let mut created = Vec::new();
+    for role in roles {
+        if crate::detect::system::paths_eq(dest, &role) {
+            continue;
+        }
+        match std::fs::create_dir(&role) {
+            Ok(()) => created.push(role),
+            Err(error) => {
+                for path in created.iter().rev() {
+                    let _ = std::fs::remove_dir(path);
+                }
+                return Err(AppError::msg(format!(
+                    "角色目录已存在或无法独占创建 {}：{error}",
+                    role.display()
+                )));
+            }
+        }
+    }
+    Ok(created)
+}
+
+fn remove_empty_roles(paths: &[PathBuf]) {
+    for path in paths.iter().rev() {
+        let _ = std::fs::remove_dir(path);
+    }
+}
+
+fn prepare_configs(tool: &str, dest: &Path) -> Result<()> {
+    let mut created = Vec::new();
+    let config = crate::package_managers::config_path(tool, dest);
     for name in [".envcon-user.npmrc", ".envcon-global.npmrc"] {
-        std::fs::OpenOptions::new()
+        let path = config.join(name);
+        match std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(dest.join(name))?;
+            .open(&path)
+        {
+            Ok(_) => created.push(path),
+            Err(error) => {
+                for path in created.iter().rev() {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Err(error.into());
+            }
+        }
     }
     Ok(())
 }
 
-fn initialize_destination(value: &str) -> Result<PathBuf> {
+fn initialize_destination(tool: &str, value: &str) -> Result<PathBuf> {
     let dest = destination(value)?;
-    if !dest.exists() {
+    let root_created = !dest.exists();
+    if root_created {
         std::fs::create_dir(&dest)?;
     }
     destination(&dest.to_string_lossy())?;
-    prepare_configs(&dest)?;
+    let roles = match create_destination_layout(tool, &dest) {
+        Ok(roles) => roles,
+        Err(error) => {
+            if root_created {
+                let _ = std::fs::remove_dir(&dest);
+            }
+            return Err(error);
+        }
+    };
+    if let Err(error) = prepare_configs(tool, &dest) {
+        remove_empty_roles(&roles);
+        if root_created {
+            let _ = std::fs::remove_dir(&dest);
+        }
+        return Err(error);
+    }
     Ok(dest)
 }
 
@@ -244,10 +328,128 @@ fn manager_version(tool: &str, output: &str) -> String {
     }
 }
 
-struct PreviewDir(PathBuf);
+struct OwnedPreviewDirectory {
+    path: PathBuf,
+    marker: PathBuf,
+    token: String,
+}
+
+impl OwnedPreviewDirectory {
+    fn create(path: PathBuf) -> Result<Self> {
+        std::fs::create_dir(&path)?;
+        let marker = path.join(".envcon-preview-owner");
+        let token = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = std::fs::remove_dir(&path);
+                return Err(error.into());
+            }
+        };
+        if let Err(error) = file.write_all(token.as_bytes()) {
+            drop(file);
+            let _ = std::fs::remove_file(&marker);
+            let _ = std::fs::remove_dir(&path);
+            return Err(error.into());
+        }
+        Ok(Self {
+            path,
+            marker,
+            token,
+        })
+    }
+
+    fn cleanup(&self) {
+        let Ok(metadata) = std::fs::symlink_metadata(&self.path) else {
+            return;
+        };
+        if !metadata.is_dir() || crate::detect::system::is_reparse_path(&self.path) {
+            return;
+        }
+        let marker_is_owned = std::fs::symlink_metadata(&self.marker)
+            .is_ok_and(|metadata| metadata.is_file())
+            && !crate::detect::system::is_reparse_path(&self.marker)
+            && std::fs::read_to_string(&self.marker).is_ok_and(|token| token == self.token);
+        if marker_is_owned {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+struct PreviewDir {
+    root: OwnedPreviewDirectory,
+    owned_roles: Vec<OwnedPreviewDirectory>,
+}
+
+impl PreviewDir {
+    fn create(tool: &str, path: PathBuf) -> Result<Self> {
+        crate::package_managers::validate_layout(
+            tool,
+            Some(&path),
+            Some(&bin_path(tool, &path)),
+            Some(&crate::package_managers::cache_path(tool, &path)),
+            Some(&crate::package_managers::config_path(tool, &path)),
+        )?;
+        let root = OwnedPreviewDirectory::create(path.clone())?;
+        let mut owned_roles: Vec<OwnedPreviewDirectory> = Vec::new();
+        let mut candidates = vec![
+            crate::package_managers::prefix_path(tool, &path),
+            bin_path(tool, &path),
+            crate::package_managers::cache_path(tool, &path),
+            crate::package_managers::config_path(tool, &path),
+        ];
+        candidates.dedup_by(|a, b| crate::detect::system::paths_eq(a, b));
+        for role in candidates {
+            if crate::detect::system::path_within(&path, &role)
+                || owned_roles
+                    .iter()
+                    .any(|existing| crate::detect::system::paths_eq(&existing.path, &role))
+            {
+                continue;
+            }
+            // Only claim directories created atomically by this preview. Reusing an
+            // existing sibling here would make Drop capable of deleting user data.
+            match OwnedPreviewDirectory::create(role) {
+                Ok(owned) => owned_roles.push(owned),
+                Err(error) => {
+                    for existing in owned_roles.iter().rev() {
+                        existing.cleanup();
+                    }
+                    root.cleanup();
+                    return Err(error);
+                }
+            }
+        }
+        let scratch = Self { root, owned_roles };
+        if let Err(error) = prepare_configs(tool, &scratch.root.path) {
+            drop(scratch);
+            return Err(error);
+        }
+        Ok(scratch)
+    }
+
+    fn path(&self) -> &Path {
+        &self.root.path
+    }
+}
+
 impl Drop for PreviewDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        for role in self.owned_roles.iter().rev() {
+            role.cleanup();
+        }
+        self.root.cleanup();
     }
 }
 
@@ -283,9 +485,7 @@ pub async fn preview(
         .as_nanos();
     let scratch =
         std::env::temp_dir().join(format!("envcon-preview-{}-{stamp}", std::process::id()));
-    std::fs::create_dir(&scratch)?;
-    let scratch = PreviewDir(scratch);
-    prepare_configs(&scratch.0)?;
+    let scratch = PreviewDir::create(&tool, scratch)?;
     let version_args = if tool == "yarn" {
         args(&["--no-default-rc", "--version"])
     } else {
@@ -295,9 +495,9 @@ pub async fn preview(
         &tool,
         &run(
             &executable,
-            &scratch.0,
+            &scratch.path(),
             &tool,
-            Some(&scratch.0),
+            Some(&scratch.path()),
             &version_args,
             30,
         )
@@ -326,14 +526,13 @@ pub async fn preview(
         tool_version: version,
         source: source.to_string_lossy().into(),
         bin_path: bin_path(&tool, &destination).to_string_lossy().into(),
-        cache_path: destination
-            .join(match tool.as_str() {
-                "pnpm" => "store",
-                "cargo" => ".cargo/registry",
-                _ => "cache",
-            })
-            .to_string_lossy()
-            .into(),
+        cache_path: if tool == "cargo" {
+            destination.join(".cargo/registry")
+        } else {
+            crate::package_managers::cache_path(&tool, &destination)
+        }
+        .to_string_lossy()
+        .into(),
         destination: destination.to_string_lossy().into(),
         packages,
     })
@@ -351,7 +550,15 @@ pub(crate) fn allow_registry_recovery(plan: &mut Plan, allow: bool) {
 }
 
 fn install_args(tool: &str, dest: &Path, pin: &str) -> Result<Vec<String>> {
-    let d = |suffix: &str| dest.join(suffix).to_string_lossy().into_owned();
+    let bin = crate::package_managers::bin_path(tool, dest)
+        .to_string_lossy()
+        .into_owned();
+    let prefix = crate::package_managers::prefix_path(tool, dest)
+        .to_string_lossy()
+        .into_owned();
+    let cache = crate::package_managers::cache_path(tool, dest)
+        .to_string_lossy()
+        .into_owned();
     Ok(match tool {
         "npm" => args(&[
             "install",
@@ -371,9 +578,9 @@ fn install_args(tool: &str, dest: &Path, pin: &str) -> Result<Vec<String>> {
             "--global-dir",
             &dest.to_string_lossy(),
             "--global-bin-dir",
-            &d("bin"),
+            &bin,
             "--store-dir",
-            &d("store"),
+            &cache,
             "--reporter",
             "append-only",
             "--",
@@ -387,9 +594,9 @@ fn install_args(tool: &str, dest: &Path, pin: &str) -> Result<Vec<String>> {
             "--global-folder",
             &dest.to_string_lossy(),
             "--prefix",
-            &dest.to_string_lossy(),
+            &prefix,
             "--cache-folder",
-            &d("cache"),
+            &cache,
             "--no-default-rc",
             "--non-interactive",
             "--",
@@ -443,7 +650,7 @@ pub async fn start(plan: Plan, names: Vec<String>) -> Result<()> {
             .packages
             .iter()
             .find(|p| p.name == name && p.reason.is_none())
-            .ok_or_else(|| AppError::msg("包不在可重装清单内"))?;
+            .ok_or_else(|| AppError::msg("包不在可重装清单中"))?;
         if seen.insert(name) {
             selected.push(p.clone());
         }
@@ -451,7 +658,7 @@ pub async fn start(plan: Plan, names: Vec<String>) -> Result<()> {
     if selected.is_empty() {
         return Err(AppError::msg("请至少选择一个包"));
     }
-    let dest = initialize_destination(&fresh.destination)?;
+    let dest = initialize_destination(&fresh.tool, &fresh.destination)?;
     crate::package_managers::commands::prepare(&fresh.tool, &dest)?;
     std::fs::write(
         dest.join("envcon-source.json"),
@@ -587,9 +794,15 @@ fn cleanup_scope(tool: &str, source: &Path) -> Result<PathBuf> {
 
 fn cleanup_args(tool: &str, scope: &Path, scratch: &Path, name: Option<&str>) -> Vec<String> {
     let scope = scope.to_string_lossy();
-    let scratch_path = scratch.to_string_lossy();
-    let bin = scratch.join("bin").to_string_lossy().into_owned();
-    let cache = scratch.join("cache").to_string_lossy().into_owned();
+    let bin = crate::package_managers::bin_path(tool, scratch)
+        .to_string_lossy()
+        .into_owned();
+    let cache = crate::package_managers::cache_path(tool, scratch)
+        .to_string_lossy()
+        .into_owned();
+    let prefix = crate::package_managers::prefix_path(tool, scratch)
+        .to_string_lossy()
+        .into_owned();
     let mut result = match (tool, name) {
         ("npm", None) => args(&["root", "--global", "--prefix", &scope]),
         ("npm", Some(_)) => args(&[
@@ -622,7 +835,7 @@ fn cleanup_args(tool: &str, scope: &Path, scratch: &Path, name: Option<&str>) ->
             "--global-folder",
             &scope,
             "--prefix",
-            &scratch_path,
+            &prefix,
             "--no-default-rc",
             "--silent",
         ]),
@@ -632,7 +845,7 @@ fn cleanup_args(tool: &str, scope: &Path, scratch: &Path, name: Option<&str>) ->
             "--global-folder",
             &scope,
             "--prefix",
-            &scratch_path,
+            &prefix,
             "--cache-folder",
             &cache,
             "--no-default-rc",
@@ -647,21 +860,23 @@ fn cleanup_args(tool: &str, scope: &Path, scratch: &Path, name: Option<&str>) ->
     result
 }
 
-fn cleanup_scratch(destination: &Path) -> Result<PreviewDir> {
+fn cleanup_scratch(tool: &str, destination: &Path) -> Result<PreviewDir> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let scratch =
-        PreviewDir(destination.join(format!(".envcon-cleanup-{}-{stamp}", std::process::id())));
-    std::fs::create_dir(&scratch.0)?;
-    prepare_configs(&scratch.0)?;
-    Ok(scratch)
+    let scratch = destination.join(format!(".envcon-cleanup-{}-{stamp}", std::process::id()));
+    PreviewDir::create(tool, scratch)
 }
 
 async fn verify_cleanup_scope(plan: &Plan, scratch: &Path) -> Result<PathBuf> {
     let source = Path::new(&plan.source);
     crate::old_packages::verify_separate(source, Path::new(&plan.destination))?;
+    if let Some(issue) = crate::package_managers::legacy_layout_issue(&plan.tool, source) {
+        return Err(AppError::msg(format!(
+            "{issue}；旧入口归属未确认前不允许通过清理命令删除"
+        )));
+    }
     let anchor = cleanup_anchor(&plan.tool, source)?;
     if !crate::detect::system::path_within(source, &anchor) {
         return Err(AppError::msg("旧包目录指向来源以外，禁止清理"));
@@ -722,14 +937,14 @@ pub(crate) async fn scanned_cleanup_plan(
     }
     crate::old_packages::verify_separate(source_path, Path::new(&reports))?;
     let executable = launcher(&executable)?;
-    let scratch = cleanup_scratch(Path::new(&reports))?;
+    let scratch = cleanup_scratch(&tool, Path::new(&reports))?;
     let version = manager_version(
         &tool,
         &run(
             &executable,
-            &scratch.0,
+            &scratch.path(),
             &tool,
-            Some(&scratch.0),
+            Some(&scratch.path()),
             &args(&["--version"]),
             30,
         )
@@ -749,15 +964,15 @@ pub(crate) async fn scanned_cleanup_plan(
         cache_path: String::new(),
         packages: vec![],
     };
-    verify_cleanup_scope(&plan, &scratch.0).await?;
+    verify_cleanup_scope(&plan, &scratch.path()).await?;
     Ok(plan)
 }
 
 pub(crate) async fn scanned_cleanup_candidates(
     plan: &Plan,
 ) -> Result<Vec<crate::old_packages::Candidate>> {
-    let scratch = cleanup_scratch(Path::new(&plan.destination))?;
-    verify_cleanup_scope(plan, &scratch.0).await?;
+    let scratch = cleanup_scratch(&plan.tool, Path::new(&plan.destination))?;
+    verify_cleanup_scope(plan, &scratch.path()).await?;
     let tool = plan.tool.clone();
     let source = PathBuf::from(&plan.source);
     tokio::task::spawn_blocking(move || {
@@ -814,8 +1029,8 @@ pub(crate) async fn cleanup_candidates(
     items: &[ItemResult],
 ) -> Result<Vec<crate::old_packages::Candidate>> {
     crate::old_packages::verify_separate(Path::new(&plan.source), Path::new(&plan.destination))?;
-    let scratch = cleanup_scratch(Path::new(&plan.destination))?;
-    verify_cleanup_scope(plan, &scratch.0).await?;
+    let scratch = cleanup_scratch(&plan.tool, Path::new(&plan.destination))?;
+    verify_cleanup_scope(plan, &scratch.path()).await?;
     let old = installed_packages(&plan.tool, Path::new(&plan.source))?;
     let dest = Path::new(&plan.destination);
     let target_root = dest.to_path_buf();
@@ -845,7 +1060,7 @@ pub(crate) async fn cleanup_candidates(
             let reason = if !original
                 .is_some_and(|p| p.reason.is_none() && p.version == item.version)
             {
-                Some("不在原可重装清单内".into())
+                Some("不在原可重装清单中".into())
             } else if !target.iter().any(|p| {
                 p.name == item.name
                     && p.version == item.version
@@ -904,21 +1119,21 @@ pub(crate) async fn remove_old(
     if !name_valid {
         return Err(AppError::msg("无效包名"));
     }
-    let scratch = cleanup_scratch(Path::new(&plan.destination))?;
-    let scope = verify_cleanup_scope(plan, &scratch.0).await?;
+    let scratch = cleanup_scratch(&plan.tool, Path::new(&plan.destination))?;
+    let scope = verify_cleanup_scope(plan, &scratch.path()).await?;
     if crate::package_managers::isolated(&plan.tool) {
         crate::package_managers::verify_cleanup_files(&plan.tool, &scope, &package.name)?;
         let request = crate::package_managers::commands::invocation(
             &plan.tool,
             &scope,
-            &scratch.0,
+            &scratch.path(),
             crate::package_managers::commands::Action::Remove(&package.name),
         )?;
         let mut cmd = command(
             Path::new(&plan.executable),
-            &scratch.0,
+            &scratch.path(),
             &plan.tool,
-            Some(&scratch.0),
+            Some(&scratch.path()),
             &request.arguments,
         );
         cmd.envs(request.environment);
@@ -943,10 +1158,10 @@ pub(crate) async fn remove_old(
     }
     run(
         Path::new(&plan.executable),
-        &scratch.0,
+        &scratch.path(),
         &plan.tool,
-        Some(&scratch.0),
-        &cleanup_args(&plan.tool, &scope, &scratch.0, Some(&package.name)),
+        Some(&scratch.path()),
+        &cleanup_args(&plan.tool, &scope, &scratch.path(), Some(&package.name)),
         180,
     )
     .await?;
@@ -984,6 +1199,113 @@ fn finish(t: &mut Snapshot, verified: &Result<Vec<Package>>, canceled: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_dir_refuses_preexisting_sibling_roles_without_deleting_them() {
+        let d = crate::test_support::TestDir::new();
+        let scratch = d.path().join("preview-uv");
+        let existing_bin = d.path().join("preview-uv-bin");
+        std::fs::create_dir(&existing_bin).unwrap();
+        std::fs::write(existing_bin.join("keep.txt"), "keep").unwrap();
+
+        assert!(PreviewDir::create("uv", scratch.clone()).is_err());
+        assert!(!scratch.exists());
+        assert_eq!(
+            std::fs::read_to_string(existing_bin.join("keep.txt")).unwrap(),
+            "keep"
+        );
+    }
+
+    #[test]
+    fn preview_dir_refuses_preexisting_junction_roles_without_touching_targets() {
+        let d = crate::test_support::TestDir::new();
+        let scratch = d.path().join("preview-uv");
+        let target = d.path().join("existing-bin-target");
+        let existing_bin = d.path().join("preview-uv-bin");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("keep.txt"), "keep").unwrap();
+        junction::create(&target, &existing_bin).unwrap();
+
+        assert!(PreviewDir::create("uv", scratch.clone()).is_err());
+        assert!(!scratch.exists());
+        assert!(junction::exists(&existing_bin).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(target.join("keep.txt")).unwrap(),
+            "keep"
+        );
+    }
+
+    #[test]
+    fn preview_dir_cleanup_removes_only_owned_directories() {
+        let d = crate::test_support::TestDir::new();
+        let scratch = d.path().join("preview-uv");
+        let bin = d.path().join("preview-uv-bin");
+        let cache = d.path().join("preview-uv-cache");
+
+        {
+            let preview = PreviewDir::create("uv", scratch.clone()).unwrap();
+            assert!(preview.path().join(".envcon-preview-owner").is_file());
+            assert!(bin.join(".envcon-preview-owner").is_file());
+            assert!(cache.join(".envcon-preview-owner").is_file());
+        }
+
+        assert!(!scratch.exists());
+        assert!(!bin.exists());
+        assert!(!cache.exists());
+    }
+
+    #[test]
+    fn preview_dir_does_not_remove_a_replacement_directory_without_its_marker() {
+        let d = crate::test_support::TestDir::new();
+        let scratch = d.path().join("preview-uv");
+        let moved = d.path().join("preview-uv-moved");
+        {
+            let preview = PreviewDir::create("uv", scratch.clone()).unwrap();
+            std::fs::rename(&scratch, &moved).unwrap();
+            std::fs::create_dir(&scratch).unwrap();
+            std::fs::write(scratch.join("keep.txt"), "keep").unwrap();
+            drop(preview);
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(scratch.join("keep.txt")).unwrap(),
+            "keep"
+        );
+    }
+
+    #[test]
+    fn preview_dir_does_not_remove_a_replacement_role_without_its_marker() {
+        let d = crate::test_support::TestDir::new();
+        let scratch = d.path().join("preview-uv");
+        let bin = d.path().join("preview-uv-bin");
+        let moved = d.path().join("preview-uv-bin-moved");
+        {
+            let preview = PreviewDir::create("uv", scratch).unwrap();
+            std::fs::rename(&bin, &moved).unwrap();
+            std::fs::create_dir(&bin).unwrap();
+            std::fs::write(bin.join("keep.txt"), "keep").unwrap();
+            drop(preview);
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(bin.join("keep.txt")).unwrap(),
+            "keep"
+        );
+    }
+
+    #[test]
+    fn preview_dir_refuses_an_existing_root_without_changing_it() {
+        let d = crate::test_support::TestDir::new();
+        let scratch = d.path().join("preview-uv");
+        std::fs::create_dir(&scratch).unwrap();
+        std::fs::write(scratch.join("keep.txt"), "keep").unwrap();
+
+        assert!(PreviewDir::create("uv", scratch.clone()).is_err());
+        assert_eq!(
+            std::fs::read_to_string(scratch.join("keep.txt")).unwrap(),
+            "keep"
+        );
+    }
     #[tokio::test]
     #[ignore = "requires ENVCON_TEST_UV/PIPX/CARGO/PYTHON; uses only temporary fixtures"]
     async fn actual_native_tools_install_and_uninstall_in_isolated_roots() {
@@ -1010,7 +1332,7 @@ mod tests {
             let old = d.path().join(format!("{tool}-old"));
             let new = d.path().join(format!("{tool}-new"));
             for root in [&old, &new] {
-                initialize_destination(&root.to_string_lossy()).unwrap();
+                initialize_destination(tool, &root.to_string_lossy()).unwrap();
                 let arguments = match tool {
                     "uv" => args(&[
                         "tool",
@@ -1099,7 +1421,7 @@ mod tests {
         std::fs::create_dir(&target).unwrap();
         assert!(destination(&target.to_string_lossy()).is_ok());
         std::fs::write(target.join("existing.txt"), "keep").unwrap();
-        let error = initialize_destination(&target.to_string_lossy())
+        let error = initialize_destination("npm", &target.to_string_lossy())
             .unwrap_err()
             .to_string();
         assert!(error.contains("existing.txt"));
@@ -1113,9 +1435,77 @@ mod tests {
         let link = d.path().join("redirect");
         junction::create(&empty, &link).unwrap();
         assert!(destination(&link.to_string_lossy()).is_err());
-        initialize_destination(&empty.to_string_lossy()).unwrap();
-        assert!(empty.join(".envcon-user.npmrc").is_file());
-        assert!(initialize_destination(&empty.to_string_lossy()).is_err());
+        initialize_destination("npm", &empty.to_string_lossy()).unwrap();
+        assert!(crate::package_managers::config_path("npm", &empty)
+            .join(".envcon-user.npmrc")
+            .is_file());
+        assert!(initialize_destination("npm", &empty.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn destination_layout_initializes_all_global_adapters_and_isolates_configs() {
+        let d = crate::test_support::TestDir::new();
+        for tool in ["npm", "pnpm", "yarn", "bun", "uv", "pipx", "cargo", "composer", "dotnet"] {
+            let root = d.path().join(tool);
+            initialize_destination(tool, &root.to_string_lossy()).unwrap_or_else(|e| panic!("{tool}: {e}"));
+            assert!(bin_path(tool, &root).is_dir(), "{tool}");
+            assert!(crate::package_managers::cache_path(tool, &root).is_dir(), "{tool}");
+            let config = crate::package_managers::config_path(tool, &root);
+            assert!(config.join(".envcon-user.npmrc").is_file(), "{tool}");
+            assert!(config.join(".envcon-global.npmrc").is_file(), "{tool}");
+            assert!(!root.join(".envcon-user.npmrc").exists(), "{tool}");
+            assert!(initialize_destination(tool, &root.to_string_lossy()).is_err(), "{tool}");
+        }
+    }
+
+    #[test]
+    fn destination_layout_preserves_existing_config_and_rolls_back_empty_roles() {
+        let d = crate::test_support::TestDir::new();
+        let root = d.path().join("npm");
+        let config = crate::package_managers::config_path("npm", &root);
+        std::fs::create_dir(&config).unwrap();
+        std::fs::write(config.join(".envcon-user.npmrc"), b"keep").unwrap();
+        assert!(initialize_destination("npm", &root.to_string_lossy()).is_err());
+        assert!(!root.exists());
+        assert!(!crate::package_managers::cache_path("npm", &root).exists());
+        assert_eq!(std::fs::read(config.join(".envcon-user.npmrc")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn destination_layout_refuses_existing_sibling_without_reusing_it() {
+        let d = crate::test_support::TestDir::new();
+        let root = d.path().join("uv-root");
+        let bin = d.path().join("uv-root-bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::write(bin.join("keep.txt"), "keep").unwrap();
+
+        assert!(initialize_destination("uv", &root.to_string_lossy()).is_err());
+        assert!(!root.exists());
+        assert_eq!(
+            std::fs::read_to_string(bin.join("keep.txt")).unwrap(),
+            "keep"
+        );
+    }
+
+    #[test]
+    fn destination_layout_rolls_back_created_roles_when_cache_is_a_junction() {
+        let d = crate::test_support::TestDir::new();
+        let root = d.path().join("uv-root");
+        let bin = d.path().join("uv-root-bin");
+        let cache = d.path().join("uv-root-cache");
+        let target = d.path().join("shared-cache");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("keep.txt"), "keep").unwrap();
+        junction::create(&target, &cache).unwrap();
+
+        assert!(initialize_destination("uv", &root.to_string_lossy()).is_err());
+        assert!(!root.exists());
+        assert!(!bin.exists());
+        assert!(junction::exists(&cache).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(target.join("keep.txt")).unwrap(),
+            "keep"
+        );
     }
 
     #[test]
@@ -1518,7 +1908,7 @@ mod tests {
                 .await
                 .is_err());
             assert_eq!(std::fs::read_dir(&next).unwrap().count(), 0);
-            initialize_destination(&next.to_string_lossy()).unwrap();
+            initialize_destination(tool, &next.to_string_lossy()).unwrap();
             crate::package_managers::commands::prepare(tool, &next).unwrap();
             let mut install_new = install_args(tool, &next, &archive.to_string_lossy()).unwrap();
             if tool != "bun" {

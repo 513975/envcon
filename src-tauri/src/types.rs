@@ -128,7 +128,102 @@ pub struct ManagedEnv {
     pub status_detail: Option<String>,
     pub size_complete: bool,
     pub identity_path: String,
+    pub is_link_entry: bool,
     pub is_external_link: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallScopeItem {
+    pub resource: String,
+    pub path: Option<String>,
+    pub details: String,
+    pub count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UninstallMode {
+    /// Remove the environment content as well as its EnvCon records. This is
+    /// the historical behaviour and stays the default.
+    Uninstall,
+    /// Keep every file on disk and only drop EnvCon's management records: the
+    /// current-version junction and any PATH entry this app can prove it wrote.
+    /// Nothing is moved or deleted, so a managed directory keeps its bytes and
+    /// an external link keeps its target.
+    Detach,
+}
+
+impl Default for UninstallMode {
+    fn default() -> Self {
+        Self::Uninstall
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallPreview {
+    pub name: String,
+    pub env_type: EnvType,
+    pub is_current: bool,
+    pub is_link_entry: bool,
+    pub is_external_link: bool,
+    /// Directory metadata fingerprint; not a file-content integrity proof.
+    #[serde(default)]
+    pub snapshot_hash: Option<String>,
+    /// Binds the observed PATH and ownership plan without exposing the whole PATH.
+    #[serde(default)]
+    pub path_snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub current_link_snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub legacy_links: Vec<UninstallScopeItem>,
+    /// Explicit per-entry consent submitted by the UI, never a creation-ownership claim.
+    #[serde(default)]
+    pub confirmed_legacy_links: Vec<String>,
+    /// Per-entry user consent for PATH strings without EnvCon ownership evidence.
+    #[serde(default)]
+    pub legacy_path_entries: Vec<UninstallScopeItem>,
+    #[serde(default)]
+    pub confirmed_legacy_path_entries: Vec<String>,
+    #[serde(default)]
+    pub installer_plan: Option<crate::installer_uninstall::Plan>,
+    pub removable: Vec<UninstallScopeItem>,
+    pub retained: Vec<UninstallScopeItem>,
+    pub unverified: Vec<UninstallScopeItem>,
+    pub blocked: Vec<UninstallScopeItem>,
+    pub scope_complete: bool,
+    /// Which operation the preview describes. The executor compares the whole
+    /// preview, so previewing one mode and executing another is rejected
+    /// instead of silently changing what gets deleted.
+    #[serde(default)]
+    pub mode: UninstallMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallActionItem {
+    pub resource: String,
+    pub path: Option<String>,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UninstallResultStatus {
+    VerifiedScopeRemoved,
+    Partial,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallResult {
+    pub name: String,
+    pub status: UninstallResultStatus,
+    pub removed: Vec<UninstallActionItem>,
+    pub retained: Vec<UninstallScopeItem>,
+    pub unverified: Vec<UninstallScopeItem>,
+    pub failed: Vec<UninstallActionItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,6 +248,70 @@ pub struct Overview {
     pub categories: Vec<CategoryOverview>,
 }
 
+/// One environment as recorded in an export. Deliberately carries no file
+/// content and no restore instruction: paths are machine-bound, so the manifest
+/// documents what exists here rather than promising a portable copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestEntry {
+    pub env_type: EnvType,
+    pub name: String,
+    /// Absolute path of the managed entry on this machine.
+    pub path: String,
+    /// Resolved identity, so a link and its target are both visible.
+    pub identity_path: String,
+    pub version: Option<String>,
+    pub status: String,
+    pub is_current: bool,
+    pub is_link_entry: bool,
+    pub is_external_link: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentManifest {
+    pub schema_version: u32,
+    pub generated_at: String,
+    pub root: Option<String>,
+    pub portable: bool,
+    pub data_dir: String,
+    pub entries: Vec<ManifestEntry>,
+    /// Facts the reader needs before treating this as a restorable backup.
+    pub compatibility: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+/// 系统散装环境
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScanStatus {
+    Unscanned,
+    Available,
+    NotDiscovered,
+    PermissionDenied,
+    StartFailed,
+    CommandFailed,
+    ParseFailed,
+    TimedOut,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScanRunStatus {
+    Complete,
+    Partial,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolScanSummary {
+    pub tool: String,
+    pub status: ScanStatus,
+    pub entry_count: usize,
+    pub detail: Option<String>,
+}
+
 /// 系统散装环境
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -164,16 +323,33 @@ pub struct ExternalEnv {
     pub command: String,
     pub is_preferred: bool,
     pub error: Option<String>,
+    pub scan_status: ScanStatus,
     /// 可纳入管理的环境类型(结构不兼容时为 None)
     pub env_type: Option<EnvType>,
     pub install_root: Option<String>,
     pub identity_path: Option<String>,
+    /// Other entrypoints of the same installation whose reported version
+    /// differs from the selected one. Empty when all launchers agree.
+    #[serde(default)]
+    pub version_conflicts: Vec<VersionConflict>,
+}
+
+/// A launcher under the same installation that reported a different version.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionConflict {
+    pub path: String,
+    pub version: Option<String>,
+    /// Why the probe produced no version, when it failed.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanReport {
     pub tools: Vec<ExternalEnv>,
+    pub core_tools: Vec<ToolScanSummary>,
+    pub status: ScanRunStatus,
     pub warnings: Vec<String>,
 }
 

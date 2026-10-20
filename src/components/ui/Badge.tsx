@@ -5,10 +5,12 @@ export function Badge({
   children,
   color = "gray",
   className,
+  title,
 }: {
   children: ReactNode;
   color?: "gray" | "green" | "blue" | "orange" | "red";
   className?: string;
+  title?: string;
 }) {
   const colors = {
     gray: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
@@ -19,6 +21,7 @@ export function Badge({
   };
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap",
         colors[color],

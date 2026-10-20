@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "date": "2026-10-19",
+  "timezone": "Asia/Shanghai",
+  "item": "UNINST-01 / R3-g 历史 PATH 逐项确认",
+  "status": "implemented-and-isolation-verified; real Windows PATH/registry verification pending",
+  "scope": {
+    "implemented": [
+      "来源日志语义快照绑定；来源日志变化时拒绝陈旧预览",
+      "仅从所选环境固定 current 入口生成历史 PATH 候选",
+      "历史 PATH 默认未选择；未选择项保留且不阻止受管环境删除",
+      "逐项精确字符串确认；重复、候选外、被改写、重复 PATH 项及共享依赖拒绝或保留",
+      "confirmed-removing / confirmed-removed / unverified 审计状态",
+      "写入失败、写后复查失败和晚到依赖返回部分结果",
+      "手工保存/恢复作为显式恢复路径：写 manual/verified 基线并清空自动所有权，不认领既有条目",
+      "UI 默认未选、勾选、取消重置及提交 confirmedLegacyPathEntries 场景"
+    ],
+    "not_performed": [
+      "真实 Windows 用户 PATH 或注册表写入",
+      "真实工具安装、升级或卸载",
+      "Windows VM 实机验收",
+      "打包、上传或正式发布"
+    ]
+  },
+  "sourceHashes": {
+    "src-tauri/src/path_ownership.rs": "5fe4f8caaefc54e4316be9f047d6c0f1f024b101c5da6279e1aa36d58f84fd8d",
+    "src-tauri/src/commands.rs": "b5ce8a618ad56378385e4f86df2a519f9e84eea17b3939fb5031f082df235025",
+    "src-tauri/src/types.rs": "3de0577db43f3a24f443c8e790fbd6032980225e94ce1e31264899860a2bd02b",
+    "src/lib/types.ts": "59e0f4dbb4cae23a83a0e2eee32be7cc97f3342cf1e39f036d9b44c06c53fc2c",
+    "src/pages/Environments.tsx": "2e0b1ddc16538e59cf41d6110dcf1dd30c775941c5a4f9d546cc72ea7386ca01",
+    "tests/release-052-ui.mjs": "8bd815623745f58cbfd2967da413fc11c28ec20140d36d30095d6d470facc206",
+    "ROADMAP.md": "9e4b0efc660d56499cbfd59f10062b5ea11f65b8c225e1134c91f40251163008"
+  },
+  "commands": [
+    {
+      "name": "full-verify",
+      "command": "$env:ENVCON_PLAYWRIGHT_MODULE='C:/Users/island/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'; rtk npm run verify",
+      "workingDirectory": "D:\\SOLO project\\envcon",
+      "exitCode": 0,
+      "result": "Rust 205 passed / 0 failed / 13 ignored; 1708 modules transformed; both read-state tests PASS; all eight UI suites PASS"
+    },
+    {
+      "name": "path-ownership-targeted",
+      "command": "rtk cargo test --offline --lib path_ownership -- --test-threads=1",
+      "workingDirectory": "D:\\SOLO project\\envcon\\src-tauri",
+      "exitCode": 0,
+      "result": "13 passed / 0 failed / 205 filtered out"
+    },
+    {
+      "name": "uninstall-legacy-path-targeted",
+      "command": "rtk cargo test --offline --lib uninstall_legacy_path -- --test-threads=1",
+      "workingDirectory": "D:\\SOLO project\\envcon\\src-tauri",
+      "exitCode": 0,
+      "result": "7 passed / 0 failed / 211 filtered out"
+    },
+    {
+      "name": "release-052-ui-targeted",
+      "command": "rtk node tests/run-ui.mjs C:/Users/island/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright tests/release-052-ui.mjs",
+      "workingDirectory": "D:\\SOLO project\\envcon",
+      "exitCode": 0,
+      "result": "PASS: default unselected, checked, cancel reset, confirmedLegacyPathEntries submission, PATH preview and partial recheck"
+    },
+    {
+      "name": "production-build",
+      "command": "rtk npm run build",
+      "workingDirectory": "D:\\SOLO project\\envcon",
+      "exitCode": 0,
+      "result": "TypeScript/Vite build succeeded; 1708 modules transformed; built in 716ms"
+    },
+    {
+      "name": "cargo-check",
+      "command": "rtk cargo check --offline",
+      "workingDirectory": "D:\\SOLO project\\envcon\\src-tauri",
+      "exitCode": 0,
+      "result": "0 errors; 5 existing dead-code warnings (preview_cleanup and four installer_uninstall items)"
+    },
+    {
+      "name": "diff-check",
+      "command": "rtk git diff --check",
+      "workingDirectory": "D:\\SOLO project\\envcon",
+      "exitCode": 0,
+      "result": "no whitespace errors; no output"
+    },
+    {
+      "name": "fmt-check",
+      "command": "rtk cargo fmt --check",
+      "workingDirectory": "D:\\SOLO project\\envcon\\src-tauri",
+      "exitCode": 1,
+      "result": "not executed: cargo-fmt.exe is not installed for the stable-x86_64-pc-windows-msvc toolchain"
+    }
+  ],
+  "testNames": [
+    "path_ownership::tests::legacy_cleanup_requires_exact_unique_non_shared_confirmation",
+    "path_ownership::tests::pending_or_unverified_journal_blocks_legacy_confirmation",
+    "path_ownership::tests::legacy_cleanup_binds_journal_snapshot_and_does_not_claim_readded_entries",
+    "path_ownership::tests::legacy_cleanup_interrupted_commit_keeps_confirmed_removing_not_ownership",
+    "path_ownership::tests::explicit_manual_save_reconciles_pending_record_without_claiming_entries",
+    "commands::tests::uninstall_legacy_path_requires_exact_confirmation_and_records_user_consent",
+    "commands::tests::uninstall_legacy_path_rejects_duplicate_foreign_and_rewritten_confirmations",
+    "commands::tests::uninstall_legacy_path_shared_or_changed_after_preview_is_preserved",
+    "commands::tests::uninstall_legacy_path_write_or_recheck_failure_is_audited_as_partial",
+    "commands::tests::uninstall_legacy_path_all_types_keep_unselected_and_remove_only_confirmed_strings",
+    "commands::tests::uninstall_legacy_path_duplicate_aliases_cannot_be_confirmed_or_removed",
+    "commands::tests::uninstall_legacy_path_rechecks_source_history_even_when_path_value_is_unchanged"
+  ],
+  "failureHistory": [
+    {
+      "stage": "first targeted uninstall_legacy_path run",
+      "observed": "6 passed / 1 failed; the old assertion counted a retained same-path item as removed",
+      "resolution": "limited the assertion to the intended removal resource; final targeted run is 7 passed / 0 failed"
+    },
+    {
+      "stage": "earlier UI regression",
+      "observed": "PASS before later backend snapshot/confirmation changes",
+      "resolution": "targeted release-052 UI and full verify were rerun after the final source changes"
+    }
+  ],
+  "limitations": [
+    "The journal snapshot is a SHA-256 semantic snapshot, not a signature or tamper-proof source authentication.",
+    "The writer lock covers the local journal process, but PATH and journal updates are not a cross-process atomic transaction.",
+    "No real user PATH/registry or external tool environment was modified.",
+    "Real installer uninstall execution and VM verification remain pending; R3 must not be closed by this document."
+  ]
+}

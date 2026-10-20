@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 348: add the 保留目录并停用 (Detach) mode alongside the existing uninstall mode",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "670feb03e25b2961d607fdabdbb81cd5ea242e4d6c1c4ddb60b959442e1e839d",
+    "src-tauri/src/types.rs": "e4637b291c2ea82ac20152b7ddf0caa11174744ca5624a26bc4b6e307a31acc3",
+    "src/lib/types.ts": "a095d82373c99652b3b71ac21194cfacb8563c978c9953ea63cebff73a38b3f5",
+    "src/lib/api.ts": "dd8d6198b86a09e7e4a52303cf3a4bcd6707bb2a2e80366cfd3d855fdab88b7b",
+    "src/pages/Environments.tsx": "53bf7be5d3e3b9e44d31d6261d09c0c00e9ca652e5a872e553e969a15531061b",
+    "tests/release-052-ui.mjs": "12fcd933c6fa6ba5845f5eee3308719a34765693e82e415392224ba50407ac78"
+  },
+  "gapClosed": "ROADMAP R3 item 348 asked for three modes; only one existed. uninstall_env had no mode parameter, so the sole path always deleted managed directories (or removed links) and the UI offered a single confirmation button.",
+  "implementation": {
+    "modeEnum": "UninstallMode { Uninstall, Detach } lives in types:: and rides on UninstallPreview with serde default, so older clients deserialize as Uninstall",
+    "detachShape": "apply_detach_mode moves every directory/link entry from removable to retained and rewrites each details string to say why. The current-version junction and EnvCon-owned PATH entries stay removable: leaving them would leave the environment active, which is not 'stopped'",
+    "execution": "execute_uninstall_scope skips the directory/link deletion branch entirely when mode is Detach; only the junction detach runs, and the retained entries are reported back",
+    "modeBinding": "Every place that re-derives a preview (preview_uninstall_with_path_mode, execute_uninstall_with_path, execute_uninstall_scope, the post-detach recheck) applies the requested mode. Without this a Detach request would be compared against an Uninstall-shaped observation and rejected as '预览已变化'",
+    "installerConflict": "Detach refuses to run an original uninstaller: an uninstaller deletes exactly what Detach promises to keep. The refusal is stated in the preview (as an unverified entry) and enforced before execution",
+    "ui": "The confirm dialog gains a 选择处理方式 group with 卸载（删除内容）/停用（保留文件）; switching modes re-runs the preview because the old preview bound the other scope"
+  },
+  "defectsFoundAndFixed": [
+    "The first wiring left the post-detach recheck generating an Uninstall-shaped preview, which would have made every Detach run fail its own consistency check with 卸载预览已变化.",
+    "uninstall_env originally re-derived its baseline with the default mode, so a Detach submission would never match. It now derives with the submitted mode and skips the installer plan entirely for Detach."
+  ],
+  "fixtures": [
+    {
+      "name": "commands::tests::detach_mode_keeps_every_file_and_only_drops_management_records",
+      "asserts": [
+        "an Uninstall preview plans to delete EnvCon 受管目录",
+        "the same environment shaped as Detach lists that directory under retained with 停用模式：保留磁盘内容 and does not list it under removable",
+        "the current-version junction is still removed, because 'stopped' also means inactive",
+        "after execution the payload file still reads back byte-identical while current/node is gone"
+      ]
+    },
+    {
+      "name": "commands::tests::a_preview_whose_mode_disagrees_with_its_scope_is_rejected",
+      "asserts": [
+        "a Detach-shaped scope relabelled as Uninstall is refused with 卸载预览已变化",
+        "the refusal happens before any mutation, so the payload is untouched"
+      ]
+    },
+    {
+      "name": "tests/release-052-ui.mjs (detach mode section)",
+      "asserts": [
+        "clicking 停用（保留文件）re-runs the preview exactly once and sends mode=detach",
+        "the tab reports aria-pressed=true",
+        "the directory leaves the 将移除 section and appears under 明确保留 with 停用模式：保留磁盘内容",
+        "the primary button becomes 确认停用 and 确认删除目录 disappears",
+        "the dialog body says 停用后目录与文件全部原地保留 instead of the old 永久删除安装目录",
+        "cancelling executes nothing"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "285 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml detach_mode_keeps_every_file -- --test-threads=1",
+      "result": "1 passed"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 484ms after the UI assertion and copy fixes"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/commands.rs src-tauri/src/types.rs src/lib/types.ts src/lib/api.ts src/pages/Environments.tsx",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "notVerified": [
+    "No real managed directory was detached on this host; every case ran against temporary fixtures",
+    "The UI assertions prove the dialog switches mode, re-previews and relabels the scope, but the click still targets the mock, not a real backend",
+    "Detach with an installer-ready Python/LLVM environment was exercised only through the backend guard, not through the dialog"
+  ],
+  "limitations": [
+    "Only 卸载 and 停用 exist. The third requested mode, 仅移除管理记录 without touching the current junction, is not implemented separately: Detach always deactivates, because an environment left current is not stopped",
+    "Detach does not move, copy or archive anything: the directory simply stays where it is and loses its EnvCon records. There is no undo path back to 'managed' other than re-integrating the directory",
+    "The mode is carried inside the preview, so a client that hand-builds a preview can pick any mode; the executor defends by re-deriving and comparing",
+    "No packaging, tagging or release"
+  ]
+}

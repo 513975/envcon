@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   RefreshCw,
   FolderOpen,
@@ -8,13 +8,16 @@ import {
   ScanSearch,
   X,
   FolderPlus,
+  Wand2,
+  FileDown,
+  FileUp,
 } from "lucide-react";
 import { PageShell } from "../components/layout/PageShell";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Spinner, Empty } from "../components/ui/Empty";
-import { ConfirmDialog } from "../components/ui/Modal";
+import { ConfirmDialog, Modal } from "../components/ui/Modal";
 import { EnvTypeBadge } from "../components/EnvTypeBadge";
 import { ScanResults } from "../components/ScanResults";
 import { SelectionButton } from "../components/ui/SelectionButton";
@@ -32,7 +35,11 @@ import {
   type Overview,
   type ExternalEnv,
   type ManagedEnv,
+  type PathRepairPreview,
   type ScanReport,
+  type ToolScanSummary,
+  type UninstallPreview,
+  type ManifestComparison,
 } from "../lib/types";
 
 export function Environments() {
@@ -40,10 +47,30 @@ export function Environments() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<EnvType>("jdk");
   const [busy, setBusy] = useState<string | null>(null);
+  const [pathRepair, setPathRepair] = useState<PathRepairPreview | null>(null);
   const [confirmUninstall, setConfirmUninstall] = useState<ManagedEnv | null>(
     null,
   );
+  const [uninstallPreview, setUninstallPreview] = useState<UninstallPreview | null>(null);
+  const [previewingUninstall, setPreviewingUninstall] = useState(false);
+  // 卸载会删除内容；停用只解除管理并保留全部文件。默认仍是历史行为。
+  const [uninstallMode, setUninstallMode] = useState<"uninstall" | "detach">("uninstall");
+  const [manifestComparison, setManifestComparison] =
+    useState<ManifestComparison | null>(null);
+  const [uninstallPreviewError, setUninstallPreviewError] = useState<string | null>(null);
+  const [confirmedLegacyLinks, setConfirmedLegacyLinks] = useState<string[]>([]);
+  const [confirmedLegacyPathEntries, setConfirmedLegacyPathEntries] = useState<string[]>([]);
+  const legacyConfirmationsReady = (uninstallPreview?.legacyLinks ?? []).every(
+    (item) => item.path !== null && confirmedLegacyLinks.includes(item.path),
+  );
+  const legacyPathConfirmationsReady = confirmedLegacyPathEntries.every(
+    (path) => (uninstallPreview?.legacyPathEntries ?? []).some((item) => item.path === path),
+  );
+  const installerReady = uninstallPreview?.installerPlan?.state === "ready";
   const [systemEnvs, setSystemEnvs] = useState<ExternalEnv[] | null>(null);
+  const [systemCoreTools, setSystemCoreTools] = useState<ToolScanSummary[]>([]);
+  const [systemScanStatus, setSystemScanStatus] = useState<ScanReport["status"]>("complete");
+  const [systemScanError, setSystemScanError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [projectDirs, setProjectDirs] = useState<string[]>(savedProjectDirs);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
@@ -51,7 +78,10 @@ export function Environments() {
   useScanResult<Overview>("overview", [], setOverview);
   useScanResult<ScanReport>("system", projectDirs, useCallback((report: ScanReport) => {
     setSystemEnvs(report.tools);
+    setSystemCoreTools(report.coreTools ?? []);
+    setSystemScanStatus(report.status ?? (report.warnings?.length ? "partial" : "complete"));
     setScanWarnings(report.warnings);
+    setSystemScanError(null);
   }, []));
 
   const refreshOverview = useAppStore((s) => s.refreshOverview);
@@ -65,6 +95,42 @@ export function Environments() {
       toast.error("加载失败", String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** 导出只读清单；不创建、不还原、不搬移任何环境。 */
+  const exportManifest = async () => {
+    try {
+      const target = await save({
+        title: "导出环境清单",
+        defaultPath: "envcon-manifest.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!target) return;
+      const saved = await api.exportEnvironmentManifest(target);
+      toast.success(
+        "环境清单已导出",
+        `已写入 ${saved}。清单只记录本机路径，不是可还原的备份。`,
+      );
+    } catch (e) {
+      toast.error("导出失败", String(e));
+    }
+  };
+
+  /** 读取清单并只读比对；不会创建、还原或搬移任何环境。 */
+  const importManifest = async () => {
+    try {
+      const source = await open({
+        title: "导入环境清单并比对",
+        multiple: false,
+        directory: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!source || Array.isArray(source)) return;
+      const comparison = await api.importEnvironmentManifest(source);
+      setManifestComparison(comparison);
+    } catch (e) {
+      toast.error("清单比对失败", String(e));
     }
   };
 
@@ -84,11 +150,39 @@ export function Environments() {
     if (busy) return;
     setBusy(`switch:${env.name}`);
     try {
-      await api.switchEnv(env.envType, env.name);
-      toast.success(
-        `已切换 ${ENV_TYPE_META[env.envType].label}`,
-        `${env.name} 已设为当前版本`,
-      );
+      const diagnosis = await api.switchEnv(env.envType, env.name);
+      const shadowed = diagnosis.commands.filter((c) => c.status === "shadowed");
+      const missing = diagnosis.commands.filter((c) => c.status === "missing");
+      const version = diagnosis.version ? ` ${diagnosis.version}` : "";
+      const detail = [
+        diagnosis.currentTarget
+          ? `当前链接：${diagnosis.currentTarget}${version}`
+          : "已设为当前版本",
+        diagnosis.commands.length > 0
+          ? `命令解析：${diagnosis.commands
+              .map((c) => `${c.command} ${c.status === "managed" ? "命中受管入口" : c.status === "shadowed" ? "被靠前安装覆盖" : "未解析到"}`)
+              .join("；")}`
+          : "",
+        shadowed.length > 0
+          ? `警告：${shadowed.map((c) => c.command).join("、")} 仍会命中 ${shadowed[0].resolved ?? "其他安装"}`
+          : "",
+        missing.length > 0
+          ? `提示：${missing.map((c) => c.command).join("、")} 不在 PATH 中`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      if (shadowed.length > 0 || missing.length > 0) {
+        toast.info(
+          `已切换 ${ENV_TYPE_META[env.envType].label}，命令生效待确认`,
+          detail,
+        );
+      } else {
+        toast.success(
+          `已切换 ${ENV_TYPE_META[env.envType].label}`,
+          detail || `${env.name} 已设为当前版本`,
+        );
+      }
       refreshOverview();
     } catch (e) {
       toast.error("切换失败", String(e));
@@ -97,16 +191,107 @@ export function Environments() {
     }
   };
 
-  const doUninstall = async () => {
-    if (!confirmUninstall || busy) return;
+  /** 只重新读取一个环境，用于修好目录后确认它是否已恢复。 */
+  const redetect = async (env: ManagedEnv) => {
+    if (busy) return;
+    setBusy(`redetect:${env.envType}:${env.name}`);
+    try {
+      const result = await api.redetectEnvironment(env.envType, env.name);
+      if (result.status === "available") {
+        toast.success(
+          `${env.name} 重新检测通过`,
+          result.version ? `版本 ${result.version}` : "已可正常识别",
+        );
+      } else {
+        toast.error(
+          `${env.name} 仍未恢复`,
+          result.statusDetail ?? "状态仍不可用",
+        );
+      }
+      await load();
+    } catch (e) {
+      toast.error("重新检测失败", String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openPathRepair = async (envType: EnvType) => {
+    if (busy) return;
+    setBusy(`repair:${envType}`);
+    try {
+      const preview = await api.previewPathRepair(envType);
+      if (preview.mode === "none") {
+        toast.info("无需修复 PATH 顺序", preview.summary);
+        return;
+      }
+      setPathRepair(preview);
+    } catch (e) {
+      toast.error("读取 PATH 修复预览失败", String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doApplyPathRepair = async () => {
+    if (!pathRepair?.plan || busy) return;
+    setBusy("repair:apply");
+    try {
+      const result = await api.applyPathRepair(pathRepair.plan);
+      if (result.verified) {
+        toast.success(
+          "已调整 PATH 顺序并核验",
+          `受管入口已在用户 PATH 首位；未增删任何条目。${result.commands
+            .map((c) => `${c.command} ${c.status === "managed" ? "命中受管入口" : c.status}`)
+            .join("；")}。请在新终端核对命令`,
+        );
+      } else {
+        toast.info(
+          "PATH 顺序已写入，但核验未通过",
+          [
+            ...result.problems,
+            "可能原因：已有终端仍使用旧环境，或系统 PATH 中另有更早的同名命令",
+          ].join("\n"),
+        );
+      }
+      setPathRepair(null);
+      refreshOverview();
+    } catch (e) {
+      toast.error("PATH 修复失败", String(e));
+      setPathRepair(null);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doUninstall = async () => {    if (!confirmUninstall || busy || !uninstallPreview || !uninstallPreview.scopeComplete || uninstallPreview.blocked.length > 0 || !legacyConfirmationsReady || !legacyPathConfirmationsReady) return;
     const env = confirmUninstall;
     setBusy(`uninstall:${env.name}`);
     try {
-      await api.uninstallEnv(env.envType, env.name);
-      toast.success(env.isExternalLink ? "已移除管理链接" : "已卸载", env.isExternalLink ? `${env.name} 原安装目录已保留` : `${env.name} 已删除`);
+      const result = await api.uninstallEnv(env.envType, env.name, {
+        ...uninstallPreview, confirmedLegacyLinks, confirmedLegacyPathEntries,
+      });
+      if (result.status === "partial") {
+        const removed = result.removed.map((item) => item.resource).join("、") || "无可核验的移除项";
+        toast.error(
+          "移除部分失败",
+          [
+            `已核验移除：${removed}`,
+            ...result.failed.map((item) => `${item.resource}：${item.details}`),
+            result.unverified.length > 0 ? `仍未验证 ${result.unverified.length} 类目录外副作用` : "",
+          ].filter(Boolean).join("\n"),
+        );
+      } else {
+        const details = [
+          `已核验移除 ${result.removed.map((item) => item.resource).join("、") || "所选受管范围"}`,
+          result.retained.length > 0 ? `保留 ${result.retained.length} 类目录外/外部资源` : "",
+          result.unverified.length > 0 ? `${result.unverified.length} 类目录外副作用仍未验证` : "",
+        ].filter(Boolean).join("；");
+        toast.success("受管范围已移除并核验", details);
+      }
       setConfirmUninstall(null);
     } catch (e) {
-      toast.error("卸载失败", String(e));
+      toast.error("移除失败", String(e));
     } finally {
       setBusy(null);
       // A failed removal may already have detached current or removed some files.
@@ -114,13 +299,55 @@ export function Environments() {
     }
   };
 
+  const openUninstallPreview = async (env: ManagedEnv, mode: "uninstall" | "detach" = "uninstall") => {
+    if (busy) return;
+    setUninstallMode(mode);
+    setConfirmUninstall(env);
+    setUninstallPreview(null);
+    setConfirmedLegacyLinks([]);
+    setConfirmedLegacyPathEntries([]);
+    setUninstallPreviewError(null);
+    setPreviewingUninstall(true);
+    try {
+      setUninstallPreview(await api.previewUninstallEnv(env.envType, env.name, mode));
+    } catch (error) {
+      setUninstallPreviewError(String(error));
+    } finally {
+      setPreviewingUninstall(false);
+    }
+  };
+
+  /** 在同一个对话框内切换模式：必须重新预览，旧预览绑定的是另一种范围。 */
+  const switchUninstallMode = async (mode: "uninstall" | "detach") => {
+    const env = confirmUninstall;
+    if (!env || busy || mode === uninstallMode) return;
+    setUninstallMode(mode);
+    setUninstallPreview(null);
+    setConfirmedLegacyLinks([]);
+    setConfirmedLegacyPathEntries([]);
+    setUninstallPreviewError(null);
+    setPreviewingUninstall(true);
+    try {
+      setUninstallPreview(await api.previewUninstallEnv(env.envType, env.name, mode));
+    } catch (error) {
+      setUninstallPreviewError(String(error));
+    } finally {
+      setPreviewingUninstall(false);
+    }
+  };
+
   const doScanSystem = async (force = true) => {
     setScanning(true);
+    setSystemScanError(null);
     try {
       const report = await api.scanSystem(projectDirs, force);
       setSystemEnvs(report.tools);
+      setSystemCoreTools(report.coreTools ?? []);
+      setSystemScanStatus(report.status ?? (report.warnings?.length ? "partial" : "complete"));
       setScanWarnings(report.warnings);
     } catch (e) {
+      setSystemScanStatus("failed");
+      setSystemScanError(String(e));
       toast.error("扫描失败", String(e));
     } finally {
       setScanning(false);
@@ -190,10 +417,28 @@ export function Environments() {
         overview.rootExists ? `根目录:${overview.root}` : "尚未设置管理根目录"
       }
       actions={
-        <Button size="sm" onClick={() => load(true)} loading={loading}>
-          <RefreshCw className="size-3.5" />
-          刷新
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            onClick={exportManifest}
+            title="导出只读环境清单：记录本机路径与版本，不创建、不还原、不搬移任何环境"
+          >
+            <FileDown className="size-3.5" />
+            导出清单
+          </Button>
+          <Button
+            size="sm"
+            onClick={importManifest}
+            title="读取已导出的清单并与本机现状比对：只读，不创建、不还原、不搬移任何环境"
+          >
+            <FileUp className="size-3.5" />
+            导入比对
+          </Button>
+          <Button size="sm" onClick={() => load(true)} loading={loading}>
+            <RefreshCw className="size-3.5" />
+            刷新
+          </Button>
+        </div>
       }
     >
       {/* 类型 Tab */}
@@ -251,6 +496,7 @@ export function Environments() {
                       </Badge>
                     )}
                     {env.isExternalLink && <Badge color="blue">外部链接</Badge>}
+                    {env.isLinkEntry && !env.isExternalLink && <Badge color="blue">受管链接</Badge>}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
                     <span>{env.version ?? "未知版本"}</span>
@@ -281,6 +527,27 @@ export function Environments() {
                       设为当前
                     </Button>
                   )}
+                  {env.isCurrent && (
+                    <Button
+                      size="sm"
+                      loading={busy === `repair:${env.envType}`}
+                      disabled={busy !== null || env.status !== "available"}
+                      onClick={() => openPathRepair(env.envType)}
+                    >
+                      <Wand2 className="size-3.5" />
+                      预览 PATH 修复
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    title={`重新读取 ${env.name} 的结构与版本（只读）`}
+                    aria-label={`重新检测 ${env.name}`}
+                    loading={busy === `redetect:${env.envType}:${env.name}`}
+                    disabled={busy !== null}
+                    onClick={() => void redetect(env)}
+                  >
+                    <ScanSearch className="size-3.5" />
+                  </Button>
                   <Button
                     size="sm"
                     title={`打开 ${env.name} 安装目录`}
@@ -298,11 +565,11 @@ export function Environments() {
                     variant="ghost"
                     className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
                     disabled={busy !== null}
-                    aria-label={`${env.isExternalLink ? "移除管理" : "卸载环境"} ${env.name}`}
-                    onClick={() => setConfirmUninstall(env)}
+                    aria-label={`${env.isExternalLink ? "移除管理" : env.isLinkEntry ? "移除链接" : "删除受管目录"} ${env.name}`}
+                    onClick={() => void openUninstallPreview(env)}
                   >
                     <Trash2 className="size-3.5" />
-                    {env.isExternalLink ? "移除管理" : "卸载"}
+                    {env.isExternalLink ? "移除管理" : env.isLinkEntry ? "移除链接" : "删除目录"}
                   </Button>
                 </div>
               </div>
@@ -347,6 +614,9 @@ export function Environments() {
           }
         />
         <div className="px-4"><ScanStatus kind="system" projects={projectDirs} /></div>
+        {systemScanError && <p role="alert" className="mx-4 mb-2 rounded bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+          最近一次扫描未完成：{systemScanError}{systemEnvs !== null && "；仍显示上次成功结果"}
+        </p>}
         {projectDirs.length > 0 && (
           <div className="px-4 py-2 space-y-1">
             {projectDirs.map((dir) => (
@@ -382,12 +652,15 @@ export function Environments() {
           </details>
         )}
         {systemEnvs === null ? (
-          <Empty title="尚未扫描" />
-        ) : systemEnvs.length === 0 ? (
-          <Empty title="未发现可用工具" />
+          <Empty
+            title={scanning ? "正在扫描" : systemScanError ? "扫描未完成" : "尚未扫描"}
+            desc={systemScanError ?? "扫描前不会把工具状态判定为未安装。"}
+          />
         ) : (
           <ScanResults
             rows={systemEnvs}
+            coreTools={systemCoreTools}
+            scanRunStatus={systemScanStatus}
             canIntegrate={overview.rootExists}
             integrating={integrating}
             onIntegrate={doIntegrate}
@@ -397,24 +670,302 @@ export function Environments() {
 
       {/* 卸载确认 */}
       <ConfirmDialog
+        open={pathRepair !== null}
+        onClose={() => setPathRepair(null)}
+        onConfirm={doApplyPathRepair}
+        confirmText="调整顺序"
+        loading={busy === "repair:apply"}
+        confirmDisabled={!pathRepair?.plan || pathRepair.mode !== "reorder"}
+        title="PATH 顺序修复预览"
+        message={
+          pathRepair && (
+            <>
+              <p className="text-xs text-zinc-500">
+                只读预览，尚未修改用户 PATH。
+              </p>
+              <p className="mt-2">{pathRepair.summary}</p>
+              {pathRepair.mode === "reorder" && pathRepair.plan && (
+                <>
+                  <div className="mt-3 rounded-md border border-zinc-200 px-2.5 py-2 text-xs dark:border-zinc-800">
+                    <div className="text-zinc-500">将移到最前的受管入口</div>
+                    <div className="break-all font-mono">{pathRepair.entry}</div>
+                    <div className="mt-2 text-zinc-500">当前覆盖它的目录</div>
+                    <ul className="break-all font-mono text-amber-700 dark:text-amber-300">
+                      {pathRepair.shadowing.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="mt-3 text-xs">
+                    <div className="text-zinc-500">调整后的用户 PATH</div>
+                    <div className="mt-1 break-all font-mono text-emerald-700 dark:text-emerald-400">
+                      {pathRepair.resultingPath}
+                    </div>
+                  </div>
+                </>
+              )}
+              {(pathRepair.mode === "manual" ||
+                pathRepair.blocked.length > 0) && (
+                <ul
+                  role="alert"
+                  className="mt-3 space-y-1 text-xs text-red-600 dark:text-red-400"
+                >
+                  {pathRepair.blocked.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                  {pathRepair.manualEntries.map((entry) => (
+                    <li key={entry}>需手动处理：{entry}</li>
+                  ))}
+                </ul>
+              )}
+              <ul className="mt-3 space-y-1 text-xs text-zinc-400">
+                {pathRepair.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </>
+          )
+        }
+      />
+
+      {/* 清单只读比对：没有确认按钮，因为这里不执行任何恢复动作 */}
+      <Modal
+        open={manifestComparison !== null}
+        onClose={() => setManifestComparison(null)}
+        title="环境清单比对"
+        footer={
+          <Button size="sm" onClick={() => setManifestComparison(null)}>
+            关闭
+          </Button>
+        }
+      >
+        {manifestComparison && (
+          <>
+            <p className="text-xs text-zinc-500">
+              只读比对，未创建、还原或搬移任何环境。
+            </p>
+            <p className="mt-2 text-xs">
+              清单生成于 {manifestComparison.recordedGeneratedAt}；记录根目录{" "}
+              {manifestComparison.recordedRoot ?? "（无）"}，本机根目录{" "}
+              {manifestComparison.currentRoot ?? "（无）"}
+            </p>
+            {!manifestComparison.sameRoot && (
+              <p
+                role="alert"
+                className="mt-2 text-xs text-amber-700 dark:text-amber-300"
+              >
+                根目录不同：这是跨机器比对，差异不代表环境被改动。
+              </p>
+            )}
+            <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
+              {(
+                [
+                  ["未变", manifestComparison.summary.unchanged],
+                  ["新增", manifestComparison.summary.added],
+                  ["缺失", manifestComparison.summary.missing],
+                  ["已变更", manifestComparison.summary.changed],
+                ] as const
+              ).map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-md border border-zinc-200 py-1.5 dark:border-zinc-800"
+                >
+                  <div className="text-zinc-500">{label}</div>
+                  <div className="text-sm font-medium">{value}</div>
+                </div>
+              ))}
+            </div>
+            {manifestComparison.rows.filter((row) => row.kind !== "unchanged")
+              .length > 0 && (
+              <ul className="mt-3 max-h-64 space-y-1.5 overflow-auto text-xs">
+                {manifestComparison.rows
+                  .filter((row) => row.kind !== "unchanged")
+                  .map((row) => (
+                    <li
+                      key={`${row.envType}:${row.name}`}
+                      className="rounded-md border border-zinc-200 px-2.5 py-1.5 dark:border-zinc-800"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
+                          {ENV_TYPE_META[row.envType].label}
+                        </span>
+                        <span>{row.name}</span>
+                        <span className="text-zinc-500">
+                          {row.kind === "added"
+                            ? "本机新增"
+                            : row.kind === "missing"
+                              ? "本机已无"
+                              : `已变更：${row.differences.join("、")}`}
+                        </span>
+                      </div>
+                      <div className="mt-1 break-all font-mono text-zinc-500">
+                        {row.kind !== "added" && (
+                          <div>
+                            清单：{row.recordedStatus} ·{" "}
+                            {row.recordedVersion ?? "版本未记录"} ·{" "}
+                            {row.recordedPath}
+                          </div>
+                        )}
+                        {row.kind !== "missing" && (
+                          <div>
+                            本机：{row.currentStatus} ·{" "}
+                            {row.currentVersion ?? "版本未探测"} ·{" "}
+                            {row.currentPath}
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            )}
+            <ul className="mt-3 space-y-1 text-xs text-zinc-400">
+              {manifestComparison.limitations.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </Modal>
+
+      <ConfirmDialog
         open={confirmUninstall !== null}
-        onClose={() => { if (!busy) setConfirmUninstall(null); }}
+        onClose={() => {
+          if (!busy) {
+            setConfirmUninstall(null);
+            setUninstallPreview(null);
+            setConfirmedLegacyLinks([]);
+            setConfirmedLegacyPathEntries([]);
+            setUninstallPreviewError(null);
+          }
+        }}
         onConfirm={doUninstall}
         danger
-        confirmText={confirmUninstall?.isExternalLink ? "移除管理" : "确认卸载"}
+        confirmText={uninstallMode === "detach" ? "确认停用" : confirmUninstall?.isExternalLink ? "移除管理" : confirmUninstall?.isLinkEntry ? "移除链接" : installerReady ? "执行原厂卸载" : "确认删除目录"}
         loading={busy?.startsWith("uninstall:") ?? false}
-        title={`${confirmUninstall?.isExternalLink ? "移除管理" : "卸载环境"} ${confirmUninstall?.name ?? ""}`}
+        confirmDisabled={previewingUninstall || !uninstallPreview || !!uninstallPreviewError || !uninstallPreview.scopeComplete || uninstallPreview.blocked.length > 0 || !legacyConfirmationsReady || !legacyPathConfirmationsReady}
+         title={`${confirmUninstall?.isExternalLink ? "移除管理" : confirmUninstall?.isLinkEntry ? "移除受管链接" : installerReady ? "原厂卸载" : "删除受管目录"} ${confirmUninstall?.name ?? ""}`}
         message={
           <>
+            {previewingUninstall && <p>正在核对可移除范围，请稍候...</p>}
+            {uninstallPreviewError && <p role="alert" className="text-red-600 dark:text-red-400">无法生成卸载预览：{uninstallPreviewError}</p>}
+            <div role="group" aria-label="选择处理方式" className="mb-3 flex gap-1.5">
+              <button
+                type="button"
+                aria-pressed={uninstallMode === "uninstall"}
+                disabled={busy !== null || previewingUninstall}
+                onClick={() => void switchUninstallMode("uninstall")}
+                className={`rounded-md border px-2.5 py-1 text-xs ${uninstallMode === "uninstall" ? "border-red-500 bg-red-50 font-medium text-red-700 dark:bg-red-950 dark:text-red-300" : "border-zinc-200 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400"}`}
+              >
+                卸载（删除内容）
+              </button>
+              <button
+                type="button"
+                aria-pressed={uninstallMode === "detach"}
+                disabled={busy !== null || previewingUninstall}
+                onClick={() => void switchUninstallMode("detach")}
+                className={`rounded-md border px-2.5 py-1 text-xs ${uninstallMode === "detach" ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "border-zinc-200 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400"}`}
+              >
+                停用（保留文件）
+              </button>
+            </div>
+            {uninstallMode === "detach" && (
+              <p className="mb-3 text-xs text-emerald-700 dark:text-emerald-400">
+                停用只解除 EnvCon 的管理记录与当前版本链接，磁盘上的文件全部保留；不会调用原厂卸载器。
+              </p>
+            )}
+            {uninstallPreview && <p className="text-xs text-amber-700 dark:text-amber-400">
+              {installerReady
+                ? "执行前会再次核对预览、原厂登记和卸载器文件哈希，范围变化时停止。将运行精确匹配的原厂卸载器；只在可识别范围内核验登记和运行时目录，目录外关联项仍可能未验证。"
+                : "执行前会再次核对预览，范围变化时停止。仅移除所列目录、链接和有来源证据的用户 PATH 条目；来源未知的链接或历史 PATH 如需清理，必须逐项确认。不调用原厂卸载器，目录外关联项仍可能未验证，因此不等于完整卸载证明。"}
+            </p>}
             <p>
-              {confirmUninstall?.isExternalLink ? "仅移除管理链接：" : "将永久删除安装目录及其中的文件（包括在该目录安装的包）："}
+              {uninstallMode === "detach"
+                ? "停用后目录与文件全部原地保留，仅解除管理记录："
+                : confirmUninstall?.isExternalLink || confirmUninstall?.isLinkEntry
+                  ? "仅移除管理链接："
+                  : installerReady
+                    ? "将运行原厂卸载器并核验所选安装路径："
+                    : "将永久删除安装目录及其中的文件（包括在该目录安装的包）："}
               <b className="break-all">{confirmUninstall?.path}</b>
             </p>
-            {confirmUninstall?.isExternalLink && <p className="mt-2 break-all">原安装目录保留：{confirmUninstall.identityPath}</p>}
+            {(confirmUninstall?.isExternalLink || confirmUninstall?.isLinkEntry) && <p className="mt-2 break-all">原安装目录保留：{confirmUninstall.identityPath}</p>}
+            {uninstallPreview && <div className="mt-3 space-y-2 text-xs">
+              <p className={uninstallPreview.scopeComplete && uninstallPreview.blocked.length === 0 ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+                {uninstallPreview.scopeComplete && uninstallPreview.blocked.length === 0 ? "已生成可核对的卸载范围。" : "卸载范围不完整，已禁用执行。"}
+              </p>
+              {([
+                ["将移除", uninstallPreview.removable, "text-red-600 dark:text-red-400"],
+                ["明确保留", uninstallPreview.retained, "text-emerald-700 dark:text-emerald-400"],
+                ["未验证/不自动处理", uninstallPreview.unverified, "text-amber-700 dark:text-amber-400"],
+                ["阻止执行", uninstallPreview.blocked, "text-red-600 dark:text-red-400"],
+              ] as const).map(([title, items, color]) => items.length > 0 && <section key={title}>
+                <h4 className={`font-medium ${color}`}>{title}</h4>
+                <ul className="mt-1 space-y-1">
+                  {items.map((item, index) => <li key={`${item.resource}:${index}`} className="break-all">
+                    <span className="font-medium">{item.resource}</span>
+                    {item.path && <span className="font-mono"> — {item.path}</span>}
+                    <span className="block text-zinc-500">{item.details}{item.count != null ? `（${item.count} 项）` : ""}</span>
+                  </li>)}
+                </ul>
+              </section>)}
+              {(uninstallPreview.legacyLinks?.length ?? 0) > 0 && <section className="rounded border border-amber-500/40 p-2">
+                <h4 className="font-medium text-amber-700 dark:text-amber-400">来源未知的链接：需要逐项确认</h4>
+                <p className="mt-1 text-zinc-500">默认保留这些入口。勾选只授权本次移除所列链接，不表示它们由 EnvCon 创建；不会删除链接的外部目标。</p>
+                {uninstallPreview.legacyLinks?.map((item) => <label key={item.path} className="mt-2 flex items-start gap-2 break-all">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 shrink-0"
+                    checked={item.path !== null && confirmedLegacyLinks.includes(item.path)}
+                    disabled={busy !== null || item.path === null}
+                    onChange={(event) => {
+                      const path = item.path;
+                      if (!path) return;
+                      const checked = event.target.checked;
+                      setConfirmedLegacyLinks((current) => checked
+                        ? [...current.filter((entry) => entry !== path), path]
+                        : current.filter((entry) => entry !== path));
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium">确认移除 {item.resource}</span>
+                    <span className="block font-mono">{item.path}</span>
+                    <span className="block text-zinc-500">{item.details}</span>
+                  </span>
+                </label>)}
+              </section>}
+              {(uninstallPreview.legacyPathEntries?.length ?? 0) > 0 && <section className="rounded border border-amber-500/40 p-2">
+                <h4 className="font-medium text-amber-700 dark:text-amber-400">来源未知的历史 PATH：默认保留</h4>
+                <p className="mt-1 text-zinc-500">逐项勾选仅授权本次移除预览列出的精确 PATH 字符串；不表示该项由 EnvCon 创建。共享依赖、重复或已变化的条目不会清理。</p>
+                {uninstallPreview.legacyPathEntries?.map((item) => <label key={item.path} className="mt-2 flex items-start gap-2 break-all">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 shrink-0"
+                    checked={item.path !== null && confirmedLegacyPathEntries.includes(item.path)}
+                    disabled={busy !== null || item.path === null}
+                    onChange={(event) => {
+                      const path = item.path;
+                      if (!path) return;
+                      const checked = event.target.checked;
+                      setConfirmedLegacyPathEntries((current) => checked
+                        ? [...current.filter((entry) => entry !== path), path]
+                        : current.filter((entry) => entry !== path));
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium">确认移除此历史 PATH 条目</span>
+                    <span className="block font-mono">{item.path}</span>
+                    <span className="block text-zinc-500">{item.details}</span>
+                  </span>
+                </label>)}
+              </section>}
+            </div>}
             <p className="mt-1.5 text-xs text-zinc-400">
               {confirmUninstall?.isCurrent ? "当前链接也会一并移除，需要重新选择当前环境。" : ""}
-              {confirmUninstall?.isExternalLink ? "之后可以重新扫描并纳入管理。" : "此操作不可恢复，请先关闭使用此环境的程序。"}
-              不会修改其他环境或自动清理共享 PATH 条目。
+              {confirmUninstall?.isExternalLink || confirmUninstall?.isLinkEntry ? "之后可以重新扫描并纳入管理。" : "此操作不可恢复，请先关闭使用此环境的程序。"}
+               仅自动清理有 EnvCon 来源证据且无共享依赖的用户 PATH 项；来源未知的历史固定项默认保留，需逐项授权。
+               {!confirmUninstall?.isExternalLink && !confirmUninstall?.isLinkEntry && (installerReady
+                 ? " 原厂卸载成功后才会清理有来源证据的 PATH；用户级包、外部 venv、共享缓存及目录外数据仍可能保留。"
+                 : " 此操作不调用原厂卸载器；安装器登记、用户级包、缓存及目录外数据可能保留，不能视为完整卸载。")}
             </p>
           </>
         }

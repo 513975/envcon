@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01 affected global package listing inside the read-only configuration preview",
+  "status": "implemented-and-isolated-ui-verified; real manager installation and real configuration write not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.8",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "68963d2a0bbd69f7d137acf80ea27430619bfb602e2387b129405aee187b527d",
+    "src-tauri/src/packages.rs": "ff222045737c852717c7f41094a2ee051ed1817cfad3dc171976cec32e1ac122",
+    "src/pages/PackageManagers.tsx": "291a8d9a2ce4c033e1a9f62b7958834d3b1d6d6a1fa743071cecb04eb3558ff9",
+    "src/lib/types.ts": "a260f832923a0c6113718ba5e82350830496275da6c1ab70d33b549ebfab98d2",
+    "tests/packages-ui.mjs": "4a60e223281f0cd1c297642b9ba28f3e479a6afac48a921457abdb3ce889b189"
+  },
+  "implementation": [
+    "packages::global_package_rows exposes the existing disk-reading global inventory as read-only (name, version, detail) triples",
+    "pkgtools::read_affected_packages reads only the current global root; it never executes a manager, installs, updates or deletes",
+    "classify_affected_packages marks every existing package as unresolved when the command entry changes, and kept otherwise; unresolved_count reflects that",
+    "an empty read is described as 'not necessarily an empty directory' rather than claiming nothing is installed",
+    "a missing current global root is reported explicitly instead of producing an empty list that looks like a clean result",
+    "an unreadable global root produces a note with the underlying error and no fabricated packages",
+    "ToolConfigPreview carries affectedPackages (packages, unresolvedCount, note); the batch path reuses it per tool",
+    "the single-tool preview dialog lists the affected packages with name, version, optional diagnostic, and an 'entry may stop resolving' marker plus a total"
+  ],
+  "fixtures": [
+    "pkgtools::tests::affected_packages_mark_launchers_only_when_the_entry_moves",
+    "pkgtools::tests::affected_packages_never_claim_absence_from_an_empty_read",
+    "pkgtools::tests::affected_packages_read_the_global_root_without_executing_anything"
+  ],
+  "uiCoverage": {
+    "singlePreview": "the preview dialog shows 受影响的全局包（当前全局目录）, the eslint 9.1.0 row marked as possibly unresolved, and the 1 个可能不再解析 total",
+    "blockedPreview": "the blocked pip preview carries an explicit 'no global directory found' note and never fabricates packages"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "245 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml pkgtools::tests -- --test-threads=1",
+      "result": "22 passed / 0 failed / 237 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 685ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real global installation was read; the current-root side used temporary fixtures only",
+    "Unresolved status is a conservative inference from a command-entry change; it does not prove that any specific launcher fails",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "At most 50 packages are listed to bound the preview cost; the list is truncated silently beyond that",
+    "The batch dialog does not yet render per-tool package lists, only the single-tool dialog does",
+    "Package rows whose metadata is damaged appear with the inventory's own detail string and no version"
+  ]
+}

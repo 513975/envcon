@@ -1,6 +1,6 @@
 # EnvCon 0.5.5 构建记录
 
-本版增加 ADB / Android SDK Platform Tools 环境管理，使用说明见 [ADB](adb.md)。版本声明在 package.json、锁文件、Cargo 和 Tauri 配置中统一为 0.5.5。
+本版增加 ADB / Android SDK Platform Tools 环境管理，使用说明见 [ADB](../guides/adb.md)。版本声明在 package.json、锁文件、Cargo 和 Tauri 配置中统一为 0.5.5。
 
 ## 验证
 

@@ -7,7 +7,8 @@ use futures_util::StreamExt;
 use tokio::sync::Mutex;
 
 use crate::error::{AppError, Result};
-use crate::sources::{DownloadSpec, InstallMethod};
+use crate::sources::{DownloadSpec, InstallMethod, VerificationInfo};
+use sha2::{Digest, Sha256};
 
 pub struct DownloadManager {
     next_id: AtomicU64,
@@ -95,6 +96,7 @@ impl DownloadManager {
         let tmp_dest = dest.with_extension("part");
         let mut file = tokio::fs::File::create(&tmp_dest).await?;
         let mut stream = resp.bytes_stream();
+        let mut digest = Sha256::new();
 
         let mut downloaded: u64 = 0;
         let mut last_report = Instant::now();
@@ -111,6 +113,7 @@ impl DownloadManager {
             let Some(chunk) = chunk else { break };
             let chunk = chunk.map_err(AppError::Net)?;
             file.write_all(&chunk).await?;
+            digest.update(&chunk);
             downloaded += chunk.len() as u64;
 
             // 每约 250ms 回报一次
@@ -126,6 +129,9 @@ impl DownloadManager {
         file.flush().await?;
         check_canceled(cancel)?;
         drop(file);
+        validate_content_length(total, downloaded)?;
+        validate_content_length(spec.expected_size, downloaded)?;
+        validate_digest(&spec.verification, &digest)?;
         on_progress(downloaded, total, last_speed);
 
         // .part → 最终名
@@ -136,6 +142,73 @@ impl DownloadManager {
         tokio::fs::rename(&tmp_dest, &final_path).await?;
         Ok(final_path)
     }
+}
+
+fn validate_content_length(expected: Option<u64>, downloaded: u64) -> Result<()> {
+    if let Some(expected) = expected {
+        if expected != downloaded {
+            return Err(AppError::msg(format!(
+                "下载长度校验失败：预期 {expected} 字节，实际 {downloaded} 字节"
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_digest(
+    verification: &VerificationInfo,
+    digest: &Sha256,
+) -> Result<()> {
+    match verification {
+        VerificationInfo::TrustedSha256 { expected, .. } => {
+            if !is_sha256(expected) {
+                return Err(AppError::msg("下载校验资料无效：SHA-256 必须是 64 位十六进制值"));
+            }
+            let actual = format!("{:x}", digest.clone().finalize());
+            if !actual.eq_ignore_ascii_case(expected) {
+                return Err(AppError::msg(format!(
+                    "下载 SHA-256 校验失败：预期 {expected}，实际 {actual}"
+                )));
+            }
+        }
+        VerificationInfo::ChecksumFile { .. } => {
+            return Err(AppError::msg(
+                "下载校验资料暂不支持：无法安全解析并核对来源校验文件",
+            ));
+        }
+        VerificationInfo::Invalid { reason } => {
+            return Err(AppError::msg(format!("下载校验资料无效：{reason}")));
+        }
+        VerificationInfo::Unverified { .. } => {}
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_existing_file(
+    path: &Path,
+    verification: &VerificationInfo,
+    expected_size: Option<u64>,
+) -> Result<()> {
+    let metadata = std::fs::metadata(path)?;
+    validate_content_length(expected_size, metadata.len())?;
+    if verification.expected_sha256().is_none() {
+        return validate_digest(verification, &Sha256::new());
+    }
+    let mut file = std::fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut file, &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    validate_digest(verification, &digest)
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// 解压 zip 到目标目录;strip_top 时剥掉顶层目录。进度通过 on_progress(0-1) 回报
@@ -444,6 +517,13 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
 
+    #[test]
+    fn content_length_verification_rejects_mismatch_but_allows_unknown_length() {
+        assert!(validate_content_length(Some(4), 3).is_err());
+        assert!(validate_content_length(Some(4), 4).is_ok());
+        assert!(validate_content_length(None, 3).is_ok());
+    }
+
     #[tokio::test]
     async fn installer_drains_large_stderr_and_reports_failure() {
         let exe = PathBuf::from(std::env::var("SystemRoot").unwrap())
@@ -564,7 +644,12 @@ mod tests {
                 let _ = ready_tx.send(());
                 let _ = stop_rx.recv_timeout(Duration::from_secs(5));
             });
-            let spec = DownloadSpec { url: format!("http://{address}/archive"), method: InstallMethod::Unzip { strip_top: false } };
+            let spec = DownloadSpec {
+                url: format!("http://{address}/archive"),
+                method: InstallMethod::Unzip { strip_top: false },
+                verification: VerificationInfo::default(),
+                expected_size: None,
+            };
             let dest = dir.path().join("download.zip");
             let cancel = Arc::new(AtomicBool::new(false));
             let manager = DownloadManager::new();
@@ -582,5 +667,175 @@ mod tests {
             assert!(!dest.with_extension("part").exists());
             assert!(manager.active.lock().await.is_empty());
         }
+    }
+
+    #[test]
+    fn checksum_states_are_distinguished_and_never_misreported_as_verified() {
+        let digest = Sha256::new();
+        let expected = format!("{:x}", Sha256::digest(b"fixture"));
+        assert!(validate_digest(
+            &VerificationInfo::trusted_sha256(&expected, "test fixture"),
+            &Sha256::new()
+        )
+        .is_err());
+        assert!(validate_digest(
+            &VerificationInfo::trusted_sha256("not-a-sha256", "test fixture"),
+            &digest
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("无效"));
+        assert!(validate_digest(
+            &VerificationInfo::ChecksumFile {
+                url: "https://example.test/SHA256SUMS".into(),
+                filename: "archive.zip".into(),
+                source: "fixture".into(),
+            },
+            &digest,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("暂不支持"));
+        assert!(validate_digest(
+            &VerificationInfo::Invalid {
+                reason: "malformed digest".into(),
+            },
+            &digest,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("无效"));
+        assert!(validate_digest(&VerificationInfo::unverified(), &digest).is_ok());
+    }
+
+    #[test]
+    fn pre_install_recheck_detects_file_tampering_and_size_changes() {
+        let dir = crate::test_support::TestDir::new();
+        let file = dir.path().join("asset.bin");
+        std::fs::write(&file, b"trusted bytes").unwrap();
+        let verification = VerificationInfo::trusted_sha256(
+            format!("{:x}", Sha256::digest(b"trusted bytes")),
+            "fixture publisher metadata",
+        );
+        assert!(validate_existing_file(&file, &verification, Some(13)).is_ok());
+
+        std::fs::write(&file, b"tampered data").unwrap();
+        assert!(validate_existing_file(&file, &verification, Some(13))
+            .unwrap_err()
+            .to_string()
+            .contains("SHA-256"));
+        assert!(validate_existing_file(&file, &verification, Some(12))
+            .unwrap_err()
+            .to_string()
+            .contains("长度"));
+        assert!(validate_existing_file(&file, &VerificationInfo::unverified(), Some(12)).is_err());
+        assert!(validate_existing_file(&file, &VerificationInfo::unverified(), None).is_ok());
+    }
+
+    #[tokio::test]
+    async fn download_length_and_digest_failures_never_commit_partial_file() {
+        for (body, content_length, expected_size, verification) in [
+            (
+                b"short".as_slice(),
+                Some(10usize),
+                None,
+                VerificationInfo::unverified(),
+            ),
+            (
+                b"tampered".as_slice(),
+                Some(8usize),
+                None,
+                VerificationInfo::trusted_sha256(
+                    format!("{:x}", Sha256::digest(b"expected")),
+                    "fixture publisher metadata",
+                ),
+            ),
+            (
+                b"exact".as_slice(),
+                Some(5usize),
+                Some(6u64),
+                VerificationInfo::unverified(),
+            ),
+            (
+                b"asset".as_slice(),
+                Some(5usize),
+                None,
+                VerificationInfo::ChecksumFile {
+                    url: "https://example.test/SHA256SUMS".into(),
+                    filename: "asset.zip".into(),
+                    source: "fixture publisher".into(),
+                },
+            ),
+            (
+                b"asset".as_slice(),
+                Some(5usize),
+                None,
+                VerificationInfo::Invalid {
+                    reason: "malformed publisher digest".into(),
+                },
+            ),
+        ] {
+            let dir = crate::test_support::TestDir::new();
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                stream.read(&mut request).unwrap();
+                let content_length = content_length.unwrap();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+                )
+                .unwrap();
+                stream.write_all(body).unwrap();
+                stream.flush().unwrap();
+            });
+            let spec = DownloadSpec {
+                url: format!("http://{address}/asset"),
+                method: InstallMethod::Unzip { strip_top: false },
+                verification,
+                expected_size,
+            };
+            let destination = dir.path().join("asset.zip");
+            let result = DownloadManager::new()
+                .download(&spec, &destination, |_, _, _| {})
+                .await;
+            server.join().unwrap();
+            assert!(result.is_err());
+            assert!(!destination.exists());
+            assert!(!destination.with_extension("part").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn unverified_mirror_asset_is_labeled_as_unverified_but_can_download() {
+        let dir = crate::test_support::TestDir::new();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nmirror"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+        });
+        let spec = DownloadSpec {
+            url: format!("http://{address}/mirror.zip"),
+            method: InstallMethod::Unzip { strip_top: false },
+            verification: VerificationInfo::unverified(),
+            expected_size: Some(6),
+        };
+        let destination = dir.path().join("mirror.zip");
+        assert!(DownloadManager::new()
+            .download(&spec, &destination, |_, _, _| {})
+            .await
+            .is_ok());
+        server.join().unwrap();
+        assert_eq!(std::fs::read(destination).unwrap(), b"mirror");
     }
 }

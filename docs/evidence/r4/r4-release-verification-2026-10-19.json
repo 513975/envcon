@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-19",
+  "scope": "R4 / REL-01 executable portions: Windows CI definition, fresh-clone verifier, release record, rollback/tag process, and read-only app update check",
+  "version": "0.5.5",
+  "versionConsistent": true,
+  "verification": {
+    "npmRunVerify": {
+      "command": "npm run verify",
+      "rust": "230 passed / 0 failed / 14 ignored",
+      "frontend": "1709 modules transformed; build passed",
+      "readState": "2 suites passed",
+      "ui": "9 suites passed (settings, startup, release-052, download, package-manager-update, scans, scan, sizes, packages)",
+      "playwright": "C:\\Users\\island\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright",
+      "result": "passed"
+    },
+    "appUpdateTests": {
+      "command": "cargo test --offline --lib app_update::tests -- --test-threads=1 --quiet",
+      "result": "4 passed / 1 ignored"
+    },
+    "settingsUi": {
+      "command": "node tests/run-ui.mjs <Codex Playwright> tests/settings-ui.mjs",
+      "result": "PASS: update check available/error states"
+    },
+    "offlineIntegration": {
+      "command": "cargo test --offline --test sources_test download_spec -- --test-threads=1",
+      "result": "3 passed / 2 filtered out (network tests not run)"
+    },
+    "cargoCheck": {
+      "command": "cargo check --offline",
+      "result": "0 errors / 1 warning (existing path_ownership::preview_cleanup dead code)"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "exit 0; line-ending conversion warnings only"
+    },
+    "fmt": {
+      "command": "cargo fmt --check",
+      "result": "not executed: cargo-fmt.exe is not installed for stable-x86_64-pc-windows-msvc"
+    },
+    "freshClone": {
+      "command": "pwsh -NoProfile -File scripts/verify-fresh-clone.ps1 -SkipInstall -SkipTests",
+      "result": "failed as expected: HEAD has 11 required files that are not committed",
+      "missing": [
+        "PRODUCT_ASSESSMENT.md",
+        "src-tauri/tests/download_test.rs",
+        "src-tauri/tests/sources_test.rs",
+        "src-tauri/tests/switcher_test.rs",
+        "tests/scan-ui.mjs",
+        "tests/package-manager-update-ui.mjs",
+        "tests/packages-ui.mjs",
+        ".github/workflows/windows.yml",
+        "docs/release-process.md",
+        "scripts/record-release.ps1",
+        "scripts/verify-fresh-clone.ps1"
+      ],
+      "sourceIgnoreCheck": "no required path ignored in the working tree"
+    }
+  },
+  "releaseRecord": {
+    "path": "docs/release-record-0.5.5-20261018-230054.json",
+    "dirtyWorktree": true,
+    "artifactStatus": "present-unverified-provenance",
+    "artifactSha256": "7071493d047085c9356f56b77cd6b18d0338e0b7e7cb6f041860f8b2bff71a1e",
+    "artifactNote": "pre-existing target-v0.5.5 NSIS build; not proven to be built from the recorded commit"
+  },
+  "notRun": [
+    "GitHub Actions workflow (requires commit/push and user authorization)",
+    "live GitHub Releases check (external network not used this turn)",
+    "real upgrade, signature verification, Release upload, tag push",
+    "EXE/NSIS clean install, over-upgrade, uninstall, and configuration-preservation matrix"
+  ],
+  "blocked": [
+    "code signing and timestamping need a paid certificate/key; secrets are not stored in the repository",
+    "formal Release upload needs release authorization",
+    "real installation matrix needs a usable Windows VM or authorized machine; none is available",
+    "tag push needs explicit user authorization"
+  ],
+  "changedFiles": [
+    ".github/workflows/windows.yml",
+    ".gitignore",
+    "README.md",
+    "ROADMAP.md",
+    "docs/release-process.md",
+    "scripts/record-release.ps1",
+    "scripts/verify-fresh-clone.ps1",
+    "src-tauri/src/app_update.rs",
+    "src-tauri/src/commands.rs",
+    "src-tauri/src/lib.rs",
+    "src-tauri/src/sources.rs",
+    "src/lib/api.ts",
+    "src/lib/types.ts",
+    "src/pages/Settings.tsx",
+    "tests/settings-ui.mjs"
+  ],
+  "sourceHashes": {
+    "src-tauri/src/sources.rs": "92b04ff29f3f93c824101a9b4fe35309e7c45e3eaa5a2f36b7b76ccfde2b332e",
+    "src-tauri/src/app_update.rs": "1fc5f732b4c20b35a9da9caa6ec1f3d8d1821f8ca37b6e9b9fd661d6e419a367",
+    "src-tauri/src/commands.rs": "cddd5b4b7b29920a7b6e56fb55a36aff036853251fbdbc398894d89352488f91",
+    "src-tauri/src/lib.rs": "3263291677351e3f7f718b654e5f59831358dde3077ed402cb87964e12b4fd18",
+    "src/pages/Settings.tsx": "2593f5997d7705bfc77b82c81ac7c08adedefee3f30d5deb23a282bd427159d5",
+    "src/lib/api.ts": "6bb3fed1adec34586adbc1d860a69d10177affae54d61ef82bf2a4666960753a",
+    "src/lib/types.ts": "46e559265cad511521b26a44706e24efea2aef5dee7c2ce072c267cc3faa39f3",
+    "tests/settings-ui.mjs": "c32beba56488ad11bd807c3eac3c625a33026087619d9e7ab76ffc0afd6f31ff",
+    "scripts/verify-fresh-clone.ps1": "611b0f2ba0de9f2707e0d994fb22438f7d7b2c723a808ce3a77afbc3699ff012",
+    "scripts/record-release.ps1": "7d8ca316712707cda9c163918effc2142a36c7be4ea1b878f5477b77fa6f0ffe",
+    ".github/workflows/windows.yml": "6d0a24d2e2132d2834b721295311e29144cdb979bede4a7d460773100566f312",
+    ".gitignore": "f4398fc973f383b2ffb32e97f7caef6762eb806f5403b1af2535abf09e971b15",
+    "docs/release-process.md": "3c8d012dbf2dcfe0600eefb02064f9de4c21c9bb0f4e6d52e7c8d5614a2c594e"
+  }
+}

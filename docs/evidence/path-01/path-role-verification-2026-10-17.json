@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-17",
+  "item": "PATH-01 directory role model",
+  "status": "implementation and isolation regression passed; migration, real command effectiveness, and host configuration remain unverified",
+  "files": [
+    {
+      "path": "src-tauri/src/pkgtools.rs",
+      "sha256": "bb3aab175508885198a128fab915dd4d1a8e890247e8e0da604c9c0e680a97e9"
+    },
+    {
+      "path": "src-tauri/src/package_managers/native.rs",
+      "sha256": "4bec5037a226279c057cfd89650c6be194d0c413c10f785e561c1ae4953c5354"
+    },
+    {
+      "path": "src-tauri/src/package_managers/mod.rs",
+      "sha256": "eea8cf1b9af42c3ae1915b56cbdfce659bfbb72e092ef08bbc5936d720c96777"
+    },
+    {
+      "path": "src-tauri/src/global_reinstall.rs",
+      "sha256": "3b33cfdec8fa8e11185ab2d65d7391791b0933c8b4e51f75dc87f990973fd98c"
+    },
+    {
+      "path": "src-tauri/src/migration.rs",
+      "sha256": "4ef2bd1076711e286f304ca6495d504fd6d0ca9f5952ce914609041c1fdbfac5"
+    }
+  ],
+  "changes": [
+    "Added an explicit tool-environment, command-entry, cache/storage, and configuration directory role view.",
+    "Routed supported global configuration through the role validator.",
+    "Separated command-entry/cache and configuration overlaps for all managers; retained npm prefix and Yarn prefix/bin semantics.",
+    "Made dotnet's isolated cache a sibling so its reinstall fixture does not overlap its command root.",
+    "Rejected migration sources that are inside or alias the EnvCon management root.",
+    "Applied the same four-role validation before package-manager configuration writes, including non-isolated npm/pnpm/Yarn paths."
+  ],
+  "fixtures": [
+    "package_managers::tests::every_manager_has_explicit_roles_and_rejects_config_cache_overlap",
+    "package_managers::tests::role_model_preserves_manager_specific_entry_layouts",
+    "package_managers::native::tests::isolated_manager_roles_are_siblings_and_reject_nested_aliases",
+    "package_managers::native::tests::pnpm_and_yarn_classic_keep_package_store_and_command_prefixes_separate",
+    "global_reinstall::tests::destination_layout_initializes_all_global_adapters_and_isolates_configs",
+    "global_reinstall::tests::destination_layout_refuses_existing_sibling_without_reusing_it",
+    "migration::tests::refuses_sources_inside_or_aliasing_the_managed_root",
+    "pkgtools::tests::configuration_write_layout_rejects_config_cache_overlap_before_side_effects",
+    "pkgtools::tests::cache_only_configuration_checks_absolute_paths"
+  ],
+  "focused": {
+    "command": "cargo test --offline --lib package_managers::tests -- --test-threads=1",
+    "result": "4 passed; 0 failed; 199 filtered out"
+  },
+  "verify": {
+    "command": "npm run verify",
+    "result": "193 passed; 0 failed; 13 ignored; TypeScript/Vite, two read-state suites, and eight UI suites passed",
+    "playwright": "C:/Users/island/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright"
+  },
+  "build": {
+    "command": "npm run build",
+    "result": "1708 modules transformed; built in 686ms"
+  },
+  "check": {
+    "command": "cargo check --offline",
+    "result": "0 errors; 4 existing dead_code warnings for the not-yet-connected installer execution core"
+  },
+  "diffCheck": {
+    "command": "git diff --check",
+    "result": "exit code 0"
+  },
+  "limitations": [
+    "No real user PATH, registry, package-manager configuration, install, migration, upgrade, or uninstall was performed.",
+    "Legacy layout recovery and end-to-end migration/cleanup ownership are still pending.",
+    "A successful configuration write is not evidence that a new terminal resolves the intended command.",
+    "Windows VM acceptance, packaging, signing, push, and release remain blocked or unverified."
+  ]
+}

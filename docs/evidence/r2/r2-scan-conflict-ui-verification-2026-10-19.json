@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R2 scan-result UI rendering of same-installation entrypoint version conflicts",
+  "status": "implemented-and-ui-verified; real host scan not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "sourceHashes": {
+    "src/components/ScanResults.tsx": "0288921fd45acab2e4aa9f8538cb973a4128679ef624a7a54f5741b20b69f8b9",
+    "src/lib/types.ts": "bb61c6900763d35083b15438ab0df7d27c6f18da79278c1745b58e110fc71649",
+    "tests/scan-ui.mjs": "170345695c83999854eede7b4841c045169897201f3c15f69128b82b6146f431"
+  },
+  "implementation": [
+    "ExternalEnv gains an optional versionConflicts array mirroring the Rust payload",
+    "each affected entry renders a status block listing every conflicting launcher with its reported version or its probe error",
+    "the block states that one installation record was kept and asks the user to verify the entrypoints in a new terminal",
+    "the collapsed group header shows an aggregate 'N 个入口版本不一致' marker so the conflict is visible without expanding",
+    "paths use break-all and the list is width-constrained, so long launcher paths wrap instead of overflowing at 390px"
+  ],
+  "uiCoverage": {
+    "scan-ui": "the Node.js fixture carries two conflicts (one with a version, one with a probe error); the test asserts the aggregate header marker, the block heading, both paths, the version text and the error text, then asserts no horizontal overflow at 390px and captures tests/scan-conflicts-390.png"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "262 passed / 0 failed / 14 ignored"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 677ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "targeted": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/scan-ui.mjs",
+      "result": "PASS"
+    }
+  },
+  "notVerified": [
+    "No real host installation with divergent launcher versions was scanned; the UI was driven by a simulated backend",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "The conflict block lives inside the expanded entry, so a user must expand the tool to see individual paths",
+    "Only the aggregate count appears when collapsed",
+    "The UI does not offer a remediation action; it points the user to verify in a new terminal"
+  ]
+}

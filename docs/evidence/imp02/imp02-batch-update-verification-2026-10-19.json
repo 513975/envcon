@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 / R2 item: batch package-manager update with preview, skip semantics and failure retry",
+  "status": "implemented-and-isolated-verified; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "4b2b489ebdf87831ff884b6ba7fc0b7eae2ffe25af3120ba4533079782511d78",
+    "src-tauri/src/lib.rs": "7f354cc465c7409e4647666ac8101369a4ba2297a97c3d6002621b39d3870124",
+    "src/lib/types.ts": "8fcc7eac7e0732fc276b90b1c233eb1410b88577bfe228c66d76b62a718d0cdf",
+    "src/lib/api.ts": "0979c0415ed2c95e499bfb54f3d529b877d10e293668ef76201a960314d2013e",
+    "src/pages/PackageManagers.tsx": "33192e5c52b797da1c7ac465ec0cc00297b3d03b2b897a61edfb8e88b7790f24",
+    "tests/package-manager-update-ui.mjs": "6d23c999ff21a487bcec8cb9f68c87ea06be721eb30c1a14775b9fe1c69aa36c"
+  },
+  "gapClosed": "ROADMAP R2 item previously recorded as unfinished: 批量更新、跳过与失败项重试均未实现",
+  "implementation": {
+    "preview": "preview_package_manager_updates returns every catalog manager's read-only preview plus ready/blocked splits; blocked managers keep their reason instead of being dropped",
+    "batchExecution": "update_package_managers takes the exclusive guards once for the whole run, reuses the single-tool executor per manager, and never holds the lock per tool",
+    "skipSemantics": "A refusal before any command runs (missing command, unsupported self-update, Yarn Berry, unverifiable pip interpreter, or an explicit user skip) is reported as skipped with its reason and is never counted as a failure",
+    "retry": "retryable is derived from items whose outcome is failed, so the UI cannot drift from what actually happened; the retry dialog resends only those tools and merges results back without losing the first run",
+    "ui": "A 批量更新 button opens a read-only preview listing each manager's current version, executable and exact command (or its skip reason); confirming runs only the ready tools; the result dialog labels every outcome and offers 重试失败项"
+  },
+  "defectsFixed": [
+    "The single-tool command had to be split into guard + inner so a batch could hold the locks once; the first refactor returned the guards unbound, which would have dropped every lock immediately — caught and fixed before verification.",
+    "The batch result dialog initially stacked on top of the still-open preview; the preview is now closed when the batch completes."
+  ],
+  "fixtures": [
+    {
+      "name": "commands::tests::batch_outcomes_separate_skips_from_failures_and_drive_retry",
+      "asserts": "every status maps to one batch outcome; skips carry a reason and no result; only failures become retryable; item order is preserved"
+    },
+    {
+      "name": "commands::tests::batch_preview_splits_ready_and_blocked_without_dropping_reasons",
+      "asserts": "the ready/blocked split keeps the blocked entry and its reason rather than filtering it away"
+    },
+    {
+      "name": "tests/package-manager-update-ui.mjs (batch section)",
+      "asserts": [
+        "opening the batch preview executes nothing (batchCalls empty, updateCalls unchanged)",
+        "the preview shows the exact command for the updatable manager and the skip reason for pipx",
+        "cancelling the preview leaves every manager untouched",
+        "confirming sends only the ready tools — pipx never reaches the executor",
+        "a failed batch surfaces a retry that resends exactly that tool, then disables itself when nothing is left"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "277 passed / 0 failed / 14 ignored"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 537ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "notVerified": [
+    "No real package manager was updated; every execution went through the UI fixture",
+    "Batch behaviour under a real mid-run failure (disk full, locked binary) was not exercised",
+    "Only one updatable manager plus one blocked manager were modelled in the fixture, not all ten at once"
+  ],
+  "limitations": [
+    "Managers run sequentially; there is no progress indicator between tools, only the final per-tool report",
+    "A batch never retries automatically: the user must confirm the retry",
+    "Target versions remain unknowable before execution, so the preview shows the current version and command only",
+    "No packaging, tagging or release"
+  ]
+}

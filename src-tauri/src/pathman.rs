@@ -42,48 +42,85 @@ pub fn split_path(s: &str) -> Vec<String> {
 
 /// 保存用户级 PATH(自动备份 + 保留原值类型 + 广播生效)
 pub fn save_user_path(entries: &[String], backups_dir: &Path) -> Result<()> {
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let env = hkcu.open_subkey_with_flags(HKCU_ENV, KEY_READ | KEY_WRITE)?;
-
-    let old_raw = env.get_raw_value(PATH_VALUE).unwrap_or(RegValue {
-        bytes: encode_reg_string(""),
-        vtype: RegType::REG_EXPAND_SZ,
-    });
-    let old = decode_reg_string(&old_raw.bytes);
-    backup_path(&old, backups_dir)?;
-
-    write_path_value(&env, &entries.join(";"), old_raw.vtype)?;
+    let mut store = RegistryPathStore::open(backups_dir)?;
+    crate::path_ownership::apply(
+        &mut store,
+        &backups_dir.join("ownership/journal.json"),
+        crate::path_ownership::Change::Replace(entries),
+    )?;
     broadcast_change();
     Ok(())
 }
 
 /// 把缺失的条目追加进用户 PATH,返回新增条目列表
 pub fn integrate_entries(new_entries: &[String], backups_dir: &Path) -> Result<Vec<String>> {
-    let state = get_path_state()?;
-    let existing: Vec<String> = state.user.iter().map(|p| p.to_lowercase()).collect();
-    let to_add: Vec<String> = new_entries
-        .iter()
-        .filter(|e| !existing.contains(&e.to_lowercase()))
-        .cloned()
-        .collect();
-    if to_add.is_empty() {
-        return Ok(vec![]);
+    let mut store = RegistryPathStore::open(backups_dir)?;
+    let added = crate::path_ownership::apply(
+        &mut store,
+        &backups_dir.join("ownership/journal.json"),
+        crate::path_ownership::Change::Append(new_entries),
+    )?;
+    if !added.is_empty() {
+        broadcast_change();
+    }
+    Ok(added)
+}
+
+/// 按预览计划把受管入口移到用户 PATH 最前；只调整顺序，不增删条目。
+pub fn apply_path_reorder(
+    plan: &crate::path_ownership::ReorderPlan,
+    backups_dir: &Path,
+) -> Result<crate::path_ownership::ReorderPlan> {
+    let mut store = RegistryPathStore::open(backups_dir)?;
+    crate::path_ownership::apply(
+        &mut store,
+        &backups_dir.join("ownership/journal.json"),
+        crate::path_ownership::Change::Reorder(plan),
+    )?;
+    broadcast_change();
+    Ok(plan.clone())
+}
+
+pub(crate) struct RegistryPathStore<'a> {
+    env: RegKey,
+    backups: &'a Path,
+}
+
+impl<'a> RegistryPathStore<'a> {
+    pub(crate) fn open(backups: &'a Path) -> Result<Self> {
+        let env = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(HKCU_ENV, KEY_READ)?;
+        Ok(Self { env, backups })
     }
 
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let env = hkcu.open_subkey_with_flags(HKCU_ENV, KEY_READ | KEY_WRITE)?;
-    let old_raw = env.get_raw_value(PATH_VALUE).unwrap_or(RegValue {
-        bytes: encode_reg_string(""),
-        vtype: RegType::REG_EXPAND_SZ,
-    });
-    let old = decode_reg_string(&old_raw.bytes);
-    backup_path(&old, backups_dir)?;
+    fn raw(&self) -> Result<RegValue> {
+        let value = match self.env.get_raw_value(PATH_VALUE) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => RegValue {
+                bytes: encode_reg_string(""), vtype: RegType::REG_EXPAND_SZ,
+            },
+            Err(error) => return Err(error.into()),
+        };
+        if !matches!(value.vtype, RegType::REG_SZ | RegType::REG_EXPAND_SZ) {
+            return Err(crate::error::AppError::msg("PATH 注册表类型不是字符串，已停止写入"));
+        }
+        checked_path_string(&value.bytes)?;
+        Ok(value)
+    }
+}
 
-    let mut merged = state.user;
-    merged.extend(to_add.iter().cloned());
-    write_path_value(&env, &merged.join(";"), old_raw.vtype)?;
-    broadcast_change();
-    Ok(to_add)
+impl crate::path_ownership::PathStore for RegistryPathStore<'_> {
+    fn read(&mut self) -> Result<String> {
+        Ok(decode_reg_string(&self.raw()?.bytes))
+    }
+
+    fn write(&mut self, value: &str) -> Result<()> {
+        let writable = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(HKCU_ENV, KEY_READ | KEY_WRITE)?;
+        let old = self.raw()?;
+        backup_path(&decode_reg_string(&old.bytes), self.backups)?;
+        write_path_value(&writable, value, old.vtype)
+    }
 }
 
 /// 以指定类型写入 PATH(UTF-16LE + 终止符)
@@ -120,6 +157,21 @@ fn decode_reg_string(bytes: &[u8]) -> String {
         .collect();
     let s = String::from_utf16_lossy(&units);
     s.trim_end_matches('\0').to_string()
+}
+
+fn checked_path_string(bytes: &[u8]) -> Result<String> {
+    if bytes.len() % 2 != 0 {
+        return Err(crate::error::AppError::msg("PATH 注册表字符串字节长度无效"));
+    }
+    let units: Vec<u16> = bytes.chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]])).collect();
+    let value = String::from_utf16(&units)
+        .map_err(|_| crate::error::AppError::msg("PATH 包含无效 UTF-16，已停止写入"))?;
+    let value = value.trim_end_matches('\0');
+    if value.contains('\0') {
+        return Err(crate::error::AppError::msg("PATH 包含嵌入的空字符，已停止写入"));
+    }
+    Ok(value.into())
 }
 
 fn backup_path(old: &str, backups_dir: &Path) -> Result<()> {
@@ -176,6 +228,17 @@ fn unix_to_utc(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn malformed_path_values_are_not_replaced_with_empty_or_lossy_text() {
+        assert!(super::checked_path_string(&[0]).is_err());
+        assert!(super::checked_path_string(&[0, 0xd8]).is_err());
+        assert!(super::checked_path_string(&super::encode_reg_string("first\0second")).is_err());
+        assert_eq!(
+            super::checked_path_string(&super::encode_reg_string(r"D:\user;;D:\tools")).unwrap(),
+            r"D:\user;;D:\tools"
+        );
+    }
+
     #[test]
     fn rapid_path_changes_keep_distinct_backups() {
         let dir = crate::test_support::TestDir::new();

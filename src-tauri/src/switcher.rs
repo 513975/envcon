@@ -15,8 +15,14 @@ pub fn switch(root: &Path, env_type: EnvType, name: &str) -> Result<()> {
     }
 
     let junction = root.join("current").join(env_type.junction());
+    if crate::detect::system::has_reparse_component(&root.join("current"))
+        || crate::detect::system::has_reparse_component(&root.join("envs").join(env_type.folder()))
+    {
+        return Err(AppError::msg("环境或 current 父目录被重定向，停止切换"));
+    }
     std::fs::create_dir_all(root.join("current"))?;
 
+    crate::link_ownership::record_creation(root, &junction, &env_dir, || {
     let previous = std::fs::read_link(&junction).ok();
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let prepared = root.join("current").join(format!(".{}-next-{stamp}", env_type.junction()));
@@ -28,6 +34,7 @@ pub fn switch(root: &Path, env_type: EnvType, name: &str) -> Result<()> {
         return Err(AppError::msg(format!("切换失败: {e}；旧链接恢复结果: {restored:?}")));
     }
     Ok(())
+    })
 }
 
 pub(crate) fn validate_name(name: &str) -> Result<()> {
@@ -52,9 +59,13 @@ mod tests {
 
 /// 移除指定类型的 current junction(不删除目标内容)
 pub fn remove_junction_for(root: &Path, env_type: EnvType) -> Result<()> {
+    remove_junction_for_checked(root, env_type, None)
+}
+
+pub(crate) fn remove_junction_for_checked(root: &Path, env_type: EnvType, expected: Option<&str>) -> Result<()> {
     let _guard = SWITCH_LOCK.lock().unwrap();
     let junction = root.join("current").join(env_type.junction());
-    remove_junction(&junction)
+    crate::link_ownership::remove(root, &junction, expected)
 }
 
 /// 判定路径是否为链接(junction 或符号链接)
@@ -121,8 +132,10 @@ fn rename_aside(path: &Path) -> Result<()> {
 /// - 空的真实目录(历史损坏残留) → 直接删除
 /// - 非空真实目录/文件 → 改名挪开为 <名称>.old-<时间戳>,不误删数据
 fn remove_junction(junction: &Path) -> Result<()> {
-    let Ok(meta) = std::fs::symlink_metadata(junction) else {
-        return Ok(()); // 不存在,视为已移除
+    let meta = match std::fs::symlink_metadata(junction) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
     };
 
     if is_link(junction) {

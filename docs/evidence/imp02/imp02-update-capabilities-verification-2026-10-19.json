@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 / R2 item 327: turn the 'downgrade unsupported' prose into a structured capability, and stop presenting an entry-point limit as a manager limitation",
+  "status": "implemented-and-isolated-verified; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "790db0a6b5495ed2ae1c54fd9e6f013432a691b6b3a4eb412dc9988105368eba",
+    "src-tauri/src/commands.rs": "d60dc6ff2c13d6e15bb13428ce48376b8e4a9e3be65dd9aaa2d83e34265f9319",
+    "src/lib/types.ts": "a34fb57d135b31a8c4d2e2fc9a7d146fb48d3e1b8ce2374398f2cc3f5fc18e17",
+    "src/pages/PackageManagers.tsx": "16d93a722e1f18c219a58a1a2b0ec34e0775837fcd31ce303cc78b09898559f2",
+    "tests/package-manager-update-ui.mjs": "5f128c2c4a441f139aad3bab09d4292d8a29f1b1c07192cda9fcf8248c8b9d34"
+  },
+  "gapClosed": "ROADMAP R2 item 327 previously recorded: 降级限制只是说明而未在能力层禁用. The panel said '不支持指定版本降级', which reads as a manager defect even though every command this module builds simply targets 'latest' and takes no version argument.",
+  "implementation": {
+    "capabilityModel": "UpdateCapabilities{latest_only, manual_pinned_command} is computed per manager and carried on every PackageManagerUpdatePreview, including blocked ones, because the limit belongs to the entry point rather than to one attempt",
+    "honestSplit": "latest_only describes what *this* entry point offers; manual_pinned_command exposes the manager's own documented version-pinned command where one exists, so the user can act instead of being told 'no'",
+    "noInvention": "yarn (pins per project, not per machine), bun (documents no pinned self upgrade), pipx/cargo/dotnet (no general self-update) all report None — None means 'no verified one-liner', never 'impossible'",
+    "ui": "The preview dialog now renders 版本范围 (latest-only explanation) and, when present, 指定版本需手动执行 with the exact template, replacing the misleading blanket claim"
+  },
+  "fixtures": [
+    {
+      "name": "pkgtools::tests::update_capabilities_state_the_entry_point_limit_and_real_pin_commands",
+      "asserts": [
+        "every catalog manager reports latest_only",
+        "npm/pnpm/pip/composer/uv expose their documented pinned command verbatim",
+        "yarn/bun/pipx/cargo/dotnet expose none, so no pin command is invented"
+      ]
+    },
+    {
+      "name": "tests/package-manager-update-ui.mjs (preview mock + existing assertions)",
+      "asserts": [
+        "the preview mock carries capabilities so the dialog can render the new fields without a runtime error",
+        "both the single-tool and batch preview paths supply the field",
+        "existing preview/execute/cancel/batch/retry assertions still pass unchanged"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "282 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml update_capabilities_state -- --test-threads=1",
+      "result": "1 passed"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 537ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/pkgtools.rs src-tauri/src/commands.rs src/lib/types.ts src/pages/PackageManagers.tsx tests/package-manager-update-ui.mjs",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "notVerified": [
+    "The pinned commands are templates taken from each manager's documented CLI, not executed on this host",
+    "No real manager was updated or downgraded",
+    "The UI fixture now asserts the 版本范围 line, the 指定版本需手动执行 label and the exact npm template render in the preview dialog",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "The remaining half of item 327 — real staged progress for a single-command update — is untouched: these managers do not report intermediate phases, so a percentage would be fabricated",
+    "'Dependency changes are resolved by the manager and not reported' and 'old versions may be delisted' remain prose in the panel; only the version-range limit became structured",
+    "IMP-02 item 327 stays unchecked"
+  ]
+}

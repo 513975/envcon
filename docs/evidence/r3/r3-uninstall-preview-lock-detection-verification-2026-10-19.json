@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 347: identify files that would block deletion before any deletion runs, instead of discovering the lock only after the attempt fails",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "4753eec35156dc14b4ab84e9e4d9ee303b8e14409cfe176d34ed5145d4c87714"
+  },
+  "gapClosed": "The preview counted files and reparse points but never asked whether a file was in use. A locked file surfaced only as a partial failure after `execute_uninstall_scope` had already detached the current junction, leaving the user with a half-applied delete and no warning.",
+  "implementation": {
+    "probe": "file_blocks_deletion opens each file with DELETE access and closes immediately. Nothing is modified: requesting DELETE answers 'would deleting this fail right now'.",
+    "errorDiscrimination": "Only ERROR_SHARING_VIOLATION (32) counts as in use. Access-denied is a permissions problem and must never be reported as a lock.",
+    "boundedSampling": "The preview probes at most LOCK_PROBE_LIMIT (200) files and the text says whether it checked everything ('已检查全部 N 个文件') or only a sample ('已抽样检查前 N 个文件（共 M 个）'). An empty tree says no check was needed.",
+    "reporting": "Locks land in `unverified` under the resource name 文件占用 with the affected relative paths (first 10 listed, remainder counted) and an instruction to close the owning program. A lock does not block the preview: the scope stays complete so the user can decide with full information."
+  },
+  "defectFoundAndFixed": {
+    "symptom": "Existing fixture `uninstall_reports_partial_failure_when_a_managed_file_is_locked` started failing with 卸载预览已变化，请重新生成预览后再执行.",
+    "cause": "validate_uninstall_execution_preview compares the whole UninstallPreview for equality. Lock state is an observation about the environment, not part of the deletion scope, so a file opened between preview and execution made a valid preview look changed.",
+    "fix": "Both sides now drop the LOCK_RESOURCE entries before comparing. The preview still reports locks to the user; only the scope-equality check ignores them.",
+    "whyItMatters": "Without this, any program opening a file during the confirmation dialog would force the user to re-preview, and the new feature would have broken the pre-existing partial-failure path."
+  },
+  "fixtures": [
+    {
+      "name": "commands::tests::uninstall_preview_reports_a_locked_file_before_any_deletion_runs",
+      "asserts": [
+        "a clean tree reports no 文件占用 entry and says all files were checked",
+        "holding a file with share_mode(0) makes the preview surface 文件占用 naming locked.bin",
+        "the unlocked sibling free.txt is not blamed",
+        "the lock does not clear scope_complete, so it is information rather than a blocker",
+        "releasing the handle removes the entry from a fresh preview"
+      ]
+    },
+    {
+      "name": "commands::tests::uninstall_reports_partial_failure_when_a_managed_file_is_locked (pre-existing)",
+      "asserts": "still passes: a lock taken after the preview no longer invalidates the preview, and the execution reports a partial result"
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "283 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml uninstall_ -- --test-threads=1",
+      "result": "31 passed / 0 failed / 1 ignored"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/commands.rs",
+      "result": "exit 0, CRLF notice only"
+    }
+  },
+  "notVerified": [
+    "No real running program was used to hold a real environment file; the lock is a fixture handle with share_mode(0)",
+    "Only file locks are probed. A directory held open by a process, or a mapped executable image, is not covered",
+    "The 200-file limit means a large environment is only sampled; the text says so but the user cannot raise the limit",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "Item 347 also asks to identify the current environment and PATH references before deletion, and to detect related processes; only the file-lock part is implemented",
+    "Process identification is not attempted: mapping a handle back to a process needs elevated APIs this app does not use",
+    "The probe adds one open/close per sampled file to preview latency; not measured on a large environment",
+    "UI shows the entry through the existing 未验证 scope list, without a dedicated lock icon"
+  ]
+}

@@ -18,11 +18,18 @@ export function ToolMigration({
   onComplete: () => void;
 }) {
   const definition = managerDefinition(tool.tool);
+  // Yarn 2+ uses globalFolder for global data, not as a Classic global install
+  // directory, so that migration kind must not be offered for Berry.
+  const berry =
+    tool.tool === "yarn" &&
+    tool.version !== null &&
+    Number.parseInt(tool.version.split(".")[0] ?? "", 10) >= 2;
+  const canMigrateGlobal = definition.migrateGlobal && !berry;
   const [kind, setKind] = useState<"global" | "cache">(
-    definition.migrateGlobal ? "global" : "cache",
+    canMigrateGlobal ? "global" : "cache",
   );
   const [source, setSource] = useState(
-    (definition.migrateGlobal ? tool.globalPath : tool.cachePath) ?? "",
+    (canMigrateGlobal ? tool.globalPath : tool.cachePath) ?? "",
   );
   const [plan, setPlan] = useState<MigrationPlan | null>(null);
   const [result, setResult] = useState<MigrationResult | null>(null);
@@ -142,7 +149,7 @@ export function ToolMigration({
         ) : (
           <>
             <div className="flex gap-4 text-xs">
-              {definition.migrateGlobal && (
+              {canMigrateGlobal && (
                 <label className="flex items-center gap-2">
                   <input
                     type="radio"
@@ -209,6 +216,8 @@ export function ToolMigration({
             <p className="text-xs">
               复制校验后保留原目录备份，原路径改为兼容链接；包管理器配置不变。目标必须为空，pip
               的已安装包不在迁移范围内。
+              {berry &&
+                " Yarn 2+ 的 globalFolder 只是全局数据目录，因此不提供“全局包目录”迁移；仅缓存目录适用。"}
             </p>
             {plan && (
               <label className="flex items-start gap-2 text-xs">

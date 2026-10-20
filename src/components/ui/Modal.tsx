@@ -78,6 +78,7 @@ interface ConfirmProps {
   danger?: boolean;
   confirmText?: string;
   loading?: boolean;
+  confirmDisabled?: boolean;
 }
 
 export function ConfirmDialog({
@@ -89,6 +90,7 @@ export function ConfirmDialog({
   danger = false,
   confirmText = "确认",
   loading = false,
+  confirmDisabled = false,
 }: ConfirmProps) {
   return (
     <Modal
@@ -111,6 +113,7 @@ export function ConfirmDialog({
             variant={danger ? "danger" : "primary"}
             onClick={onConfirm}
             loading={loading}
+            disabled={confirmDisabled}
           >
             {confirmText}
           </Button>

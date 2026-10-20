@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 349: import a previously exported manifest and diff it against this machine, replacing a manifest that could only be written",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "gapClosed": "Item 349 asked for export, import, backup and recovery. Only export existed: EnvironmentManifest was Serialize-only, the notes told the reader 导入不会自动执行, and there was no way to read a manifest back. A user holding a manifest from last month could not answer the only question it can honestly support: what changed here since then.",
+  "whyImportIsAComparison": "A manifest records absolute paths on one machine and carries no file content, so turning it into restored environments would require inventing where the bytes come from. Import is therefore a read-only diff. It is the half of item 349 that can be implemented without a restore design, and it makes the existing export genuinely useful instead of write-only.",
+  "implementation": {
+    "serde": "EnvironmentManifest and ManifestEntry gained Deserialize alongside Serialize, with PartialEq so round-trips and comparisons are testable.",
+    "compare_manifests": "Pure function over two already-built manifests: no filesystem, no clock, so every classification rule is reachable from a fixture instead of only through IPC.",
+    "pairing": "Entries pair on (env type, lowercased name) through a BTreeMap on both sides, so a moved or renamed entry surfaces as missing+added rather than being silently matched to a neighbour.",
+    "classification": "Each pair lands in exactly one of unchanged / added / missing / changed. An added row leaves the recorded side null and a missing row leaves the current side null, so neither reads as an empty version string.",
+    "pathComparison": "Paths go through detect::system::path_key, so case, separator direction and a trailing separator do not produce phantom 路径 differences.",
+    "nullVersion": "A recorded null version means the probe failed at export time, not that the version is empty, so it never triggers a 版本 difference. This is the distinction most likely to be implemented wrongly.",
+    "rootMismatch": "same_root is false when the roots differ or the manifest has none, and only then does the cross-machine limitation appear: row results then describe a diff, not a defect.",
+    "sourceGuard": "validate_manifest_source rejects relative paths, non-.json extensions, a missing file and a directory before parsing; schema_version is checked separately so a future manifest fails loudly instead of mis-parsing.",
+    "noRestore": "The command returns a comparison and nothing else. There is no restore path, no environment creation and no mutation of the managed root."
+  },
+  "fixtures": [
+    {
+      "name": "commands::tests::manifest_comparison_classifies_unchanged_added_missing_and_changed",
+      "asserts": [
+        "a path differing only in case, separator and trailing slash is Unchanged with no differences",
+        "a version change reports exactly [版本]",
+        "a status change reports exactly [状态]",
+        "a recorded null version does not mark the entry changed even when a version is now known",
+        "an added row has null recorded side rather than echoing current values",
+        "a manifest recorded under another root sets same_root=false and states the cross-machine limitation",
+        "the same-root comparison does not carry that limitation",
+        "an entry present on both sides under different roots is Changed with [路径], not Missing (this assertion failed against my first implementation and corrected my own expectation)"
+      ]
+    },
+    {
+      "name": "commands::tests::manifest_source_must_be_an_existing_absolute_json_file",
+      "asserts": [
+        "an absolute existing .json file is accepted",
+        "relative paths, non-json extensions, absent files and a directory are all rejected",
+        "a manifest entry absent locally becomes Missing with its recorded version kept",
+        "the missing row leaves the current side null rather than a blank string"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "294 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml manifest -- --test-threads=1",
+      "result": "6 passed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors, 0 warnings"
+    },
+    "typescript": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/release-052-ui.mjs",
+      "result": "PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/commands.rs src-tauri/src/types.rs src-tauri/src/lib.rs src/lib/types.ts src/lib/api.ts src/pages/Environments.tsx tests/release-052-ui.mjs",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "d3453541db28cee9a0ec57b3fe5174a5bf55613407dd6de10b6a77b0c313494a",
+    "src-tauri/src/types.rs": "2192fb9705490b40f18c602ca021ac836127ff621ee2f3485e7dd0c42bd8c649",
+    "src-tauri/src/lib.rs": "821e04a5f3bc31fc850133b45ec7677ddfb0804c8f34c4c52fd460483e6ee9ab",
+    "src/lib/types.ts": "202a062c859b8e608089fc2ecfd0bb7d0a3c41e73cd255bc40d526532dfc95b3",
+    "src/lib/api.ts": "9989837008799cfd3be140ccfac0a66b1c215637df3b25db3888f03dc1a82cb5",
+    "src/pages/Environments.tsx": "053773eff8e9f4696c535f1658df014c93e468cb50035ec121fd2e7dca72bccf",
+    "tests/release-052-ui.mjs": "f32708e3f13ea6b554abd699cc57896c84606f833e505614c6accafb57f08ec2"
+  },
+  "uiAssertions": [
+    "clicking 导入比对 calls import_environment_manifest exactly once with the path the picker returned",
+    "the dialog states 只读比对，未创建、还原或搬移任何环境",
+    "the four summary counters render their own values with none swallowing another",
+    "a missing entry renders its recorded side and no 本机 side",
+    "an added entry renders its 本机 side and no 清单 side",
+    "a changed entry names the differing fields (版本、状态) rather than a generic 已变更",
+    "no confirm/restore button exists in the dialog",
+    "cancelling the file picker does not compare"
+  ],
+  "notVerified": [
+    "No real manifest from another machine was imported; every comparison used fixtures",
+    "The UI path never wrote a real file: the picker and the command are both mocked",
+    "Restore/recovery remains unimplemented, so item 349's 备份和恢复 half is untouched"
+  ],
+  "limitations": [
+    "Pairing is by (type, lowercased name). Two genuinely different installations that share a name are reported as one entry; the limitation text says so rather than the code pretending otherwise",
+    "Cross-machine comparisons flag 路径 differences for every entry, which is honest but noisy; there is no path mapping UI",
+    "A manifest whose schema_version is not 1 is refused outright; no migration path exists yet",
+    "Item 349 stays unchecked: export+import are done, backup/recovery are not",
+    "No packaging, tagging or release"
+  ]
+}

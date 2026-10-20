@@ -194,6 +194,11 @@ export function OldPackageScan({
                 {task.currentPath}
               </p>
             )}
+            {task.permissionDenied > 0 && (
+              <p className="text-amber-600 dark:text-amber-400">
+                {task.permissionDenied} 处目录因权限不足未能读取；这些位置未被扫描，不代表其中没有包
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-3">
             <select

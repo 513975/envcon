@@ -10,6 +10,27 @@ use crate::error::{AppError, Result};
 
 pub static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Version-dependent manager semantics that the static catalog cannot express.
+/// The caller resolves these from the manager that will actually run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Yarn 2+ uses `globalFolder` for global data, not as a Classic global
+    /// install directory; migrating it as one would move the wrong resource.
+    pub yarn_berry: bool,
+}
+
+impl Capabilities {
+    pub fn for_tool(tool: &str, version: Option<&str>) -> Self {
+        Self {
+            yarn_berry: tool == "yarn"
+                && version
+                    .and_then(|value| value.split('.').next())
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .is_some_and(|major| major >= 2),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationPlan {
@@ -102,11 +123,22 @@ fn absolute_identity(path: &Path) -> Result<PathBuf> {
     ))
 }
 
-pub fn preview(root: &Path, tool: &str, kind: &str, source: &Path) -> Result<MigrationPlan> {
+pub fn preview(
+    root: &Path,
+    tool: &str,
+    kind: &str,
+    source: &Path,
+    capabilities: Capabilities,
+) -> Result<MigrationPlan> {
     let definition = crate::package_managers::definition(tool)?;
     if !matches!(kind, "global" | "cache") || (kind == "global" && !definition.migrate_global) {
         return Err(AppError::msg(
             "不支持此迁移类型；解释器内的 Python 包请使用重装功能",
+        ));
+    }
+    if kind == "global" && tool == "yarn" && capabilities.yarn_berry {
+        return Err(AppError::msg(
+            "Yarn 2+ 的 globalFolder 是全局数据目录，不是 Classic 全局安装目录；不提供该迁移。请使用 Yarn 自身的项目级版本管理",
         ));
     }
     let metadata = fs::symlink_metadata(source)?;
@@ -116,6 +148,13 @@ pub fn preview(root: &Path, tool: &str, kind: &str, source: &Path) -> Result<Mig
         ));
     }
     let source = absolute_identity(source)?;
+    if kind == "global" {
+        if let Some(issue) = crate::package_managers::legacy_layout_issue(tool, &source) {
+            return Err(AppError::msg(format!(
+                "{issue}。迁移会保留错误布局；请先使用恢复预览核对工具和入口目录"
+            )));
+        }
+    }
     let target_path = root.join("globals").join(format!("{tool}-{kind}"));
     if fs::symlink_metadata(&target_path).is_ok_and(|meta| meta.file_attributes() & 0x400 != 0) {
         return Err(AppError::msg("目标目录不能是链接"));
@@ -126,8 +165,12 @@ pub fn preview(root: &Path, tool: &str, kind: &str, source: &Path) -> Result<Mig
             "源目录和目标目录不能相同、互为父子或通过链接指向同一位置",
         ));
     }
+    if path_within(&source, root) || path_within(root, &source) {
+        return Err(AppError::msg(
+            "不能迁移管理根目录或与管理根目录重叠的目录",
+        ));
+    }
     for protected in [
-        Some(root.to_path_buf()),
         dirs::home_dir(),
         dirs::data_dir(),
         dirs::data_local_dir(),
@@ -139,7 +182,7 @@ pub fn preview(root: &Path, tool: &str, kind: &str, source: &Path) -> Result<Mig
     {
         if path_within(&source, &protected) {
             return Err(AppError::msg(
-                "不能迁移管理根目录、用户目录、系统目录或它们的父目录",
+                "不能迁移用户目录、系统目录或它们的父目录",
             ));
         }
     }
@@ -215,12 +258,17 @@ fn verify_file(source: &Path, target: &Path) -> Result<()> {
     Err(AppError::msg(format!("文件校验失败: {}", source.display())))
 }
 
-pub fn execute(root: &Path, requested: &MigrationPlan) -> Result<MigrationResult> {
+pub fn execute(
+    root: &Path,
+    requested: &MigrationPlan,
+    capabilities: Capabilities,
+) -> Result<MigrationResult> {
     let plan = preview(
         root,
         &requested.tool,
         &requested.kind,
         Path::new(&requested.source),
+        capabilities,
     )?;
     if &plan != requested {
         return Err(AppError::msg("目录或配置已变化，请重新预览迁移"));
@@ -343,16 +391,16 @@ mod tests {
         )
         .unwrap();
         junction::create(source.join("node_modules/tool"), source.join("reference")).unwrap();
-        let plan = preview(&root, "npm", "global", &source).unwrap();
+        let plan = preview(&root, "npm", "global", &source, Capabilities::default()).unwrap();
         assert_eq!(plan.files, 2);
         assert_eq!(plan.links, 1);
-        let result = execute(&root, &plan).unwrap();
+        let result = execute(&root, &plan, Capabilities::default()).unwrap();
         assert_eq!(
             fs::read(source.join("tool.cmd")).unwrap(),
             fs::read(Path::new(&result.backup).join("tool.cmd")).unwrap()
         );
         assert!(source.join("reference/index.js").is_file());
-        assert!(preview(&root, "npm", "global", &source).is_err());
+        assert!(preview(&root, "npm", "global", &source, Capabilities::default()).is_err());
     }
 
     #[test]
@@ -362,16 +410,49 @@ mod tests {
         let source = fixture.path().join("source");
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&root).unwrap();
-        let plan = preview(&root, "pip", "cache", &source).unwrap();
+        let plan = preview(&root, "pip", "cache", &source, Capabilities::default()).unwrap();
         fs::write(source.join("new"), b"changed").unwrap();
-        assert!(execute(&root, &plan).is_err());
+        assert!(execute(&root, &plan, Capabilities::default()).is_err());
         fs::create_dir_all(root.join("globals/pip-cache")).unwrap();
         fs::write(root.join("globals/pip-cache/existing"), b"keep").unwrap();
-        assert!(preview(&root, "pip", "cache", &source).is_err());
+        assert!(preview(&root, "pip", "cache", &source, Capabilities::default()).is_err());
         fs::write(source.join("node.exe"), b"runtime").unwrap();
-        assert!(preview(&root, "npm", "global", &source).is_err());
-        assert!(preview(&root, "npm", "global", fixture.path()).is_err());
+        assert!(preview(&root, "npm", "global", &source, Capabilities::default()).is_err());
+        assert!(
+            preview(&root, "npm", "global", fixture.path(), Capabilities::default()).is_err()
+        );
         assert!(source.join("new").is_file());
+    }
+
+    #[test]
+    fn refuses_sources_inside_or_aliasing_the_managed_root() {
+        let fixture = TestDir::new();
+        let root = fixture.path().join("managed");
+        fs::create_dir_all(root.join("nested/source")).unwrap();
+        assert!(
+            preview(
+                &root,
+                "npm",
+                "global",
+                &root.join("nested/source"),
+                Capabilities::default()
+            )
+            .is_err()
+        );
+
+        let alias = fixture.path().join("managed-alias");
+        junction::create(&root, &alias).unwrap();
+        fs::create_dir_all(alias.join("source")).unwrap();
+        assert!(
+            preview(
+                &root,
+                "npm",
+                "global",
+                &alias.join("source"),
+                Capabilities::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -381,9 +462,9 @@ mod tests {
         let source = fixture.path().join("source");
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(&root).unwrap();
-        let mut plan = preview(&root, "npm", "cache", &source).unwrap();
+        let mut plan = preview(&root, "npm", "cache", &source, Capabilities::default()).unwrap();
         plan.target = fixture.path().join("elsewhere").to_string_lossy().into();
-        assert!(execute(&root, &plan).is_err());
+        assert!(execute(&root, &plan, Capabilities::default()).is_err());
         fs::write(source.join("a"), b"aaa").unwrap();
         fs::write(source.join("b"), b"bbb").unwrap();
         assert!(verify_file(&source.join("a"), &source.join("b")).is_err());
@@ -397,8 +478,8 @@ mod tests {
         fs::create_dir_all(&source).unwrap();
         fs::create_dir_all(root.join("globals/pip-cache")).unwrap();
         fs::write(source.join("entry"), b"cache").unwrap();
-        let plan = preview(&root, "pip", "cache", &source).unwrap();
-        let result = execute(&root, &plan).unwrap();
+        let plan = preview(&root, "pip", "cache", &source, Capabilities::default()).unwrap();
+        let result = execute(&root, &plan, Capabilities::default()).unwrap();
         assert!(Path::new(&result.journal).is_file());
         assert_eq!(fs::read(source.join("entry")).unwrap(), b"cache");
     }
@@ -412,15 +493,62 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("locked"), b"keep").unwrap();
-        let plan = preview(&root, "npm", "cache", &source).unwrap();
+        let plan = preview(&root, "npm", "cache", &source, Capabilities::default()).unwrap();
         let lock = fs::OpenOptions::new()
             .write(true)
             .share_mode(0)
             .open(source.join("locked"))
             .unwrap();
-        assert!(execute(&root, &plan).is_err());
+        assert!(execute(&root, &plan, Capabilities::default()).is_err());
         drop(lock);
         assert!(!junction::exists(&source).unwrap_or(false));
         assert_eq!(fs::read(source.join("locked")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn refuses_to_migrate_a_legacy_uv_layout_as_is() {
+        let fixture = TestDir::new();
+        let root = fixture.path().join("managed");
+        let source = fixture.path().join("uv-tools");
+        fs::create_dir_all(source.join("bin")).unwrap();
+        fs::create_dir_all(source.join("cache")).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        assert!(preview(&root, "uv", "global", &source, Capabilities::default()).is_err());
+        fs::remove_dir(source.join("bin")).unwrap();
+        fs::remove_dir(source.join("cache")).unwrap();
+        assert!(preview(&root, "uv", "global", &source, Capabilities::default()).is_ok());
+    }
+
+    #[test]
+    fn yarn_berry_never_migrates_global_folder_as_a_classic_install_root() {
+        let fixture = TestDir::new();
+        let root = fixture.path().join("managed");
+        let source = fixture.path().join("yarn-global");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&root).unwrap();
+
+        // Yarn Classic keeps the global install directory semantics.
+        assert!(preview(&root, "yarn", "global", &source, Capabilities::default()).is_ok());
+        // Berry uses globalFolder for global data, so the global-kind migration
+        // must be refused before any directory is touched.
+        let berry = Capabilities::for_tool("yarn", Some("4.1.0"));
+        let error = preview(&root, "yarn", "global", &source, berry).unwrap_err();
+        assert!(
+            error.to_string().contains("globalFolder"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(fs::read_dir(&source).unwrap().count(), 0);
+        // The cache kind stays available because cacheFolder is a real cache.
+        assert!(preview(&root, "yarn", "cache", &source, berry).is_ok());
+    }
+
+    #[test]
+    fn capabilities_recognize_classic_and_berry_versions() {
+        assert!(!Capabilities::for_tool("yarn", Some("1.22.22")).yarn_berry);
+        assert!(Capabilities::for_tool("yarn", Some("2.4.3")).yarn_berry);
+        assert!(Capabilities::for_tool("yarn", Some("4.1.0")).yarn_berry);
+        assert!(!Capabilities::for_tool("yarn", None).yarn_berry);
+        assert!(!Capabilities::for_tool("npm", Some("11.0.0")).yarn_berry);
+        assert!(!Capabilities::for_tool("yarn", Some("unknown")).yarn_berry);
     }
 }

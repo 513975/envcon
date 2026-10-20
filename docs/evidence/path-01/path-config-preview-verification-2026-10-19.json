@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01 configuration diff preview: read-only old/new value comparison, command-entry drift, PATH resolution and package-impact note before any write",
+  "status": "implemented-and-isolated-ui-verified; real manager configuration write and real registry comparison not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.8",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "d8480849bc3840cd3f5615c836f00bd04fbfe4aa4b75e39364a7c691f4476668",
+    "src-tauri/src/commands.rs": "09b8d7da1c108656de453c691cee3d4a2f8ccd68607acb13de445e9899ca8465",
+    "src-tauri/src/lib.rs": "0030722b25ee4d2eeb1de6035e5a14c4cccece902c55e223e771715d6d4a5a9c",
+    "src/pages/PackageManagers.tsx": "a8721f2e70fbb088d0fd87c1a8df442d1ac6fbc1570be9857afa70eb9f0b6f56",
+    "src/lib/types.ts": "7133e276f1d93b94674da81c98f746b2b213327f58567e1e3116bf12886c9099",
+    "src/lib/api.ts": "3006c414d95c07680c4ec912d91815ba4f25adde293c7bf6b4e52bff7ba7ff15",
+    "tests/packages-ui.mjs": "da95cbd2e490631f8cc50538da77e5c400441180cd817f3493f30951e235d645"
+  },
+  "implementation": [
+    "pkgtools::preview_tool_config reuses the same catalog checks, layout validation and target computation as apply_tool_config, but performs no write",
+    "ToolConfigPreview carries changes (key, role, current, next), blocked reasons, warnings, command entry drift, merged-PATH resolution and a package-impact flag",
+    "build_config_changes is pure so fixtures compare arbitrary old/new manager values without touching the registry",
+    "role_for_key classifies global/command/cache/configuration keys across npm, pnpm, Yarn Classic/Berry, pip, uv, pipx, bun, cargo and composer",
+    "config_target_exists/config_target_non_empty only inspect targets: a missing target is reported, never created",
+    "preview lists unchanged values as well, so a user can see the final target even when nothing changes",
+    "preview adds a warning when the target entry is shadowed by a path-earlier installation and when a non-empty target already exists",
+    "preview_blocked mirrors the write path: unsupported capabilities, invalid layout, missing/unusable manager executable, and Yarn 2+ global configuration",
+    "the UI opens a confirmation dialog from 仅设置路径 that shows the diff first; 写入配置 stays disabled while preview.blocked is non-empty",
+    "npm run verify coverage: packages-ui asserts that preview is called before apply, that no apply call happens while previewing, and that a blocked preview never applies"
+  ],
+  "fixtures": [
+    "pkgtools::tests::config_preview_lists_old_and_new_values_without_writing",
+    "pkgtools::tests::config_preview_classifies_every_manager_key",
+    "pkgtools::tests::config_preview_refuses_invalid_layout_without_creating_directories",
+    "pkgtools::tests::config_preview_counts_only_existing_non_empty_targets"
+  ],
+  "uiCoverage": {
+    "previewBeforeWrite": "仅设置路径 calls preview_tool_config and leaves apply_tool_config uncalled until 写入配置 is pressed",
+    "diffRender": "old value, new value, unset old value, command-entry change marker, non-empty target warning and shadowed resolution are asserted",
+    "blockedPath": "a pip preview with a blocked reason keeps 写入配置 disabled and never calls apply_tool_config"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "239 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml pkgtools::tests -- --test-threads=1",
+      "result": "16 passed / 0 failed / 237 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 642ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real package-manager configuration was changed; the preview ran only through fixtures and a simulated UI backend",
+    "The current-value side of the diff is read through the manager's own query commands, which were not compared against a real installation in this round",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "Preview lists configuration keys and the computed command entry; it does not enumerate every global package that would be affected",
+    "Unchanged values are included intentionally so the user still sees the final target; the UI does not currently highlight which rows actually change",
+    "The command-entry change is reported but old entries are not removed automatically"
+  ]
+}

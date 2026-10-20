@@ -9,6 +9,8 @@ import type {
   VersionInfo,
   SourceInfo,
   EnvVarInfo,
+  UninstallPreview,
+  UninstallResult,
 } from "./types";
 
 /** 后端 API 封装 */
@@ -19,8 +21,41 @@ export const api = {
   cancelSizeScan: (id: number) => cmd<void>("cancel_size_scan", { id }),
   getOverview: (force = false) =>
     scanRead<Overview>("overview", [], force),
+  exportEnvironmentManifest: (path: string) =>
+    cmd<string>("export_environment_manifest", { path }),
+  redetectEnvironment: (envType: import("./types").EnvType, name: string) =>
+    cmd<import("./types").EnvironmentRedetect>("redetect_environment", {
+      envType,
+      name,
+    }),
+  importEnvironmentManifest: (path: string) =>
+    cmd<import("./types").ManifestComparison>("import_environment_manifest", {
+      path,
+    }),
   updatePackageManager: (tool: string) =>
-    cmd<string>("update_package_manager", { tool }),
+    cmd<import("./types").PackageManagerUpdateResult>(
+      "update_package_manager",
+      { tool },
+    ),
+  previewPackageManagerUpdate: (tool: string) =>
+    cmd<import("./types").PackageManagerUpdatePreview>(
+      "preview_package_manager_update",
+      { tool },
+    ),
+  previewPackageManagerUpdates: () =>
+    cmd<import("./types").PackageManagerUpdateBatchPreview>(
+      "preview_package_manager_updates",
+    ),
+  updatePackageManagers: (tools: string[], skip: string[] = []) =>
+    cmd<import("./types").PackageManagerBatchResult>(
+      "update_package_managers",
+      { tools, skip },
+    ),
+  packageManagerUpdateRecord: (tool: string) =>
+    cmd<import("./types").PackageManagerUpdateRecord | null>(
+      "package_manager_update_record",
+      { tool },
+    ),
   setRoot: (path: string) => cmd<string>("set_root", { path }),
   scanSystem: (projectDirs: string[] = [], force = false) =>
     scanRead<ScanReport>("system", projectDirs, force),
@@ -30,9 +65,26 @@ export const api = {
     version: string | null,
   ) => cmd<string>("integrate_external_env", { envType, path, version }),
   switchEnv: (envType: EnvType, name: string) =>
-    cmd<void>("switch_env", { envType, name }),
-  uninstallEnv: (envType: EnvType, name: string) =>
-    cmd<void>("uninstall_env", { envType, name }),
+    cmd<import("./types").SwitchDiagnosis>("switch_env", { envType, name }),
+  previewPathRepair: (envType: EnvType) =>
+    cmd<import("./types").PathRepairPreview>("preview_path_repair", { envType }),
+  applyPathRepair: (plan: NonNullable<import("./types").PathRepairPreview["plan"]>) =>
+    cmd<import("./types").PathRepairResult>("apply_path_repair", { plan }),
+  previewUninstallEnv: (
+    envType: EnvType,
+    name: string,
+    mode?: "uninstall" | "detach",
+  ) => cmd<UninstallPreview>("preview_uninstall_env", { envType, name, mode }),
+  uninstallEnv: (
+    envType: EnvType,
+    name: string,
+    expectedPreview: UninstallPreview,
+  ) =>
+    cmd<UninstallResult>("uninstall_env", {
+      envType,
+      name,
+      expectedPreview,
+    }),
   openPath: (path: string) => cmd<void>("open_path", { path }),
   getPathState: () => cmd<PathState>("get_path_state"),
   saveUserPath: (entries: string[]) => cmd<void>("save_user_path", { entries }),
@@ -71,6 +123,8 @@ export const api = {
       writeBlocked: boolean;
       hasConfigBackup: boolean;
     }>("get_settings"),
+  checkAppUpdate: () =>
+    cmd<import("./types").AppUpdateStatus>("check_app_update"),
   reloadSettings: () => cmd<void>("reload_settings"),
   restoreSettingsBackup: () => cmd<void>("restore_settings_backup"),
   setDownloadsDir: (dir: string) => cmd<void>("set_downloads_dir", { dir }),
@@ -83,6 +137,16 @@ export const api = {
     cmd<void>("save_env_var", { name, value }),
   getToolConfigs: (force = false) =>
     scanRead<import("./types").ToolConfig[]>("tools", [], force),
+  inspectUvLayout: (path: string) =>
+    cmd<import("./types").UvLegacyLayout>("inspect_uv_layout", { path }),
+  recoverUvLayout: (
+    expected: import("./types").UvLegacyLayout,
+    executable: string,
+  ) =>
+    cmd<import("./types").UvRecoveryReport>("recover_uv_layout", {
+      expected,
+      executable,
+    }),
   listInstalledPackages: (
     tool: string,
     directory: string | null = null,
@@ -173,6 +237,22 @@ export const api = {
       tool,
       token,
       names,
+    }),
+  previewToolConfig: (
+    tool: string,
+    globalPath?: string | null,
+    cachePath?: string | null,
+  ) =>
+    cmd<import("./types").ToolConfigPreview>("preview_tool_config", {
+      tool,
+      globalPath: globalPath ?? null,
+      cachePath: cachePath ?? null,
+    }),
+  previewToolConfigs: (
+    tools: { tool: string; globalPath: string | null; cachePath: string | null }[],
+  ) =>
+    cmd<import("./types").ToolConfigBatchPreview>("preview_tool_configs", {
+      tools,
     }),
   applyToolConfig: (
     tool: string,

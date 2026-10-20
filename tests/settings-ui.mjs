@@ -12,12 +12,19 @@ try {
   await page.addInitScript(() => {
     window.calls = [];
     window.settings = { root: null, downloadsDir: null, portable: true, dataDir: "D:/fixture/data", configWarning: "配置文件格式无效。原文件未修改，请恢复备份。", writeBlocked: true, hasConfigBackup: true };
+    window.updateResult = {
+      status: "updateAvailable", currentVersion: "0.5.5", latestVersion: "0.6.0",
+      releaseName: "EnvCon v0.6.0", releaseUrl: "https://github.com/513975/envcon/releases/tag/v0.6.0",
+      notes: "fixture release notes", publishedAt: "2026-10-19T00:00:00Z",
+      assets: [], error: null,
+    };
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1,
       invoke: async (command, args) => {
         window.calls.push({ command, args });
         switch (command) {
           case "get_settings": return { ...window.settings };
+          case "check_app_update": return { ...window.updateResult };
           case "get_overview": return { root: window.settings.root, rootExists: !!window.settings.root, categories: [] };
           case "scan_system": return { tools: [], warnings: [] };
           case "get_path_state": return { user: [], system: [] };
@@ -65,12 +72,23 @@ try {
   while (await page.getByRole("button", { name: "关闭通知", exact: true }).count()) {
     await page.getByRole("button", { name: "关闭通知", exact: true }).first().click();
   }
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await page.getByText("可更新到 v0.6.0", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "打开发布页", exact: true }).count(), 1);
+  await page.evaluate(() => {
+    window.updateResult = {
+      ...window.updateResult, status: "error", latestVersion: null, releaseUrl: null,
+      notes: null, error: "GitHub API 限流或拒绝访问，请稍后重试",
+    };
+  });
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await page.getByText(/^检查失败：/).waitFor();
   await page.screenshot({ path: "tests/settings-desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.locator("main").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await page.screenshot({ path: "tests/settings-mobile.png", fullPage: true });
   assert.deepEqual(errors, []);
-  console.log("PASS: damaged config banner, blocked writes, recovery confirmation/cancel/failure/busy guard, restored root and reload");
+  console.log("PASS: damaged config banner, blocked writes, recovery confirmation/cancel/failure/busy guard, restored root and reload, update check available/error states");
 } finally {
   await browser.close();
 }

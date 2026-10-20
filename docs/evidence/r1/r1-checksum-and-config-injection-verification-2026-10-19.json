@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R1/DL-VERIFY-01 checksum-file mismatch semantics, offline-cache downgrade coverage, and IMP-08 configuration path injection guard",
+  "status": "implemented-and-isolated-verified; live download and live manager configuration not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/sources.rs": "5181449bea17c9f3b19e6666ea76e94f235c202f1d0ac84ecdb5cf0edc61a344",
+    "src-tauri/src/pkgtools.rs": "121409d8ab1047f320fc6825ddd68e3fbd8a3787bfca64370c8eb94cf5730481"
+  },
+  "implementation": [
+    "parse_sha256_checksum_file now distinguishes 'the file listed other assets' from 'the file has no usable entries'",
+    "a valid checksum file that lists N other assets reports that count and warns the version or asset name may have changed",
+    "the empty/unparseable case keeps its original shorter message so the two conditions stay distinguishable",
+    "validate_tool_config_layout rejects configuration paths containing semicolon, quote, NUL, CR or LF",
+    "the rejection is explicit: the value is also written into manager configuration files, where such characters would change the file's meaning",
+    "no dead code was added: the speculative AssetFingerprint/cached_verification_for_asset draft was removed after confirming resolve_download_spec re-fetches and re-parses the checksum file on every install and never reuses a cached digest"
+  ],
+  "fixtures": [
+    "sources::tests::checksum_file_listing_other_assets_is_not_a_silent_match",
+    "sources::tests::offline_cache_never_keeps_a_trusted_digest_for_a_replaced_asset",
+    "pkgtools::tests::config_paths_cannot_break_out_of_manager_config_files"
+  ],
+  "reviewFindings": {
+    "checksumMismatch": "covered: parser rejects missing entries, malformed digests, conflicting digests, path traversal in the target name, and now other-asset listings",
+    "assetReplacement": "covered by design and now by a fixture: offline cache rows are downgraded to Unverified, and resolve_download_spec always re-fetches the checksum file, so a replaced asset cannot inherit an old trusted digest",
+    "existingCoverageReused": [
+      "download::tests::checksum_states_are_distinguished_and_never_misreported_as_verified",
+      "download::tests::download_length_and_digest_failures_never_commit_partial_file",
+      "download::tests::pre_install_recheck_detects_file_tampering_and_size_changes",
+      "sources::tests::verification_resolution_keeps_trusted_metadata_and_rejects_insecure_checksum_files",
+      "installer_uninstall::tests::llvm_parent_fallback_is_exact_and_does_not_accept_shell_commands"
+    ]
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "260 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml checksum_file_listing_other_assets -- --test-threads=1",
+      "result": "1 passed / 0 failed / 272 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No live checksum file was fetched; parsing is exercised with fixture bodies",
+    "No live package-manager configuration was written with a rejected path",
+    "Official checksum sources for the remaining 16 tools are still pending R0 review",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "The path guard is character-based; it does not attempt to escape values for every manager's config syntax",
+    "A checksum file that lists the target plus other assets is still accepted, which is correct, but the extra entries are not reported",
+    "Asset replacement detection relies on the publisher changing the checksum file; a silently swapped asset with an unchanged checksum entry remains undetectable by design"
+  ]
+}

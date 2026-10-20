@@ -5,9 +5,13 @@ mod types;
 pub use types::{ItemResult, Package};
 pub mod commands;
 pub use native::{
-    bin_env, bin_path, cache_env, configured_env_path, default_source, detect, global_env,
-    installation_path, inventory, verify_cleanup_files,
+    bin_env, bin_path, cache_env, cache_path, config_path, configured_env_path, default_source,
+    command_entry_policy, detect, directory_roles, global_env, inspect_uv_layout,
+    installation_path, inventory, legacy_layout_issue, prefix_path, validate_directory_roles,
+    validate_layout, verify_cleanup_files, CommandEntryPolicy, DirectoryRoles,
+    UvEntrypointSnapshot, UvLegacyLayout, UvToolLayout,
 };
+pub(crate) use native::inspect_uv_tool;
 
 use crate::error::{AppError, Result};
 use serde::{Deserialize, Serialize};
@@ -44,6 +48,7 @@ pub struct Definition {
     pub family: Family,
     pub adapter: AdapterKind,
     pub reinstall: ReinstallKind,
+    pub self_update: bool,
     pub global_config: bool,
     pub cache_config: bool,
     pub migrate_global: bool,
@@ -126,6 +131,9 @@ pub fn configuration(
     }
     let mut changes = Vec::new();
     if let Some(path) = global {
+        let tool_root = std::path::Path::new(path);
+        let roles = directory_roles(tool, tool_root, cache.map(std::path::Path::new));
+        validate_directory_roles(tool, &roles)?;
         changes.push((
             global_env(tool)
                 .ok_or_else(|| AppError::msg("没有全局路径适配器"))?
@@ -140,6 +148,9 @@ pub fn configuration(
                     .into(),
             ));
         }
+    }
+    if global.is_none() && cache.is_some() {
+        validate_layout(tool, None, None, cache.map(std::path::Path::new), None)?;
     }
     if let Some(path) = cache {
         changes.push((
@@ -163,6 +174,7 @@ mod tests {
             assert!(item.id.bytes().all(|c| c.is_ascii_lowercase()));
             assert!(!item.name.is_empty());
             assert!(ManagerId::try_from(item.id.clone()).is_ok());
+            assert_eq!(item.self_update, !matches!(item.id.as_str(), "pipx" | "cargo" | "dotnet"));
         }
         assert!(ManagerId::try_from(String::from("../untrusted")).is_err());
     }
@@ -187,5 +199,43 @@ mod tests {
                 assert!(cache_env(&manager.id).is_some());
             }
         }
+    }
+
+    #[test]
+    fn every_manager_has_explicit_roles_and_rejects_config_cache_overlap() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("managed/global");
+        std::fs::create_dir_all(&root).unwrap();
+        for manager in definitions() {
+            let roles = directory_roles(&manager.id, &root, None);
+            if !manager.global_config {
+                continue;
+            }
+            assert!(validate_directory_roles(&manager.id, &roles).is_ok(),
+                "{}: {roles:?}", manager.id);
+
+            let overlapping = directory_roles(
+                &manager.id,
+                &root,
+                Some(&roles.configuration),
+            );
+            assert!(
+                validate_directory_roles(&manager.id, &overlapping).is_err(),
+                "{} accepted a cache/configuration overlap",
+                manager.id
+            );
+        }
+    }
+
+    #[test]
+    fn role_model_preserves_manager_specific_entry_layouts() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("managed/global");
+        let npm = directory_roles("npm", &root, None);
+        assert_eq!(npm.command_entry, root);
+        let yarn = directory_roles("yarn", &root, None);
+        assert_eq!(yarn.command_entry, prefix_path("yarn", &root).join("bin"));
+        assert_ne!(yarn.command_entry, yarn.tool_environment);
+        assert_ne!(yarn.command_entry, yarn.cache_storage);
     }
 }

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-18T23:06:41.9545829Z",
+  "version": "0.5.5",
+  "versionConsistent": true,
+  "versionSources": {
+    "packageJson": "0.5.5",
+    "tauriConfig": "0.5.5",
+    "cargoToml": "0.5.5"
+  },
+  "git": {
+    "commit": "bc2455f5b5a52b98e249141c4551983f64d75464",
+    "branch": "main",
+    "dirty": true
+  },
+  "buildEnvironment": {
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "architecture": "X64",
+    "node": "v24.17.0",
+    "npm": "11.18.0",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)"
+  },
+  "lockfiles": {
+    "packageLock": {
+      "path": "package-lock.json",
+      "sha256": "583dd12ec5db59cfaaeb8a03783c0d9add89919682d4c67f507aeb1007632e3f"
+    },
+    "cargoLock": {
+      "path": "src-tauri/Cargo.lock",
+      "sha256": "cf1557eea886668df1d16724eb9d7db513fd1e2aa0a1b210ac82ab2a3933fcc6"
+    }
+  },
+  "artifacts": [
+    {
+      "path": "src-tauri\\target-v0.5.5\\release\\bundle\\nsis\\EnvCon_0.5.5_x64-setup.exe",
+      "status": "present-unverified-provenance",
+      "bytes": 2842439,
+      "lastWriteTimeUtc": "2026-09-19T08:53:47.6987695Z",
+      "sha256": "7071493d047085c9356f56b77cd6b18d0338e0b7e7cb6f041860f8b2bff71a1e"
+    }
+  ],
+  "artifactDiscovery": "Scanned src-tauri/target*/release/bundle. Artifact presence does not prove it was built from the recorded commit.",
+  "notes": "A dirty worktree or a pre-existing artifact cannot be treated as a release build. Rebuild from the recorded commit before publishing.",
+  "status": {
+    "source": "recorded",
+    "tests": "npm run verify: Rust 230 passed / 14 ignored; 1709 modules; 2 read-state and 9 UI suites PASS (2026-10-19)",
+    "package": "artifact-present-unverified-provenance",
+    "release": "not-published"
+  },
+  "verification": {
+    "evidence": "ROADMAP.md (2026-10-19 R4 / REL-01 section)",
+    "status": "npm run verify: Rust 230 passed / 14 ignored; 1709 modules; 2 read-state and 9 UI suites PASS (2026-10-19)"
+  }
+}

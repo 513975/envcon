@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "ASMT-04 re-diagnosis closure after applying a PATH repair",
+  "status": "implemented-and-isolated-ui-verified; no real user PATH was written",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "8ab5c5bb414ef18584c2732f4073f5a8ed7051f84ff5f0da7ffadc2296480b4e",
+    "src-tauri/src/path_ownership.rs": "dc2f763c24df03d672dd2f1468e26b3b3731ea70b533b2b38d61c4ce874f270c",
+    "src/pages/Environments.tsx": "6306c33b1151ced5e611b55b253a8d2cf1932b7de356e0e60f31342cbb88a3c3",
+    "src/lib/types.ts": "7868a17bcbf3f0843724a85de2b2279c3bb7b095998fc0bdab7e184b11259d26",
+    "src/lib/api.ts": "eedfd09d24672503206ddb32a7dd6a335ceccd656c8b7fedf5caf174c68e1caa",
+    "tests/release-052-ui.mjs": "b2ad043446a707e703a549233e0859c0219ab26e3302b93d53d867de084ef39d"
+  },
+  "implementation": [
+    "apply_path_repair now returns PathRepairResult instead of the requested plan",
+    "after the write it re-reads the registry and recomputes the result from the live PATH",
+    "verified is true only when the live user PATH equals the applied plan and no command still resolves to another installation",
+    "the result reports the live user PATH, per-command resolution, concrete problems and requiresNewTerminal",
+    "verify_path_repair_at accepts an explicit merged PATH order so fixtures never depend on the host registry",
+    "the environments page distinguishes 已调整 PATH 顺序并核验 from 已写入，但核验未通过, and explains that an open terminal or a system PATH entry may be the cause"
+  ],
+  "fixtures": [
+    "commands::tests::path_repair_result_requires_the_live_path_to_match_and_clear_shadowing"
+  ],
+  "uiCoverage": {
+    "release-052-ui": "a verified repair asserts 已调整 PATH 顺序并核验 and the managed-entry-first message; an unverified repair asserts 核验未通过 plus the still-shadowed reason"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "257 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml path_repair -- --test-threads=1",
+      "result": "3 passed / 0 failed / 268 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 721ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real user PATH was reordered; the verification was exercised with injected PATH states",
+    "No new terminal was opened to confirm the reported resolution",
+    "The UI path used a simulated backend only",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "The verification inspects the registry value, so it cannot detect a running shell that still holds the old environment",
+    "A system PATH entry ahead of the user entry still shows as shadowed, which is reported rather than auto-fixed",
+    "The result does not persist an audit record beyond the existing PATH journal entry"
+  ]
+}

@@ -144,13 +144,23 @@ export function Download() {
     for (const t of Object.values(tasks)) {
       if (t.status === "done" && !doneToastFired.has(t.id)) {
         doneToastFired.add(t.id);
-        toast.success("安装完成", `${t.targetName}(${t.version})已就绪`);
+        toast.success(
+          "安装步骤完成",
+          `${t.targetName} (${t.version}) 已放入管理目录；文件完整性与版本核验范围取决于该工具的下载源支持。`,
+        );
         refreshOverview();
-        setTimeout(() => useInstallStore.getState().remove(t.id), 3000);
+        // The backend keeps the finished task for a while; drop it here only so
+        // this page stops listing it, not to destroy the outcome elsewhere.
+        setTimeout(() => useInstallStore.getState().dismiss(t.id), 3000);
       }
       if (t.status === "error" && !doneToastFired.has(t.id)) {
         doneToastFired.add(t.id);
         toast.error("安装失败", `${t.targetName}: ${t.message}`);
+        setTimeout(() => useInstallStore.getState().dismiss(t.id), 3000);
+      }
+      if (t.status === "canceled" && !doneToastFired.has(t.id)) {
+        doneToastFired.add(t.id);
+        toast.info("安装已取消", `${t.targetName} (${t.version})`);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,6 +172,10 @@ export function Download() {
 
   const start = async (v: VersionInfo) => {
     if (!sourcesReady || loading || !versions?.includes(v)) return;
+    if (v.verification?.status === "invalid") {
+      toast.error("校验资料不可用", "当前校验依据无效，已阻止下载；请刷新或切换到官方来源。");
+      return;
+    }
     const name = targetNames[v.version] ?? defaultTargetName(envType, v.version);
     try {
       await api.startInstall(envType, v.version, name, source, v.url);
@@ -308,7 +322,7 @@ export function Download() {
           {envType === "rust" && <p>Rust 按 stable / beta / nightly 渠道安装，由 rustup 获取对应最新版本。</p>}
           {["llvm", "deno", "bun", "git", "gh", "mingw"].includes(envType) && <p>GitHub 源查询最近 100 个发布记录后筛选兼容安装包，不代表完整历史归档。</p>}
           {envType === "adb" && <p>Android SDK Platform Tools，包含 ADB 和 Fastboot。仅列出 Google 当前索引提供的 Windows 稳定版，不代表完整历史版本。使用需遵守 Android SDK 许可条款。</p>}
-          {envType === "python" && <p>Python 列表来自版本目录；仅源码发布的安全维护版本可能没有 Windows 安装器。</p>}
+          {envType === "python" && <p>Python 官方源用发布清单确认正式日期与 Windows x64 安装器；华为镜像按目录逐项确认对应安装器文件。镜像目录修改时间不是发布日期；若官方日期接口不可用，日期显示未知。</p>}
           {envType === "maven" && <p>Maven 仅适配 3.x；官方当前分发目录不包含全部历史版本。</p>}
           {versions?.some(v => v.note?.includes("离线缓存")) && <p role="alert" className="text-amber-700 dark:text-amber-400">在线查询失败，正在展示离线缓存，版本可能过期。请检查网络后刷新或切换源。</p>}
         </div>
@@ -343,6 +357,25 @@ export function Download() {
                       {v.note && (
                         <Badge color={v.note === "LTS" ? "green" : "gray"}>{v.note}</Badge>
                       )}
+                      {v.verification?.status === "trustedSha256" ? (
+                        <Badge
+                          color="green"
+                          title={`校验来源：${v.verification.source}`}
+                        >
+                          来源提供 SHA-256
+                        </Badge>
+                      ) : v.verification?.status === "checksumFile" ? (
+                        <Badge
+                          color="green"
+                          title={`校验来源：${v.verification.source}`}
+                        >
+                          来源提供 SHA-256 文件
+                        </Badge>
+                      ) : v.verification?.status === "invalid" ? (
+                        <Badge color="red">校验资料不可用</Badge>
+                      ) : (
+                        <Badge color="orange">未验证</Badge>
+                      )}
                     </div>
                     <div className="mt-0.5 flex items-center gap-3 text-[11px] text-zinc-400">
                       {v.date && <span>{formatDate(v.date)}</span>}
@@ -373,7 +406,12 @@ export function Download() {
                     </button>
                   )}
 
-                  <Button size="sm" variant="primary" onClick={() => start(v)}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={v.verification?.status === "invalid"}
+                    onClick={() => start(v)}
+                  >
                     <DownloadIcon className="size-3.5" />
                     下载
                   </Button>
@@ -390,6 +428,9 @@ export function Download() {
         <p>
           安装位置为 根目录/envs/{ENV_TYPE_META[envType].folder}/{`<目标名>`},安装完成后可在环境管理页设为当前版本。
         </p>
+          <p className="mt-1">
+          有官方 SHA-256 的资产会在提交与安装前核对；没有可信校验资料时仅标记“未验证”，不把本地哈希当作来源证明。校验资料无效或暂不支持时会阻止下载。
+          </p>
       </div>
     </PageShell>
   );

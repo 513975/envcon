@@ -1,4 +1,4 @@
-import type { ExternalEnv } from "./types";
+import type { ExternalEnv, ScanStatus } from "./types";
 
 export const SCAN_CATEGORIES = ["语言与运行时", "包管理器", "构建工具", "其他工具"] as const;
 export type ScanCategory = typeof SCAN_CATEGORIES[number];
@@ -15,7 +15,43 @@ export function scanCategory(tool: string): ScanCategory {
 }
 
 export function scanHealthy(env: ExternalEnv) {
-  return !!env.version && !env.error;
+  return env.scanStatus ? env.scanStatus === "available" : !!env.version && !env.error;
+}
+
+export function scanStatusLabel(env: ExternalEnv) {
+  return scanStatusText(env.scanStatus, scanHealthy(env) ? "可用" : "待检查");
+}
+
+export function scanStatusText(status: ScanStatus | undefined, fallback = "未扫描") {
+  switch (status) {
+    case "available": return "可用";
+    case "notDiscovered": return "扫描范围内未发现";
+    case "permissionDenied": return "权限不足";
+    case "startFailed": return "无法启动";
+    case "commandFailed": return "命令失败";
+    case "parseFailed": return "输出无法解析";
+    case "timedOut": return "探测超时";
+    case "unscanned":
+    default: return fallback;
+  }
+}
+
+export function scanStatusColor(env: ExternalEnv): "gray" | "green" | "orange" | "red" {
+  return scanStatusTone(env.scanStatus, scanHealthy(env));
+}
+
+export function scanStatusTone(status: ScanStatus | undefined, healthy = false): "gray" | "green" | "orange" | "red" {
+  switch (status) {
+    case "available": return "green";
+    case "notDiscovered":
+    case "unscanned": return "gray";
+    case "permissionDenied":
+    case "startFailed":
+    case "commandFailed":
+    case "parseFailed":
+    case "timedOut": return "orange";
+    default: return healthy ? "green" : "red";
+  }
 }
 
 export function groupScanResults(rows: ExternalEnv[]) {

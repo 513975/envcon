@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01 explicit command-entry policy, uv legacy layout inspection, auditable recovery execution, scan warnings, sibling-entry cleanup ownership, migration guard and PATH effect reporting",
+  "status": "implemented-and-isolated-ui-verified; real uv recovery execution, real manager configuration and new-terminal command resolution not verified",
+  "sourceHashes": {
+    "src-tauri/src/package_managers/native.rs": "0bc8362f3c8412509b23419978660be362628d91e6a753916d74c8986ad5fa5d",
+    "src-tauri/src/package_managers/mod.rs": "758af54b6a4246a6bd0c9aab2283879f3409427a64cd853d0ae0f9401b29cd9f",
+    "src-tauri/src/uv_recovery.rs": "ab597113038a58d03aa3e7442002a428ca7ba52ec61fb840f4c4085c1d0afe58",
+    "src-tauri/src/detect/system.rs": "d7c3cf847d062812fbc19c588bd366b5ffdd9d0a8a27e62183977b9b85322284",
+    "src-tauri/src/pkgtools.rs": "7ec7b850d80b78e8ebb805af3e6739027e40c2dcc4ff67fe2032e17f11b198ee",
+    "src-tauri/src/packages.rs": "e4ac8ceb103c3c197214dae0de4153a87efacbadb9ec900e7b48cd069f6ebe59",
+    "src-tauri/src/migration.rs": "536fd5976a357e31341a074beea6e0430c1dcd320342b9c67056060366224220",
+    "src-tauri/src/global_reinstall.rs": "2e14758a349106ebcb9976db0a2c6050097fd60680abfd9975d7e58aa22875a2",
+    "src-tauri/src/commands.rs": "7a61d2a3205fda87245a5af28b96488fbca540e8f584d39546439bc7e3b0cf70",
+    "src-tauri/src/lib.rs": "93e745ff2f59edaef1f3f694b2acf67570cb78d3c7b72b1e02ff8c3200d5c77e",
+    "src/pages/PackageManagers.tsx": "c05f97f617346d076332c6296f6915d5f314525c8905f3a3d66ccd0bb252fda5",
+    "src/lib/types.ts": "5c88236b7b585a72de3f2b23b9a0715bda4b765df1a7feb9c95f69112b6dea08",
+    "src/lib/api.ts": "a3fef8446c7a42ecb7329e7c8e28d60758919288f067ad329612628cbbf4840e",
+    "tests/packages-ui.mjs": "3a3fc152efd2e87ba4bb337a8bd1eca8f9b0752d3887a4ca3392861ef180a1a7",
+    "tests/verify.mjs": "996023853d2e8e7e34f2c4dbce602a920562f8a72a9c23d39f4627543a3c8867"
+  },
+  "implementation": [
+    "command_entry_policy distinguishes npm/.NET root entries, Cargo/Composer/Yarn fixed subdirectories and uv/pipx/Bun/pnpm sibling entries",
+    "validate_layout requires the supplied command entry to equal the adapter layout and still forbids cache, configuration and sibling command overlap",
+    "Cargo and Composer default cache paths are now siblings of the install root instead of fake root/cache children",
+    "inspect_uv_layout reads receipts, site-packages metadata and entrypoints without moving or deleting files",
+    "uv tools with custom options, multiple requirements, direct sources, damaged/missing receipts or external entrypoints are not marked recoverable",
+    "uv cleanup accepts only the declared sibling entry directory or the recorded legacy root/bin entry, never an arbitrary external launcher",
+    "legacy uv layouts block migration and old-package cleanup until recovery has been performed",
+    "inspect_uv_layout records receipt and entrypoint hashes plus an exact pinned requirement for safely recoverable tools",
+    "recover_uv_layout binds execution to the confirmed preview, rechecks receipt/entrypoint hashes, runs uv tool install --force with a sibling UV_TOOL_BIN_DIR and verifies the new receipt/version/files before deleting old entrypoints",
+    "uv recovery reports per-tool failures/residue and keeps blocked tools, old entrypoints and the shared cache until recovery can be proven complete",
+    "scan results add a partial-result warning when the effective, managed or default uv tool directory still has a legacy nested layout",
+    "pkgtools::values queries actual command-entry directories for pnpm, Yarn, uv, pipx, Bun and Composer and falls back to the declared layout when the query is unavailable",
+    "commandPathSource distinguishes a manager-returned entry from a declared-layout fallback and the UI labels it as actual query or layout derivation",
+    "PackageManagers shows the command entry and a read-only legacy-layout warning; apply_tool_config reports whether the entry is active, needs a new terminal, is process-only, duplicated or missing",
+    "packages-ui regression is now part of npm run verify"
+  ],
+  "fixtures": [
+    "package_managers::native::tests::command_entry_policy_matches_real_manager_layouts",
+    "package_managers::native::tests::uv_legacy_layout_is_read_only_and_classifies_recovery",
+    "package_managers::native::tests::uv_cleanup_accepts_declared_sibling_or_legacy_entry_only",
+    "migration::tests::refuses_to_migrate_a_legacy_uv_layout_as_is",
+    "pkgtools::tests::path_integration_distinguishes_registry_and_current_process",
+    "package_managers::tests::every_manager_has_explicit_roles_and_rejects_config_cache_overlap",
+    "package_managers::native::tests::pnpm_and_yarn_classic_keep_package_store_and_command_prefixes_separate",
+    "package_managers::native::tests::npm_reinstall_cache_and_config_must_not_overlap_prefix",
+    "uv_recovery::tests::recovers_entrypoints_from_exact_preview_and_moves_cache",
+    "uv_recovery::tests::fails_before_mutation_when_receipt_changed_after_preview",
+    "uv_recovery::tests::retains_old_entrypoint_when_recovery_command_fails",
+    "uv_recovery::tests::partial_recovery_keeps_blocked_tool_and_shared_cache",
+    "uv_recovery::tests::recovery_accepts_only_a_uv_launcher_name",
+    "pkgtools::tests::values_include_actual_command_entries_for_pnpm_yarn_and_uv",
+    "pkgtools::tests::command_entry_source_distinguishes_queried_and_layout_fallback",
+    "detect::system::tests::scan_warns_about_legacy_uv_layouts_seen_in_the_effective_environment"
+  ],
+  "commands": [
+    {
+      "command": "cargo test --offline --lib -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "225 passed; 0 failed; 13 ignored"
+    },
+    {
+      "command": "cargo test --offline --lib uv_recovery::tests -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "5 passed; 0 failed; 232 filtered out"
+    },
+    {
+      "command": "cargo test --offline --lib detect::system::tests::scan_warns_about_legacy_uv_layouts_seen_in_the_effective_environment -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "1 passed; 0 failed; 236 filtered out"
+    },
+    {
+      "command": "cargo test --offline --lib package_managers:: -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "16 passed; 0 failed; 221 filtered out"
+    },
+    {
+      "command": "cargo test --offline --lib migration::tests -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "7 passed; 0 failed; 230 filtered out"
+    },
+    {
+      "command": "cargo test --offline --lib pkgtools::tests -- --test-threads=1",
+      "workingDirectory": "src-tauri",
+      "result": "9 passed; 0 failed; 229 filtered out"
+    },
+    {
+      "command": "npm run build",
+      "workingDirectory": "workspace root",
+      "result": "1708 modules transformed; production build succeeded"
+    },
+    {
+      "command": "npm run verify (ENVCON_PLAYWRIGHT_MODULE=Codex runtime Playwright module)",
+      "workingDirectory": "workspace root",
+      "result": "Rust 225 passed; 0 failed; 13 ignored; 1708-module production build; two read-state tests and nine UI suites PASS"
+    },
+    {
+      "command": "cargo check --offline",
+      "workingDirectory": "src-tauri",
+      "result": "0 errors; 1 existing dead-code warning (path_ownership::preview_cleanup)"
+    },
+    {
+      "command": "git diff --check",
+      "workingDirectory": "workspace root",
+      "result": "exit code 0"
+    },
+    {
+      "command": "cargo fmt --check",
+      "workingDirectory": "src-tauri",
+      "result": "not executable: cargo-fmt.exe is not installed for stable-x86_64-pc-windows-msvc"
+    }
+  ],
+  "managerMatrix": [
+    {
+      "manager": "npm",
+      "commandEntry": "install root / Windows prefix",
+      "cache": "sibling cache",
+      "globalConfiguration": "prefix, cache",
+      "isolation": "passed",
+      "realVerification": "not executed; version and real config write remain unverified"
+    },
+    {
+      "manager": "pnpm",
+      "commandEntry": "sibling bin (PNPM_HOME)",
+      "cache": "sibling store",
+      "globalConfiguration": "global-dir, global-bin-dir, store-dir",
+      "isolation": "passed",
+      "realVerification": "not executed; version and actual global-bin-dir remain unverified"
+    },
+    {
+      "manager": "yarn",
+      "commandEntry": "sibling prefix/bin (Classic)",
+      "cache": "sibling cache",
+      "globalConfiguration": "global-folder, prefix, cache-folder; Berry global install rejected",
+      "isolation": "passed",
+      "realVerification": "not executed; Classic version/config and Berry behavior remain unverified"
+    },
+    {
+      "manager": "pip",
+      "commandEntry": "not applicable to global-root configuration",
+      "cache": "pip cache only",
+      "globalConfiguration": "not supported",
+      "isolation": "passed",
+      "realVerification": "not executed; cache query/write remains unverified"
+    },
+    {
+      "manager": "bun",
+      "commandEntry": "sibling bin",
+      "cache": "sibling cache",
+      "globalConfiguration": "BUN_INSTALL_GLOBAL_DIR, BUN_INSTALL_BIN, BUN_INSTALL_CACHE_DIR",
+      "isolation": "passed",
+      "realVerification": "not executed; version and actual config remain unverified"
+    },
+    {
+      "manager": "uv",
+      "commandEntry": "sibling bin; legacy root/bin inspected read-only",
+      "cache": "sibling cache; legacy root/cache inspected",
+      "globalConfiguration": "UV_TOOL_DIR, UV_TOOL_BIN_DIR, UV_CACHE_DIR",
+      "isolation": "passed",
+      "realVerification": "recovery execution core implemented and isolated/UI verified; real uv version, actual uv tool install recovery, uv tool list and new-terminal resolution remain unverified"
+    },
+    {
+      "manager": "pipx",
+      "commandEntry": "sibling bin",
+      "cache": "sibling cache",
+      "globalConfiguration": "PIPX_HOME, PIPX_BIN_DIR, PIP_CACHE_DIR",
+      "isolation": "passed",
+      "realVerification": "not executed; version and real config remain unverified"
+    },
+    {
+      "manager": "cargo",
+      "commandEntry": "fixed root/bin",
+      "cache": "not configurable through this path UI",
+      "globalConfiguration": "CARGO_INSTALL_ROOT",
+      "isolation": "passed",
+      "realVerification": "not executed; roots and cargo behavior remain unverified"
+    },
+    {
+      "manager": "composer",
+      "commandEntry": "fixed root/vendor/bin",
+      "cache": "sibling cache",
+      "globalConfiguration": "COMPOSER_HOME, COMPOSER_CACHE_DIR",
+      "isolation": "passed",
+      "realVerification": "not executed; version and real config remain unverified"
+    },
+    {
+      "manager": "dotnet",
+      "commandEntry": "tool path root",
+      "cache": "sibling NuGet cache",
+      "globalConfiguration": "not supported; cache only",
+      "isolation": "passed",
+      "realVerification": "not executed; tool-path and NuGet cache remain unverified"
+    }
+  ],
+  "verifiedInIsolation": [
+    "all ten manager layouts are represented by an explicit policy and role model",
+    "uv legacy tools are classified as recoverable or manual without touching files",
+    "custom options, multiple requirements, direct sources, damaged receipts and external launchers are not marked recoverable",
+    "uv cleanup accepts only declared sibling or legacy entrypoints",
+    "legacy uv migration and cleanup are rejected",
+    "uv recovery is bound to the confirmed preview and rejects changed receipts or entrypoints before running any command",
+    "uv recovery verifies the new receipt, version and entrypoint files before removing old entrypoints",
+    "uv recovery command failure and blocked tools retain old entrypoints; shared cache is retained until all recoverable tools succeed",
+    "the package manager scan reports legacy uv layouts as partial warnings instead of normal state",
+    "PATH status distinguishes active, new-terminal, current-process-only, duplicate and missing",
+    "the package manager path view displays the command entry and legacy warning without overflow",
+    "the package manager path view labels a queried command entry separately from a declared-layout fallback"
+  ],
+  "notVerified": [
+    "real uv legacy recovery execution, post-recovery receipt/entrypoint verification, uv tool list output and new-terminal command resolution",
+    "real package manager configuration writes and actual versions for all ten managers",
+    "opening a new terminal and resolving each installed package command",
+    "real user PATH or registry mutation",
+    "packaging, signing and publishing"
+  ],
+  "blockedBy": [
+    "real user environment writes are prohibited for this task",
+    "uv recovery depends on reconstructable original requirements and an authorized isolated Windows environment",
+    "R0-R2 stage gates and the Windows VM remain open"
+  ]
+}

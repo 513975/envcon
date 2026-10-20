@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 line 328: document self-update limitations in the UI and surface the most recent recorded update attempt read-only",
+  "status": "implemented-and-ui-verified; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "reviewFindings": {
+    "alreadyCovered": "PackageManagerUpdateStatus already separates commandFailed / verificationFailed / versionChanged / versionUnchanged / versionUnknown, and the UI already warned that an unchanged version does not prove the latest version.",
+    "gap": "The UI never stated that downgrades are unsupported, that dependency changes are resolved by the manager without an impact report, or that old versions may no longer be downloadable. The journal written in the previous step was also invisible."
+  },
+  "implementation": {
+    "backendCommand": "package_manager_update_record(tool) -> Option<UpdateRecord>, read-only, returns None when nothing was recorded rather than fabricating an empty record",
+    "uiLimitations": "The version panel now states, before the user acts: no downgrade to a chosen version; dependency changes are resolved by the manager without an impact range; old versions may have been removed from the source.",
+    "uiRecord": "When a record exists the panel shows the status, the before→after versions (or 未确认新版本), the program, and the sentence that the record is audit-only and the app will not restore to that version.",
+    "failureTolerance": "A missing or unreadable journal hides the record line instead of breaking the page or claiming there was no update.",
+    "types": "PackageManagerUpdateRecord added; api.packageManagerUpdateRecord wired."
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "273 passed / 0 failed / 14 ignored"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 670ms"
+    },
+    "uiTargeted": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/package-manager-update-ui.mjs",
+      "result": "PASS"
+    },
+    "uiSuite": {
+      "command": "node tests/run-ui.mjs <global playwright module> 九套测试",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "no whitespace errors (only LF/CRLF notices)"
+    },
+    "uiAssertionsAdded": [
+      "the downgrade and old-version limitations are visible before any update",
+      "no record line is shown when nothing was recorded",
+      "after an update the record line appears with 命令完成 and the audit-only sentence"
+    ]
+  },
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "03fafd94d38cb17c3b34851e754cd5ccd7674f1e34190dd5402d96fb1b7c6f6f",
+    "src-tauri/src/update_journal.rs": "1ca6b143e22d4a5b57dc4df888b0c6fc6836383c573298b955b4f0e8cd76502b",
+    "src-tauri/src/lib.rs": "f0905c21e7683123948de281049743e0690f784b234ef28a02b7990fbef25e09",
+    "src/lib/types.ts": "49548e802589f7e6dac1379b35716792417153303057e264f6e0454f6e7f05d5",
+    "src/lib/api.ts": "f721e12f9e67e386b6d4ea7f086039ba14c0ede719baea516315603be8263c8e",
+    "src/pages/PackageManagers.tsx": "29b165fa10260223c0c8cb73f783814de1ea4ce3ac59c1598c3c23f0feb5c1f2",
+    "tests/package-manager-update-ui.mjs": "2e1c7eb0734c1cef43d32a9cd511c4640c7c81af9629cb359240fb5648f291a5"
+  },
+  "notVerified": [
+    "No real package manager was updated; the record display is driven by a mocked IPC response.",
+    "The limitation text states general truths about these managers; it was not checked against each manager's documentation in this round.",
+    "No packaging, tagging or release."
+  ],
+  "limitations": [
+    "Only the latest attempt per tool is shown; earlier attempts are not browsable.",
+    "The record is descriptive: it cannot prove what the updater actually did.",
+    "The UI has no way to export the journal."
+  ]
+}

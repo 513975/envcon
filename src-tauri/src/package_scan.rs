@@ -24,6 +24,21 @@ pub struct Source {
     pub error: Option<String>,
 }
 
+/// A structured scan problem. The free-text `warnings` list stays for the
+/// existing UI, but callers need to tell "permission denied" apart from
+/// "the directory vanished" without parsing Chinese prose.
+#[derive(Clone, Serialize, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanProblem {
+    /// One of: `permission-denied`, `not-found`, `unreadable`,
+    /// `entry-unreadable`, `package-list-failed`, `link-skipped`,
+    /// `depth-limit`, `limit-reached`.
+    pub kind: String,
+    /// The path involved, when the problem is about a specific location.
+    pub path: Option<String>,
+    pub detail: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -35,6 +50,41 @@ pub struct Snapshot {
     pub warning_count: usize,
     pub skipped_projects: usize,
     pub roots: Vec<String>,
+    /// Structured view of the same failures in `warnings`.
+    pub problems: Vec<ScanProblem>,
+    /// How many locations could not be read because access was denied.
+    pub permission_denied: usize,
+}
+
+/// Cap on structured problems so a huge failed tree cannot exhaust memory.
+const MAX_PROBLEMS: usize = 80;
+
+/// Map an IO error to a stable kind. Windows returns access-denied as raw
+/// error 5 and a vanished path as 2/3; both also surface as
+/// `PermissionDenied`/`NotFound` through `ErrorKind`.
+fn classify_io_kind(error: &std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "permission-denied",
+        std::io::ErrorKind::NotFound => "not-found",
+        _ => "unreadable",
+    }
+}
+
+fn problem(snapshot: &mut Snapshot, kind: &str, path: Option<&Path>, text: String) {
+    if kind == "permission-denied" {
+        snapshot.permission_denied += 1;
+    }
+    snapshot.warning_count += 1;
+    if snapshot.warnings.len() < MAX_PROBLEMS {
+        snapshot.warnings.push(text.clone());
+    }
+    if snapshot.problems.len() < MAX_PROBLEMS {
+        snapshot.problems.push(ScanProblem {
+            kind: kind.to_string(),
+            path: path.map(|p| p.to_string_lossy().into_owned()),
+            detail: text,
+        });
+    }
 }
 
 static TASK: Mutex<Option<Snapshot>> = Mutex::new(None);
@@ -51,7 +101,7 @@ fn publish(snapshot: &Snapshot) {
 }
 fn warning(snapshot: &mut Snapshot, text: String) {
     snapshot.warning_count += 1;
-    if snapshot.warnings.len() < 80 {
+    if snapshot.warnings.len() < MAX_PROBLEMS {
         snapshot.warnings.push(text);
     }
 }
@@ -122,6 +172,8 @@ pub async fn start(
         warning_count: 0,
         skipped_projects: 0,
         roots: vec![],
+        problems: vec![],
+        permission_denied: 0,
     };
     publish(&initial);
     tauri::async_runtime::spawn(async move {
@@ -328,8 +380,10 @@ fn walk(
             break;
         }
         if snapshot.visited >= limit || start.elapsed() >= timeout {
-            warning(
+            problem(
                 &mut snapshot,
+                "limit-reached",
+                None,
                 "达到目录数量或时间上限，请缩小范围继续扫描".into(),
             );
             break;
@@ -337,7 +391,12 @@ fn walk(
         let path = match path.canonicalize() {
             Ok(path) => crate::fsutil::plain_path(path),
             Err(e) => {
-                warning(&mut snapshot, format!("无法访问 {}: {e}", path.display()));
+                problem(
+                    &mut snapshot,
+                    classify_io_kind(&e),
+                    Some(&path),
+                    format!("无法访问 {}: {e}", path.display()),
+                );
                 continue;
             }
         };
@@ -350,7 +409,12 @@ fn walk(
         let entries = match std::fs::read_dir(&path) {
             Ok(entries) => entries,
             Err(e) => {
-                warning(&mut snapshot, format!("无法读取 {}: {e}", path.display()));
+                problem(
+                    &mut snapshot,
+                    classify_io_kind(&e),
+                    Some(&path),
+                    format!("无法读取 {}: {e}", path.display()),
+                );
                 continue;
             }
         };
@@ -362,8 +426,10 @@ fn walk(
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    warning(
+                    problem(
                         &mut snapshot,
+                        "entry-unreadable",
+                        Some(&path),
                         format!("目录项读取失败 {}: {e}", path.display()),
                     );
                     continue;
@@ -379,16 +445,20 @@ fn walk(
             let meta = match std::fs::symlink_metadata(entry.path()) {
                 Ok(meta) => meta,
                 Err(e) => {
-                    warning(
+                    problem(
                         &mut snapshot,
+                        classify_io_kind(&e),
+                        Some(&entry.path()),
                         format!("无法读取 {}: {e}", entry.path().display()),
                     );
                     continue;
                 }
             };
             if meta.file_type().is_symlink() {
-                warning(
+                problem(
                     &mut snapshot,
+                    "link-skipped",
+                    Some(&entry.path()),
                     format!("已跳过链接目录，可单独选择扫描: {}", entry.path().display()),
                 );
                 continue;
@@ -412,8 +482,10 @@ fn walk(
                 continue;
             }
             if depth >= 64 {
-                warning(
+                problem(
                     &mut snapshot,
+                    "depth-limit",
+                    Some(&entry.path()),
                     format!("超过扫描深度: {}", entry.path().display()),
                 );
                 continue;
@@ -435,8 +507,10 @@ fn walk(
                     }),
                     Ok(_) => {}
                     Err(e) => {
-                        warning(
+                        problem(
                             &mut snapshot,
+                            "package-list-failed",
+                            Some(&source),
                             format!("包清单读取失败 {}: {e}", source.display()),
                         );
                         snapshot.sources.push(Source {
@@ -486,6 +560,8 @@ mod tests {
             warning_count: 0,
             skipped_projects: 0,
             roots: vec![],
+            problems: vec![],
+            permission_denied: 0,
         }
     }
 
@@ -590,5 +666,82 @@ mod tests {
             |_| {},
         );
         assert_eq!(missing.status, "partial");
+    }
+
+    #[test]
+    fn io_failures_are_classified_instead_of_only_free_text() {
+        let d = crate::test_support::TestDir::new();
+        let missing = d.path().join("vanished");
+        let result = walk(
+            vec![missing.clone()],
+            &HashMap::new(),
+            empty(),
+            &AtomicBool::new(false),
+            100,
+            Duration::from_secs(10),
+            |_| {},
+        );
+
+        // A path that disappeared is a distinct kind, not "some warning".
+        let vanished = result
+            .problems
+            .iter()
+            .find(|p| p.kind == "not-found")
+            .expect("missing root must be classified as not-found");
+        assert_eq!(
+            vanished.path.as_deref(),
+            Some(missing.to_string_lossy().as_ref())
+        );
+        assert!(vanished.detail.contains("无法访问"));
+        // The structured problem and the legacy free-text warning describe the
+        // same event, so existing UI and new consumers cannot disagree.
+        assert!(result.warnings.iter().any(|w| *w == vanished.detail));
+        assert_eq!(result.warning_count, result.problems.len());
+        // Nothing was denied, so the dedicated counter must stay at zero
+        // rather than being inferred from the warning count.
+        assert_eq!(result.permission_denied, 0);
+
+        // Classification is by error kind, so a denied path can never be
+        // reported as "vanished" or vice versa.
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let not_found = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let other = std::io::Error::from(std::io::ErrorKind::InvalidData);
+        assert_eq!(classify_io_kind(&denied), "permission-denied");
+        assert_eq!(classify_io_kind(&not_found), "not-found");
+        assert_eq!(classify_io_kind(&other), "unreadable");
+    }
+
+    #[test]
+    fn permission_denied_is_counted_separately_and_problems_stay_bounded() {
+        let mut snapshot = empty();
+        let denied_path = PathBuf::from("C:/locked");
+
+        // A denied directory increments the dedicated counter and keeps both
+        // views in step.
+        problem(
+            &mut snapshot,
+            "permission-denied",
+            Some(&denied_path),
+            "无法读取 C:/locked: 拒绝访问".into(),
+        );
+        assert_eq!(snapshot.permission_denied, 1);
+        assert_eq!(snapshot.problems.len(), 1);
+        assert_eq!(snapshot.warnings.len(), 1);
+        assert_eq!(snapshot.problems[0].kind, "permission-denied");
+
+        // Non-permission problems must not inflate the denied counter.
+        problem(&mut snapshot, "not-found", None, "路径不存在".into());
+        assert_eq!(snapshot.permission_denied, 1);
+        assert_eq!(snapshot.problems[0].path.as_deref(), Some("C:/locked"));
+        assert_eq!(snapshot.problems[1].path, None);
+
+        // The cap bounds memory but the total count keeps growing, so the UI
+        // can still say how many diagnostics were dropped.
+        for i in 0..MAX_PROBLEMS * 2 {
+            problem(&mut snapshot, "unreadable", None, format!("错误 {i}"));
+        }
+        assert_eq!(snapshot.problems.len(), MAX_PROBLEMS);
+        assert_eq!(snapshot.warnings.len(), MAX_PROBLEMS);
+        assert_eq!(snapshot.warning_count, 2 + MAX_PROBLEMS * 2);
     }
 }

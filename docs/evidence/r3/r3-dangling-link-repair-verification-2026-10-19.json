@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 350: a managed link whose target disappeared can be identified and cleaned up, instead of leaving the entry permanently stuck",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/commands.rs": "178cf84f5861103e0389b99261034648953176e10258ae10377c04e77f689095"
+  },
+  "gapClosed": "preview_uninstall_scope treated an unresolvable link target as a blocker: canonicalize() failing on the target set scope_complete=false and pushed a 管理链接目标 blocked entry. The consequence was the opposite of the intent — the one kind of environment that actually needs repair (a dangling managed link) was the one the app refused to touch, and the user had no way to clear it.",
+  "implementation": {
+    "separation": "Two different failures were conflated. 'link_target_path' failing means the link object itself is unreadable, and that still blocks. 'canonicalize' failing on an already-read target means the destination is gone while the object is intact — that is now tracked separately as unresolved_target.",
+    "preview": "An unresolved target produces a removable entry named 失效链接入口 whose text states that only the link object is removed and that no target is ever followed or deleted. It does not claim to retain a 受管目标目录, because that directory no longer exists.",
+    "execution": "No new removal path was needed: link_ownership already opens the link object with FILE_FLAG_OPEN_REPARSE_POINT and marks that handle for deletion, so it never resolves the target. The fixture proves this end to end rather than assuming it."
+  },
+  "fixtures": [
+    {
+      "name": "commands::tests::a_dangling_managed_link_can_be_cleaned_up_instead_of_blocking_forever",
+      "asserts": [
+        "after the target directory is deleted the link object still exists",
+        "the preview reports scope_complete=true and pushes no 管理链接目标 blocker",
+        "a 失效链接入口 entry appears with the '不会跟随或删除任何目标' promise",
+        "the preview does not pretend to retain a 受管目标目录 that no longer exists"
+      ]
+    },
+    {
+      "name": "commands::tests::a_dangling_link_is_removed_without_touching_anything_else",
+      "asserts": [
+        "execution returns VerifiedScopeRemoved with no failures",
+        "the link entry is gone afterwards",
+        "the target path is not recreated by the removal"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "287 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml a_dangling -- --test-threads=1",
+      "result": "2 passed"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/release-052-ui.mjs",
+      "result": "PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/commands.rs",
+      "result": "exit 0, CRLF notice only"
+    }
+  },
+  "notVerified": [
+    "The dangling target was produced by deleting a temporary fixture directory, not by uninstalling a real runtime",
+    "A link whose target is unreadable because of permissions (rather than absent) takes the blocking path; that case was not re-exercised here",
+    "No UI change was needed, so no new UI assertion covers the 失效链接入口 row"
+  ],
+  "limitations": [
+    "This covers dangling link entries only. A corrupted plain directory (no link) still relies on the existing broken-status reporting; there is no separate repair action for it",
+    "The 重新识别 half of item 350 is unchanged: the overview already re-reads structure and version on every scan, but there is no dedicated 'repair' affordance beyond this removal path",
+    "Removal is the only offered repair. Re-pointing a dangling link at a new target would be an implicit move, which the plan explicitly forbids",
+    "IMP item 350 stays unchecked"
+  ]
+}

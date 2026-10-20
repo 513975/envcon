@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "IMP-02 / R2 item 325: lift the runtime installation-shape verdict from command generation into the capability layer so the tool list, preview and executor agree",
+  "status": "implemented-and-isolated-verified; no real manager was updated",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "9038e8f19fffbc9d582d600c0b09cb65c95c9a50d28b8d29328217666fd6ba61",
+    "src/lib/types.ts": "c8bae675b76fd8612fbc0011f0c5cf19211b1a5fca3f83be5a4a432231ce51ed",
+    "src/pages/PackageManagers.tsx": "58febb78ce2c1144c72c0f66f68a42d055f45a5ba89198656a5367a579aaf416"
+  },
+  "gapClosed": "The runtime installation verdict existed only inside self_update_command, so the tool list still judged updatability from the static catalog. A Corepack-managed pnpm or a pip-installed uv rendered as updatable and was refused only after the user opened the preview.",
+  "implementation": {
+    "singleSource": "self_update_channel_blocker(tool, inv) is now the only place that turns UpdateChannel into user-facing text; the executor and the tool list both call it, so their reasons cannot drift",
+    "capabilityField": "ToolConfig gains selfUpdateBlocker (serde default), filled during get_tool_configs from the same resolved Invocation",
+    "uiGating": "The 更新当前工具 button is disabled when selfUpdateBlocker is set and its title shows that reason; the version panel renders an explicit '此安装的自更新不可用' line",
+    "backwardCompatibility": "The field is #[serde(default)] and optional in TypeScript, so an older snapshot without it deserializes to None rather than failing"
+  },
+  "fixtures": [
+    {
+      "name": "pkgtools::tests::list_preview_and_executor_share_one_self_update_blocker",
+      "asserts": [
+        "the blocker string from the list path equals the executor's error string for a Corepack shim",
+        "the same equality holds for a pip-installed uv",
+        "a standalone installation yields no blocker, so the list cannot invent one"
+      ]
+    },
+    {
+      "name": "pkgtools::tests::tool_config_exposes_the_runtime_blocker_over_ipc",
+      "asserts": [
+        "the field serializes under the camelCase name selfUpdateBlocker",
+        "a snapshot without the field deserializes to None instead of failing"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "280 passed / 0 failed / 14 ignored"
+    },
+    "pkgtoolsSuite": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml pkgtools::tests -- --test-threads=1",
+      "result": "26 passed / 0 failed"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 503ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check -- ROADMAP.md src-tauri/src/pkgtools.rs src/lib/types.ts src/pages/PackageManagers.tsx",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "notVerified": [
+    "No real Corepack-managed manager exists in this environment, so the disabled-button path is proven by fixture and by the shared-function equality, not by clicking a real installation",
+    "The UI rendering is now covered: the fixture lists a Corepack-blocked pnpm, asserts the update button is disabled, the reason line renders, and the button title carries the same text",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "composer and bun still have no installation-shape check and are treated as Standalone",
+    "The Corepack heuristic reads the launcher body; a shim invoking corepack through another wrapper is not detected",
+    "The batch preview re-derives readiness from the same blocker, but the batch UI was not re-exercised with a blocked-at-runtime manager"
+  ]
+}

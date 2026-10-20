@@ -13,6 +13,9 @@ use crate::sources::{self, InstallMethod};
 use crate::types::EnvType;
 
 const EVENT: &str = "install://update";
+/// How long a finished install stays readable through `install_tasks`, so the
+/// outcome survives a page switch instead of disappearing with the toast.
+const FINISHED_TASK_TTL_SECS: u64 = 30 * 60;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status")]
@@ -157,14 +160,6 @@ impl TaskManager {
             .join(env_type.folder())
             .join(&target_name);
         let reservation = TargetReservation::acquire(self.targets.clone(), &final_dir)?;
-
-        let spec = sources::download_spec(
-            env_type,
-            &version,
-            &final_dir.to_string_lossy(),
-            &source,
-            url.as_deref(),
-        )?;
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         {
@@ -205,17 +200,32 @@ impl TaskManager {
         let tasks = self.tasks.clone();
         let dl = self.dl.clone();
         let app2 = app.clone();
+        let final_dir_for_spec = final_dir.clone();
+        let version_cache = cfg.data_dir.join("version_cache.json");
 
         tauri::async_runtime::spawn(async move {
-            let result =
+            let result = async {
+                let spec = sources::resolve_download_spec(
+                    env_type,
+                    &version,
+                    &final_dir_for_spec.to_string_lossy(),
+                    &source,
+                    url.as_deref(),
+                    &version_cache,
+                )
+                .await?;
                 run_install(&dl, &cfg, &root, env_type, &spec, &target_name, id, &app2, &tasks)
-                    .await;
+                    .await
+            }
+            .await;
             drop(reservation);
             match result {
                 Ok(()) => {
-                    // 任务完成,标记后延迟移除(前端可看到 Done 状态)
+                    // Keep the finished task so a user who navigates away can
+                    // still see the result. The entry is retired later instead of
+                    // being dropped as soon as the current page shows a toast.
                     update_status(&tasks, id, &app2, TaskStatus::Done);
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(FINISHED_TASK_TTL_SECS)).await;
                     tasks.lock().unwrap().remove(&id);
                 }
                 Err(e) => {
@@ -319,9 +329,27 @@ async fn run_install(
         })
         .await?;
 
+    // Re-hash immediately before any archive extraction or installer execution.
+    // This closes the gap where a downloaded file is replaced after the
+    // download task has completed but before the install phase starts.
+    download::validate_existing_file(&dest_path, &spec.verification, spec.expected_size)?;
+
     let result = async {
         let cancelable = matches!(spec.method, InstallMethod::Unzip { .. });
-        begin_installing(tasks, id, app, "正在安装…", cancelable)?;
+        let message = if spec.verification.is_trusted() {
+            "下载 SHA-256 已校验，正在安装…"
+        } else {
+            "来源未提供可信校验资料；文件完整性未验证，正在安装…"
+        };
+        begin_installing(tasks, id, app, message, cancelable)?;
+        let expected_version = tasks
+            .lock()
+            .unwrap()
+            .get(&id)
+            .ok_or_else(|| AppError::msg("安装任务不存在"))?
+            .snapshot
+            .version
+            .clone();
         let cat_dir = root.join("envs").join(env_type.folder());
         let final_dir = cat_dir.join(target_name);
         tokio::fs::create_dir_all(&cat_dir).await?;
@@ -343,8 +371,7 @@ async fn run_install(
                 ).await;
                 let r = match unzip_result {
                     Ok(()) => async {
-                        let version = tasks.lock().unwrap().get(&id).unwrap().snapshot.version.clone();
-                        validate_unpacked(env_type, &version, &tmp_dir).await?;
+                        validate_unpacked(env_type, &expected_version, &tmp_dir).await?;
                         begin_installing(tasks, id, app, "正在完成安装…", false)?;
                         tokio::fs::rename(&tmp_dir, &final_dir)
                             .await
@@ -358,7 +385,10 @@ async fn run_install(
                 }
                 r
             }
-            InstallMethod::Installer { args } => {
+            InstallMethod::Installer {
+                args,
+                failure_recovery,
+            } => {
                 // Claim a fresh directory so recovery never moves a pre-existing installation.
                 tokio::fs::create_dir(&final_dir).await?;
                 let app2 = app.clone();
@@ -371,7 +401,11 @@ async fn run_install(
                     }
                 })
                 .await;
-                recover_failed_install(&final_dir, result)
+                let result = match result {
+                    Ok(()) => validate_installer(env_type, &expected_version, &final_dir).await,
+                    Err(e) => Err(e),
+                };
+                recover_installer_failure(*failure_recovery, &final_dir, result)
             }
             InstallMethod::RustupInit { channel, dist_server } => {
                 tokio::fs::create_dir(&final_dir).await?;
@@ -393,6 +427,10 @@ async fn run_install(
                     },
                 )
                 .await;
+                let result = match result {
+                    Ok(()) => validate_rustup(&final_dir).await,
+                    Err(e) => Err(e),
+                };
                 recover_failed_install(&final_dir, result)
             }
         }
@@ -406,14 +444,62 @@ async fn run_install(
 }
 
 async fn validate_unpacked(env_type: EnvType, version: &str, dir: &Path) -> Result<()> {
+    if !crate::detect::looks_like(env_type, dir) {
+        return Err(AppError::msg(format!("{env_type:?} 压缩包缺少必要的可执行文件")));
+    }
     if env_type == EnvType::Adb {
-        if !crate::detect::system::is_adb_installation(dir) || !dir.join("fastboot.exe").is_file() {
-            return Err(AppError::msg("Platform Tools 安装包不完整，缺少 ADB、Fastboot 或运行库"));
+        if !dir.join("fastboot.exe").is_file() {
+            return Err(AppError::msg("Platform Tools 安装包不完整，缺少 Fastboot"));
         }
-        let actual = crate::detect::probe::probe_version(env_type, dir).await;
-        if actual.as_deref() != Some(version) {
-            return Err(AppError::msg(format!("Platform Tools 版本校验失败：预期 {version}，实际 {}", actual.as_deref().unwrap_or("未知"))));
+        let properties = tokio::fs::read_to_string(dir.join("source.properties")).await
+            .map_err(|e| AppError::msg(format!("Platform Tools 版本元数据缺失: {e}")))?;
+        let actual = properties.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == "Pkg.Revision").then(|| value.trim())
+        });
+        if actual != Some(version) {
+            return Err(AppError::msg(format!(
+                "Platform Tools 版本校验失败：预期 {version}，实际 {}",
+                actual.unwrap_or("未知")
+            )));
         }
+        return Ok(());
+    }
+    // Do not execute binaries from an archive until its publisher-provided
+    // checksum/signature has been verified. Other archives currently receive
+    // structural validation only; trusted integrity metadata is tracked by R2.
+    Ok(())
+}
+
+async fn validate_installer(env_type: EnvType, expected: &str, dir: &Path) -> Result<()> {
+    if !crate::detect::looks_like(env_type, dir) {
+        return Err(AppError::msg(format!("{env_type:?} 安装器已退出，但目标目录缺少必要文件")));
+    }
+    let actual = crate::detect::probe::probe_version(env_type, dir).await;
+    let Some(actual) = actual else {
+        return Err(AppError::msg(format!("{env_type:?} 安装器退出成功，但无法探测版本")));
+    };
+    if !version_matches(env_type, expected, &actual) {
+        return Err(AppError::msg(format!("{env_type:?} 版本校验失败：预期 {expected}，实际 {actual}")));
+    }
+    Ok(())
+}
+
+fn version_matches(env_type: EnvType, expected: &str, actual: &str) -> bool {
+    if matches!(env_type, EnvType::Rust | EnvType::Mingw)
+        || matches!(expected, "stable" | "beta" | "nightly")
+    {
+        return !actual.is_empty();
+    }
+    expected == actual
+        || (env_type == EnvType::Jdk && expected.split('+').next() == actual.split('+').next())
+}
+
+async fn validate_rustup(dir: &Path) -> Result<()> {
+    if !crate::detect::looks_like(EnvType::Rust, dir)
+        || crate::detect::probe::probe_version(EnvType::Rust, dir).await.is_none()
+    {
+        return Err(AppError::msg("rustup 已退出，但目标目录没有可用的 Rust 工具链"));
     }
     Ok(())
 }
@@ -435,6 +521,24 @@ fn recover_failed_install(final_dir: &Path, result: Result<()>) -> Result<()> {
         Err(recovery) => Err(AppError::msg(format!(
             "{error}；无法移走失败目录 {}: {recovery}，请关闭占用进程后处理该目录", final_dir.display()
         ))),
+    }
+}
+
+fn recover_installer_failure(
+    recovery: sources::InstallerFailureRecovery,
+    final_dir: &Path,
+    result: Result<()>,
+) -> Result<()> {
+    match recovery {
+        sources::InstallerFailureRecovery::RetainTarget => result.map_err(|error| {
+            AppError::msg(format!(
+                "{error}；安装器可能已写入系统记录，目标目录 {} 保留供原厂卸载或人工核对",
+                final_dir.display()
+            ))
+        }),
+        sources::InstallerFailureRecovery::MoveTargetAside => {
+            recover_failed_install(final_dir, result)
+        }
     }
 }
 
@@ -461,6 +565,53 @@ mod tests {
         assert!(target.is_dir());
     }
 
+    #[test]
+    fn failed_portable_git_install_quarantines_files_and_allows_same_name_retry() {
+        let dir = crate::test_support::TestDir::new();
+        let target = dir.path().join("git-2.55");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("partial.bin"), b"preserved").unwrap();
+
+        let error = recover_installer_failure(
+            sources::InstallerFailureRecovery::MoveTargetAside,
+            &target,
+            Err(AppError::msg("portable extraction failed")),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("portable extraction failed"));
+        assert!(!target.exists());
+        let backup = std::fs::read_dir(dir.path()).unwrap().next().unwrap().unwrap().path();
+        assert!(backup.file_name().unwrap().to_string_lossy().starts_with(".failed-git-2.55-"));
+        assert_eq!(std::fs::read(backup.join("partial.bin")).unwrap(), b"preserved");
+
+        let targets = Arc::new(Mutex::new(HashSet::new()));
+        let reservation = TargetReservation::acquire(targets, &target).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        drop(reservation);
+        assert!(target.is_dir());
+        assert_eq!(std::fs::read(backup.join("partial.bin")).unwrap(), b"preserved");
+    }
+
+    #[test]
+    fn failed_registered_installer_keeps_its_original_target() {
+        let dir = crate::test_support::TestDir::new();
+        let target = dir.path().join("python");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("python.exe"), b"installer-output").unwrap();
+
+        let error = recover_installer_failure(
+            sources::InstallerFailureRecovery::RetainTarget,
+            &target,
+            Err(AppError::msg("post-install validation failed")),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("可能已写入系统记录"));
+        assert!(target.join("python.exe").is_file());
+        assert_eq!(std::fs::read(target.join("python.exe")).unwrap(), b"installer-output");
+    }
+
     fn task() -> TaskInner {
         TaskInner {
             snapshot: TaskSnapshot {
@@ -483,6 +634,14 @@ mod tests {
         std::fs::write(dir.path().join("fastboot.exe"), b"fixture").unwrap();
         assert!(validate_unpacked(EnvType::Adb, "36.0.2", dir.path()).await.is_ok());
         assert!(validate_unpacked(EnvType::Adb, "36.0.1", dir.path()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn unverified_archives_check_structure_without_executing_their_binaries() {
+        let dir = crate::test_support::TestDir::new();
+        assert!(validate_unpacked(EnvType::Node, "22.0.0", dir.path()).await.is_err());
+        std::fs::write(dir.path().join("node.exe"), b"not an executable").unwrap();
+        assert!(validate_unpacked(EnvType::Node, "22.0.0", dir.path()).await.is_ok());
     }
 
     #[test]

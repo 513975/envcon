@@ -13,6 +13,24 @@ export function formatSpeed(bytesPerSec: number): string {
 
 export function formatDate(date: string | null | undefined): string {
   if (!date) return "—";
+  // A bare year plus time was previously misparsed by JS as January 1 of that year.
+  if (/^\d{4}\s+\d{1,2}:\d{2}$/.test(date)) return "日期未知";
+  const calendarDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (calendarDate) {
+    const [, year, month, day] = calendarDate;
+    const d = new Date(Number(year), Number(month) - 1, Number(day));
+    if (
+      d.getFullYear() === Number(year) &&
+      d.getMonth() === Number(month) - 1 &&
+      d.getDate() === Number(day)
+    ) {
+      return d.toLocaleDateString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+    }
+  }
   const d = new Date(date);
   if (isNaN(d.getTime())) return date;
   return d.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });

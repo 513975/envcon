@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "PATH-01-j: read-only command-resolution priority check for package-manager entry directories, plus apply_tool_config effect reporting",
+  "status": "implemented-and-isolated-verified; real registry/new-terminal comparison and where.exe cross-check not performed",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.8",
+  "sourceHashes": {
+    "src-tauri/src/pkgtools.rs": "f270662f271f507dc620c369d62e1b5ebf787c8388e81a2fb5eaf5bc50a17d91",
+    "src-tauri/src/commands.rs": "d067dd5f447669bb258bc17d829ebbb7984e3eae21bd5eeb8dc81722abe25a3b",
+    "src-tauri/src/package_managers/native.rs": "0bc8362f3c8412509b23419978660be362628d91e6a753916d74c8986ad5fa5d",
+    "src/pages/PackageManagers.tsx": "c05f97f617346d076332c6296f6915d5f314525c8905f3a3d66ccd0bb252fda5",
+    "ROADMAP.md": "26ac107c138c195d0d7b52c0bc6546d89bc751b1affb68ce2549c13ad8245bce"
+  },
+  "implementation": [
+    "CommandResolution resolves a launcher name through an ordered PATH list without executing it and without writing PATH",
+    "merged_path_entries combines machine PATH before user PATH, matching the order a new process receives, and expands %VAR% references",
+    "unknown %VAR% references are kept verbatim instead of dropping the entry, and quoted entries are unquoted",
+    "relative PATH entries are never treated as a match because the process working directory is unknown",
+    "PATHEXT drives launcher extension candidates, with .COM/.EXE/.BAT/.CMD as the fallback; a literal file name such as pnpm.cmd is not given extra suffixes",
+    "launcher_statuses enumerates at most 12 existing launchers (.exe/.cmd/.bat/.com) in the managed entry directory and resolves each one",
+    "PathIntegrationStatus adds command, resolvedCommand, commandStatus, commandDetail and launchers fields; membership status is unchanged",
+    "apply_tool_config now reports directory membership, the resolved command target, and any launcher inside the managed entry that a path-earlier install shadows",
+    "no launcher is executed; unknown or unreadable registry PATH reports commandStatus=unknown rather than claiming the command works"
+  ],
+  "fixtures": [
+    "pkgtools::tests::command_resolution_detects_shadowed_managed_entry_and_missing_command",
+    "pkgtools::tests::launcher_statuses_report_each_entry_and_skip_shadowed_ones",
+    "pkgtools::tests::registry_path_order_and_variable_expansion_match_a_new_terminal"
+  ],
+  "fixtureCoverage": {
+    "shadowed_by_user_level_install": "a user-level npm directory earlier in PATH wins even though the managed directory is present",
+    "managed_first": "moving the managed directory first changes the result to managed",
+    "missing_command": "an absent launcher resolves to missing with no claim of success",
+    "literal_file_name": "pnpm.cmd is resolved without appending PATHEXT suffixes",
+    "non_launcher_skipped": "readme.txt in the entry directory is not reported as a launcher",
+    "registry_order": "machine entries precede user entries in the merged list",
+    "variable_expansion": "%SystemRoot% is expanded; %ENVCON_UNSET_VAR% is preserved verbatim",
+    "quoted_entry": "quoted PATH entries are unquoted before comparison"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "233 passed / 0 failed / 14 ignored",
+      "date": "2026-10-19"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml pkgtools::tests -- --test-threads=1",
+      "result": "12 passed / 0 failed / 235 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 703ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS",
+      "note": "Run through the globally installed playwright module because node_modules has no local copy; npm run verify was not used this round."
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "exit 0; only pre-existing LF/CRLF conversion warnings"
+    }
+  },
+  "notVerified": [
+    "No comparison against a real registry/new terminal or where.exe on the host",
+    "No real package-manager configuration was written; only temporary fixtures and a simulated UI backend",
+    "Command resolution does not model per-user Windows App Paths registrations, shell aliases, or cmd.exe built-in shadowing",
+    "No real uv recovery, install, uninstall, packaging or release was performed"
+  ],
+  "notes": [
+    "The check is intentionally read-only: failing or ambiguous resolution reports a state instead of mutating PATH",
+    "A managed entry that is first in the merged PATH is reported as managed even when the launcher itself cannot be executed; execution verification remains out of scope"
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "ASMT-04 previewable PATH repair for shadowed commands after switching",
+  "status": "implemented-and-isolated-ui-verified; no real user PATH was written",
+  "owner": "Codex",
+  "targetVersion": "0.5.7-0.5.9",
+  "sourceHashes": {
+    "src-tauri/src/path_ownership.rs": "dc2f763c24df03d672dd2f1468e26b3b3731ea70b533b2b38d61c4ce874f270c",
+    "src-tauri/src/pathman.rs": "c9a852c5972e54e3b434e1a50d2c4e6510622cf10eb35570b4bc786777ee098c",
+    "src-tauri/src/commands.rs": "a45440ad31f54e8ba056d31f3bade53d06172c833b7465859b27893f58e971f7",
+    "src-tauri/src/lib.rs": "d277d105da9dae073447b5df79b97d34b55f85e9d3e3d67bd50a59e995a3eb10",
+    "src/pages/Environments.tsx": "0f3298c880eff1458879a2a3f9485beae9f8ec2a7db170dc1c0531d5b6f1290c",
+    "src/lib/types.ts": "969413ea3499ea24f3c28f7c9ffd4aba92f855f1907a707b2f2d80db011a921a",
+    "src/lib/api.ts": "e5a691bf7738f2e39ca0412b5a4677e3c1a59e0b10175023a253bb046bd7c745",
+    "tests/release-052-ui.mjs": "cb0110e5097b80d681b1117b34d251c833e234a6b4ca445a69d0659c7362619d"
+  },
+  "implementation": [
+    "path_ownership::ReorderPlan binds the exact user PATH text, the managed entry and the shadowing directories",
+    "path_ownership::preview_reorder refuses non-absolute or padded inputs, an entry that is absent or appears more than once, and a conflict that is not actually ahead of the entry",
+    "Change::Reorder recomputes the plan from the live PATH before writing and rejects a stale plan",
+    "the reorder write is additionally checked so the multiset of PATH entries is identical before and after: it can only reorder, never add or remove",
+    "the journal records action=reorder and marks the record pending before writing and verified only after the read-back matches",
+    "commands::preview_path_repair resolves shadowed commands from the merged PATH, requires the managed entry to be present exactly once in the user PATH, and returns mode reorder/manual/none",
+    "manual mode lists the conflicting directory for the user to move by hand instead of inventing an ordering",
+    "the environments page shows a 预览 PATH 修复 action for the current environment, a read-only dialog with entry, conflicts and resulting PATH, and disables 调整顺序 when no plan is bound",
+    "applying reports that nothing was added or removed and that a new terminal is required"
+  ],
+  "fixtures": [
+    "path_ownership::tests::reorder_moves_only_the_managed_entry_and_keeps_every_other_segment",
+    "path_ownership::tests::reorder_rejects_conflicts_that_are_not_ahead_or_not_identified",
+    "path_ownership::tests::reorder_apply_rechecks_the_live_path_and_never_adds_or_removes",
+    "path_ownership::tests::reorder_write_is_verified_before_being_recorded",
+    "commands::tests::path_repair_preview_requires_the_managed_entry_in_the_user_path",
+    "commands::tests::path_repair_preview_reports_nothing_to_fix_without_a_shadowed_command"
+  ],
+  "uiCoverage": {
+    "release-052-ui": "a shadowed LLVM switch degrades to 命令生效待确认; 预览 PATH 修复 opens a read-only dialog, asserts no apply call happened, asserts the bound entry is submitted, then a manual-mode preview keeps 调整顺序 disabled"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "256 passed / 0 failed / 14 ignored"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml reorder -- --test-threads=1",
+      "result": "4 passed / 0 failed / 264 filtered out"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1709 modules transformed; built in 705ms"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors; 1 pre-existing dead_code warning (path_ownership::preview_cleanup)"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    }
+  },
+  "notVerified": [
+    "No real user PATH was reordered; every write test used a fixture store",
+    "No new terminal was opened to confirm the new resolution order",
+    "The UI path was exercised against a simulated backend only",
+    "No packaging, tagging or release"
+  ],
+  "limitations": [
+    "Only ordering is repaired; installing a missing entry or deleting a stale installation remains a user action",
+    "System PATH entries are never reordered, so a shadow from the machine PATH still requires manual handling",
+    "When several managed entries are shadowed at once the preview reports manual mode rather than composing a multi-entry plan"
+  ]
+}

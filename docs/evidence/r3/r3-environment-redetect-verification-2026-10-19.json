@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "scope": "R3 / UNINST-01 item 350: re-detect one environment on demand, instead of refreshing the whole overview after repairing a directory",
+  "status": "implemented-and-isolated-verified; no real user environment touched",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "gapClosed": "Item 350's 重新识别 half had no dedicated entry point. The only way to re-read one environment was to refresh the whole overview, which re-scans all sixteen categories and every entry in them. A user who repaired one broken directory could not ask the narrower and more useful question: is *this* environment healthy now?",
+  "implementation": {
+    "EnvHealth": "New struct { version, status, status_detail } returned by a new env_health(env_type, path, accessible) helper.",
+    "singleSourceOfTruth": "scan_category no longer derives status and status_detail inline; it calls env_health. The per-environment re-detect path calls the same function, so a re-detect can never report a state the full scan would contradict. The mirror assertion in the fixture locks this equality rather than trusting the refactor.",
+    "rescan_category": "REMOVED in the same round. A public wrapper over the category scan existed only long enough for the command to be written; once the command moved to the narrower read below, the wrapper had no production caller and was deleted rather than left as test-only dead API. The fixture was repointed at read_single_env and now also asserts agreement with scan_category.",
+    "narrowRead": "read_env_entry/read_single_env extract the per-row builder (skip rule, structure, version, current-link comparison, link flags) out of scan_category. Both the category scan and the single re-detect go through it, with current_link() supplying the same junction observation to both. A re-detect therefore reads one directory instead of every sibling, while the fixture proves the two paths agree on status, status_detail, version, is_current and path.",
+    "command": "redetect_environment(state, env_type, name) validates the name with the existing switcher::validate_name (so a name can never escape the managed directory), requires a configured root, reads only the named directory, and returns it. A name that is not an environment yields a clear error instead of an empty result; hidden and .tmp- entries stay skipped by the shared rule.",
+    "readOnly": "Nothing is created, moved, switched or deleted. Version probing runs the same CLI commands the scan already ran.",
+    "ui": "A per-row 重新检测 button calls the command, reports 通过 with the version on success, and on failure reports 仍未恢复 with the status detail rather than claiming success. It then reloads the overview so the row reflects the new state."
+  },
+  "fixtures": [
+    {
+      "name": "detect::tests::rescan_reports_the_named_missing_entry_and_matches_the_full_scan",
+      "asserts": [
+        "a directory missing node.exe is reported broken with a status detail naming node.exe",
+        "after writing node.exe the next re-read drops the structural reason and reports a probe failure instead, proving the re-read does not cache the old verdict",
+        "env_health and the category scan agree exactly on status, status_detail and version"
+      ]
+    },
+    {
+      "name": "release-052-ui.mjs re-detect assertions",
+      "asserts": [
+        "clicking 重新检测 jdk-owned calls redetect_environment exactly once with { envType: jdk, name: jdk-owned }, so the button targets the clicked row and not a neighbour",
+        "a successful re-detect shows 通过 with the version",
+        "a still-broken re-detect on jdk-linked shows 仍未恢复 with the probe reason",
+        "a still-broken re-detect never renders the 通过 text (the assertion is made against the same row's name, so a stale toast cannot satisfy it)"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "297 passed / 0 failed / 14 ignored",
+      "note": "run standalone so the exit code is cargo test's own"
+    },
+    "targeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml detect::tests -- --test-threads=1",
+      "result": "3 passed"
+    },
+    "check": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors, 0 warnings"
+    },
+    "typescript": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "all nine suites PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "exit 0, CRLF notices only"
+    }
+  },
+  "sourceHashes": {
+    "src-tauri/src/detect/mod.rs": "994372cbfe8bafafce89bdba7e54fbb9b48cbb8256b59f0ca208b75d838b0828",
+    "src-tauri/src/detect/probe.rs": "9194211e3c84a49ee3da4a14d10bd6e1562d0351db9d73940d4a92f9e733cdeb",
+    "src-tauri/src/commands.rs": "1beeeedb8cbf84a00ec1f21693b630aabd54ba47520e05480a94c93250c91ae1",
+    "src-tauri/src/lib.rs": "6713319946dd9a81078fa7845d7433f41c3cf9c48d6995a30996a5a00caadf29",
+    "src/lib/types.ts": "49b8b0cc91890e5ed513fae13cc9add6bc2e38626aa82695ac86f69b4e4af15d",
+    "src/lib/api.ts": "89828eeee8c440a5702d04b09b726ea683729fda7dae9c31078d2e9f1a173e3e",
+    "src/pages/Environments.tsx": "0b0ea40ad983683993f599954f0604852a6fbe2d595fb6c8e9796aed0c67c1c4",
+    "tests/release-052-ui.mjs": "f661e4b66759719ccf84749d257546a90132b72a525b3b985cd57208a54704f6"
+  },
+  "processNote": "Two self-inflicted edits during this round joined a function signature onto its first body line (scan_category, then build_manifest) because an old_string ended in a newline the replacement did not reproduce. Both were caught by reading the file immediately afterwards and repaired; cargo check was re-run after each repair and stayed at 0 errors. Recorded because a green result does not excuse the near-miss.",
+  "notVerified": [
+    "No real repaired installation was re-detected; both fixtures synthesize the repair by writing a placeholder file",
+    "The UI path never invoked the real backend: the command is mocked, so the wire format is asserted but not exercised end to end",
+    "No measurement was taken of how much a single re-detect actually saves over a full overview refresh"
+  ],
+  "limitations": [
+    "Re-detect now reads only the named directory, but still resolves the category's current junction once per call (one read_link plus one canonicalize) and runs the same version probe the scan would",
+    "The button reports through toasts; a still-broken environment does not update an inline status in place beyond the overview reload",
+    "Item 350 stays unchecked: corrupted plain directories still have no repair action, and six environment types still report no structured probe reason",
+    "No packaging, tagging or release"
+  ]
+}
