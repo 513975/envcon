@@ -1,0 +1,73 @@
+{
+  "id": "imp05-package-query-state-classification",
+  "title": "IMP-05 包查询的状态分类：node 四态与 pip 直接来源",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "各管理器使用隔离夹具验证查询、更新、重装、卸载和失败恢复；在线与离线测试分开。",
+  "background": {
+    "gap": "`node_rows` 把每个依赖分成四种可观察状态（正常 / 缺少安装文件 / 版本与声明不一致 / 本地链接），每种都对应一条给用户看的 `detail`。既有夹具 `structured_lists_preserve_missing_packages_and_pip_locations` 只覆盖了 `missing` 一种，其余三种一旦回归（例如 `invalid: false` 被误判为「不一致」）不会有任何测试失败。`pip_rows` 的 `direct_url`（本地/VCS 直接安装）与 `editable_project_location` 回退同样没有夹具。",
+    "whyItMatters": "这些 `detail` 是「这个包为什么显示异常」的唯一解释来源。误判会让用户看到不存在的冲突，漏判会让真实缺失静默通过——两者都比不显示更糟。"
+  },
+  "implementation": {
+    "production": "无源码改动——分类逻辑已正确。补的是把每种状态与回退路径锁住。",
+    "fixtures": [
+      "node_rows_classifies_every_dependency_state_and_never_invents_one",
+      "pip_rows_flags_direct_sources_and_keeps_plain_packages_clean"
+    ]
+  },
+  "fixtures": [
+    {
+      "name": "node_rows_classifies_every_dependency_state_and_never_invents_one",
+      "asserts": [
+        "正常安装不带 detail（不能凭空产生警告）",
+        "`missing: true` → 「缺少安装文件」",
+        "`invalid: \"1.9.0\"` → 「版本与声明不一致」",
+        "`link: true` → 「本地链接」",
+        "`invalid: false` 是 npm 表示「校验通过」的写法，**不能**被当成不一致",
+        "路径优先取依赖自身的 `path`",
+        "无自身路径时回退到「项目根/node_modules/包名」",
+        "同一包同时出现在 dependencies 与 devDependencies 时按 (name, path) 去重为一行"
+      ]
+    },
+    {
+      "name": "pip_rows_flags_direct_sources_and_keeps_plain_packages_clean",
+      "asserts": [
+        "普通包不带 detail",
+        "`direct_url` 存在 → 「本地或直接来源」",
+        "非 inspect 模式直接读顶层数组",
+        "editable 安装回退到 `editable_project_location`",
+        "缺包名时报错，而不是产出一行无名记录"
+      ]
+    }
+  ],
+  "verification": {
+    "targetModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml packages::tests -- --test-threads=1",
+      "result": "9 passed / 0 failed / 1 ignored"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "319 passed / 0 failed / 14 ignored"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/packages.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": ["src-tauri/src/packages.rs"],
+  "notVerified": [
+    "未执行任何真实包管理器；`actual_managers_return_readable_lists` 仍是 ignored，需要 ENVCON_TEST_ROOT 与已安装的 npm/pnpm/yarn/pip。",
+    "未验证这些 JSON 形状与各管理器真实输出的对应关系——夹具用的是构造的 JSON，形状取自代码假设而非实测样本。",
+    "重装、卸载、失败恢复三个维度仍无 per-manager 夹具。"
+  ],
+  "limitations": [
+    "夹具锁定的是**当前**的 JSON 字段约定；若某管理器改变输出格式，夹具不会发现，只有真实运行才会暴露。",
+    "去重按 (name, path) 判定，同名不同路径会保留两行——这是刻意的，因为那确实是两个安装。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "纯函数夹具，只解析内存中的 JSON，不启动进程、不读写用户目录。"
+  }
+}

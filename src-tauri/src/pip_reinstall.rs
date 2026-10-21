@@ -414,6 +414,14 @@ pub async fn start(plan: Plan, names: Vec<String>) -> Result<()> {
             let message = error.to_string();
             let _ = update(|t| {
                 t.status = "error".into();
+                // A mid-run failure leaves items at `pending`/`installing`, and
+                // the UI renders every item unconditionally: without this the
+                // list would show "重装失败" in the header while some packages
+                // still read "安装中" or "等待".
+                crate::package_managers::settle_unfinished_items(
+                    &mut t.items,
+                    "重装中断，该包未完成安装",
+                );
                 t.message = message;
             });
         }
@@ -927,5 +935,101 @@ with zipfile.ZipFile(sys.argv[1], 'w') as z:
             .reason
             .is_some());
         println!("pip: old fixture removed, interpreter/pip/new fixture retained; detached directory rejected");
+    }
+
+    /// `index_pin` 决定一个「包名 + 版本」能否被拼成 `name==version` 交给 pip。
+    /// 它同时承担两个职责：拒绝选项注入（`--index-url`）与拒绝换行注入
+    /// （把额外参数塞进版本字符串）。既有夹具只有 3 条断言，边界完全没有锁定。
+    #[test]
+    fn index_pin_accepts_only_an_alphanumeric_name_and_a_numeric_version() {
+        // 正常包名与版本：下划线、点、连字符都在允许集内。
+        assert!(index_pin("requests", "2.31.0"));
+        assert!(index_pin("my_package", "1.0"));
+        assert!(index_pin("zope.interface", "5.0"));
+        assert!(index_pin("a-b-c", "1!2.0+cpu"));
+        assert!(index_pin("x", "0"));
+        // PEP 440 的后缀形式。
+        assert!(index_pin("pkg", "1.0.0rc1"));
+        assert!(index_pin("pkg", "1.0.post1"));
+
+        // 选项注入：首字符不是字母数字就整条拒绝，否则 pip 会把它当参数。
+        assert!(!index_pin("--index-url", "1"));
+        assert!(!index_pin("-pkg", "1"));
+        assert!(!index_pin(".pkg", "1"));
+        // 尾字符同样不能是分隔符。
+        assert!(!index_pin("pkg-", "1"));
+        assert!(!index_pin("pkg.", "1"));
+
+        // 换行 / 回车 / 空格 / 路径分隔符都不在允许集内。
+        assert!(!index_pin("foo", "1\n--extra-index-url evil"));
+        assert!(!index_pin("foo", "1\r2"));
+        assert!(!index_pin("pkg name", "1"));
+        assert!(!index_pin("pkg/name", "1"));
+        assert!(!index_pin("pkg\\name", "1"));
+
+        // 版本必须以数字开头，否则 `name==abc` 不是合法要求。
+        assert!(!index_pin("pkg", "abc"));
+        assert!(!index_pin("pkg", "v1.0"));
+        // 版本里不允许出现 `=`：`1==2` 会改写整个要求。
+        assert!(!index_pin("pkg", "1==2"));
+
+        // 空值与超长值都被拒绝（200 是两端共享的上限）。
+        assert!(!index_pin("", "1"));
+        assert!(!index_pin("pkg", ""));
+        assert!(!index_pin(&"a".repeat(201), "1"));
+        assert!(!index_pin("pkg", &"1".repeat(201)));
+        // 恰好 200 是允许的（边界包含）。
+        assert!(index_pin(&"a".repeat(200), "1"));
+        assert!(index_pin("pkg", &format!("1{}", "0".repeat(199))));
+    }
+
+    /// `normalize` 是「同名包」的判定基础：`a_b`、`a-b`、`a.b` 在 PEP 503 下
+    /// 是同一个发行版。判错会让两个不同的包被误认为冲突，或让真正的重复漏过。
+    #[test]
+    fn normalize_collapses_pep503_separators_and_flags_duplicates() {
+        assert_eq!(normalize("A_B"), "a-b");
+        assert_eq!(normalize("a-b"), "a-b");
+        assert_eq!(normalize("a.b"), "a-b");
+        // 连续分隔符折叠成一个，空段被丢弃。
+        assert_eq!(normalize("a__b"), "a-b");
+        assert_eq!(normalize("a.-b"), "a-b");
+
+        // 三个名字归一后相同 → 第二、三份都被标为「同名多份元数据」。
+        let rows = packages(vec![
+            RawPackage { name: "a_b".into(), version: "1".into(), direct: false },
+            RawPackage { name: "a-b".into(), version: "2".into(), direct: false },
+            RawPackage { name: "a.b".into(), version: "3".into(), direct: false },
+        ]);
+        // 只保留一份（首份），但它的 reason 被改成冲突说明。
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].reason.as_deref(),
+            Some("同名包有多份元数据，请先处理源环境冲突")
+        );
+
+        // 构建工具不复制旧版本：它们由新环境自己维护。
+        let build = packages(vec![
+            RawPackage { name: "pip".into(), version: "25.0".into(), direct: false },
+            RawPackage { name: "setuptools".into(), version: "70.0".into(), direct: false },
+            RawPackage { name: "wheel".into(), version: "0.43".into(), direct: false },
+        ]);
+        assert_eq!(build.len(), 3);
+        for row in &build {
+            assert_eq!(
+                row.reason.as_deref(),
+                Some("构建工具由新环境维护，不复制旧版本"),
+                "{}",
+                row.name
+            );
+        }
+
+        // 可复制的包 reason 为空；结果按归一化名排序，便于稳定展示。
+        let clean = packages(vec![
+            RawPackage { name: "Zebra".into(), version: "1".into(), direct: false },
+            RawPackage { name: "alpha".into(), version: "2".into(), direct: false },
+        ]);
+        assert!(clean.iter().all(|p| p.reason.is_none()));
+        assert_eq!(clean[0].name, "alpha");
+        assert_eq!(clean[1].name, "Zebra");
     }
 }

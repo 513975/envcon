@@ -405,6 +405,69 @@ mod tests {
     }
 
     #[test]
+    fn version_token_rejects_non_versions_and_strips_only_trailing_punctuation() {
+        // A bare integer is not a version. Years and build counters appear all
+        // over tool output; accepting them would report "2026" as a version.
+        assert_eq!(version_token("1"), None);
+        assert_eq!(version_token("2026"), None);
+        assert_eq!(version_token("no digits here"), None);
+        assert_eq!(version_token(""), None);
+
+        // Scanning starts at the first digit, so a `v` prefix is dropped
+        // implicitly rather than needing a special case.
+        assert_eq!(version_token("v24.17.0"), Some("24.17.0".into()));
+
+        // Trailing separators are trimmed; interior ones are kept because they
+        // are part of the version (e.g. 20.1.0.windows.1).
+        assert_eq!(version_token("1.2.3."), Some("1.2.3".into()));
+        assert_eq!(version_token("1.2.3-"), Some("1.2.3".into()));
+        assert_eq!(version_token("1.2.3+"), Some("1.2.3".into()));
+
+        // Surrounding quotes, brackets and commas are stripped before scanning.
+        assert_eq!(version_token("(21.0.4)"), Some("21.0.4".into()));
+        assert_eq!(version_token("\"21.0.4\""), Some("21.0.4".into()));
+        assert_eq!(version_token("[21.0.4],"), Some("21.0.4".into()));
+
+        // Leading zeros are preserved verbatim: normalising them would invent a
+        // value the tool never printed.
+        assert_eq!(version_token("01.02.03"), Some("01.02.03".into()));
+
+        // Alphanumerics inside a version token are kept (nightly/build suffixes).
+        assert_eq!(version_token("a1.b2"), Some("1.b2".into()));
+        assert_eq!(version_token("1.2.3-rc1"), Some("1.2.3-rc1".into()));
+
+        // The first acceptable token wins; earlier rejected tokens are skipped.
+        assert_eq!(version_token("2026 1.2.3"), Some("1.2.3".into()));
+        assert_eq!(version_token("abc 1.2.3 def"), Some("1.2.3".into()));
+        // A token with only one dot boundary is still a version (major.minor).
+        assert_eq!(version_token("1.2"), Some("1.2".into()));
+    }
+
+    #[test]
+    fn strip_word_prefix_requires_a_space_then_a_digit() {
+        // The normal shape: "word <digits>".
+        assert_eq!(super::strip_word_prefix("deno 2.1.0", "deno"), Some("2.1.0"));
+        assert_eq!(super::strip_word_prefix("bun 1.1.30", "bun"), Some("1.1.30"));
+
+        // No separating space means the word is part of a longer name, not a
+        // prefix label; stripping it would corrupt the value.
+        assert_eq!(super::strip_word_prefix("deno2.1.0", "deno"), None);
+
+        // A space followed by a non-digit is prose, not a version.
+        assert_eq!(super::strip_word_prefix("deno beta", "deno"), None);
+        // Two spaces put a space (not a digit) in the decisive position. This
+        // is deliberately conservative: the caller falls back to the full line.
+        assert_eq!(super::strip_word_prefix("deno  2.1.0", "deno"), None);
+
+        // Matching is case-sensitive and exact, so a different spelling is not
+        // silently treated as the same word.
+        assert_eq!(super::strip_word_prefix("Deno 2.1.0", "deno"), None);
+
+        // The word alone has nothing to strip.
+        assert_eq!(super::strip_word_prefix("deno", "deno"), None);
+    }
+
+    #[test]
     fn handles_go_version_file_with_metadata_lines() {
         let version_file = "go1.24.0\ntime 2025-02-11T00:00:00Z\n";
         let version = version_file.lines().map(str::trim).find(|line| !line.is_empty())
@@ -466,5 +529,43 @@ mod tests {
             super::probe_version(crate::types::EnvType::Node, empty.path()).await,
             None
         );
+    }
+
+    /// `snippet` is the only part of a probe failure the user actually reads,
+    /// so its shape is a product decision, not an implementation detail: one
+    /// line, bounded length, and never an empty string standing in for "the
+    /// command said nothing".
+    #[test]
+    fn snippet_flattens_bounds_and_never_returns_an_empty_reason() {
+        // Multi-line output collapses to one line: a raw stderr dump would
+        // push the surrounding message out of view.
+        assert_eq!(super::snippet("line one\nline two\n\nline three"), "line one line two line three");
+        // Windows line endings and runs of blanks behave the same way.
+        assert_eq!(super::snippet("a\r\n\tb   c"), "a b c");
+
+        // No output is reported as a fact, not as an empty string: an empty
+        // reason would read as "no error".
+        assert_eq!(super::snippet(""), "命令没有输出");
+        assert_eq!(super::snippet("   \n\t  "), "命令没有输出");
+
+        // Short text is preserved verbatim after flattening.
+        assert_eq!(super::snippet("error: not found"), "error: not found");
+
+        // The 120-character boundary is inclusive: exactly 120 is kept whole,
+        // 121 is cut. Off-by-one here would silently truncate valid messages.
+        let exactly = "a".repeat(120);
+        assert_eq!(super::snippet(&exactly), exactly);
+        let over = "a".repeat(121);
+        let bounded = super::snippet(&over);
+        assert!(bounded.ends_with('…'), "truncation must be visible: {bounded}");
+        assert_eq!(bounded.chars().count(), 121, "120 chars plus the ellipsis");
+
+        // Truncation counts characters, not bytes: a multi-byte message must
+        // not be cut mid-character (which would panic on the slice boundary).
+        let wide = "版".repeat(130);
+        let bounded = super::snippet(&wide);
+        assert!(bounded.ends_with('…'));
+        assert_eq!(bounded.chars().count(), 121);
+        assert!(bounded.chars().take(120).all(|c| c == '版'));
     }
 }

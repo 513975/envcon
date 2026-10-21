@@ -1,0 +1,111 @@
+{
+  "id": "imp07-config-history",
+  "title": "IMP-07 文件配置历史、回滚与损坏拒绝",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.7",
+  "relatedRoadmapItem": "提供配置历史、回滚和损坏恢复；注册表与第三方管理器写入使用适合各自机制的备份和恢复，不冒充文件原子写入。",
+  "background": {
+    "previousState": "只有一级 config.previous.json。它在下一次保存时被覆盖，因此再往前保存两次就无从回溯；用户没有入口查看或回到更早的状态。",
+    "gap": "缺少可累积的历史、按时间回滚的入口，以及历史文件损坏时的拒绝路径。"
+  },
+  "implementation": {
+    "storage": {
+      "directory": "<data_dir>/config-history/",
+      "naming": "config-<unix_nanos>-<pid>.json",
+      "retention": 20,
+      "rationale": "文件名里的纳秒时间戳为定长 19 位，因此按文件名字典序排序等价于按时间排序，无需解析文件名即可裁剪。"
+    },
+    "archiveOnSave": "save() 在原子替换主配置之前，把上一份已校验通过的字节归档到历史目录，并裁剪到 20 份。归档失败不阻断保存：历史是附加价值，不是保存的前提。",
+    "restore": "restore_history() 先锁写入、复查文件未被外部改动，再用 parse_settings 校验历史文件；校验通过才原子替换主配置，并把被替换的当前配置另存为 config.before-history-restore-<nanos>-<pid>.json，使回滚本身可撤回。",
+    "commands": [
+      {
+        "name": "list_config_history",
+        "returns": "ConfigHistoryInfo[] (file, stamp)，新到旧"
+      },
+      {
+        "name": "restore_config_history",
+        "guard": "只接受位于 config-history 目录内且扩展名为 .json 的路径；入参由用户提供，不能指向任意文件。"
+      }
+    ],
+    "ui": "设置页「配置保护与恢复」卡片下新增「配置历史（最近 N 份）」区，逐项显示本地时间与「回滚」按钮，回滚前弹确认对话框并说明当前配置会先另存。"
+  },
+  "defectFoundAndFixed": {
+    "symptom": "首次接入时 load() 里直接 await api.listConfigHistory()，历史列表读取失败会让整个 load() 进入 catch，设置页只显示「加载设置失败」。",
+    "trigger": "tests/settings-ui.mjs 的 mock 未提供 list_config_history，返回 undefined，导致页面无法渲染主设置卡片。",
+    "fix": "把历史读取降级为独立的 try/catch，失败时置为空列表。历史是可选的附加功能，不应让用户因此看不到管理根目录等主设置。",
+    "whyItMatters": "这不仅是测试 mock 的问题：任何一次历史目录不可读都会在生产中造成同样的页面失效。"
+  },
+  "fixtures": [
+    {
+      "name": "history_accumulates_and_lists_newest_first",
+      "asserts": "两次保存后历史有 2 份且新在前；一级备份保留最近一次，历史目录包含更早的状态。"
+    },
+    {
+      "name": "history_is_pruned_to_the_retention_limit",
+      "asserts": "保存 HISTORY_LIMIT+3 次后历史恰为 HISTORY_LIMIT 份，最旧一份已滚出窗口。"
+    },
+    {
+      "name": "restore_history_returns_an_earlier_state_and_preserves_the_displaced_file",
+      "asserts": "回滚后设置与磁盘文件都回到更早状态；被替换的当前配置保留为 config.before-history-restore-*。"
+    },
+    {
+      "name": "restore_history_rejects_a_file_that_would_break_the_config",
+      "asserts": "损坏的历史文件被拒绝，主配置与内存设置保持不变，write_blocked 不被置位。"
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "304 passed / 0 failed / 14 ignored"
+    },
+    "configModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml config::tests -- --test-threads=1",
+      "result": "10 passed / 0 failed（含 4 项新增历史夹具）"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "九套全部 PASS"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1710 modules transformed, built in 785ms"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/config.rs",
+    "src-tauri/src/commands.rs",
+    "src-tauri/src/lib.rs",
+    "src/lib/api.ts",
+    "src/pages/Settings.tsx"
+  ],
+  "notVerified": [
+    "注册表与第三方管理器写入的备份与恢复完全未实现——该条因此保持未勾选。",
+    "未在真实 %APPDATA%\\envcon 数据目录上执行回滚；全部夹具使用临时目录。",
+    "未验证 20 份上限在多进程并发保存下的精确性（每次保存各持锁，但裁剪与归档不是同一事务）。",
+    "未测试磁盘满、权限拒绝时归档失败的降级行为（代码路径存在但无夹具）。",
+    "UI 断言只覆盖设置页原有流程；「配置历史」区与回滚对话框尚无专门的 UI 断言。"
+  ],
+  "limitations": [
+    "归档按保存次数计，不按时间窗口；高频保存会较快耗尽 20 份窗口。",
+    "历史文件与主配置同级存放，用户手动清理数据目录时会一并删除。",
+    "回滚只作用于应用设置（根目录、下载目录、镜像偏好），不移动环境文件、不修改系统 PATH。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "全部读写发生在 crate::test_support::TestDir 提供的临时目录；未触碰真实 %APPDATA%\\envcon、注册表或 PATH。"
+  }
+}

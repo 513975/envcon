@@ -11,6 +11,7 @@ try {
   await page.addInitScript(() => {
     window.sizeTasks = [];
     window.sizeStarts = [];
+    window.sizeAbandons = [];
     window.__TAURI_INTERNALS__ = { transformCallback: () => 1, invoke: async (name, args) => {
       if (name === "query_scan") {
         if (args.cachedOnly) return null;
@@ -29,6 +30,14 @@ try {
       if (name === "cancel_size_scan") {
         const task = window.sizeTasks.find(t => t.id === args.id);
         task.status = "canceled"; task.detail = "已取消，显示已读取部分的大小";
+        return null;
+      }
+      if (name === "abandon_size_scan") {
+        // 放弃是移除记录，而不是把状态改成 canceled：卡住的任务永远不会自己
+        // 走到终态，只有移除才能让统计能力恢复。
+        window.sizeAbandons.push(args.id);
+        const index = window.sizeTasks.findIndex(t => t.id === args.id);
+        if (index >= 0) window.sizeTasks.splice(index, 1);
         return null;
       }
       if (name === "get_settings") return { configWarning: null };
@@ -61,6 +70,19 @@ try {
   await page.getByRole("button", { name: "统计 npm 大小", exact: true }).click();
   assert.equal(await page.evaluate(() => window.sizeStarts.length), 3);
   await page.getByRole("button", { name: "取消大小统计", exact: true }).filter({ visible: true }).click();
+  // 放弃：卡住的任务取消无效，必须能移除记录让统计恢复。
+  await page.getByRole("button", { name: "统计 npm 大小", exact: true }).click();
+  // 两个按钮必须并存——取消是「尽快停并保留部分结果」，放弃是「移除卡住记录」，
+  // 语义不同，不能互相替代。
+  assert.equal(await page.getByRole("button", { name: "取消大小统计", exact: true }).filter({ visible: true }).count() > 0, true);
+  const abandonButton = page.getByRole("button", { name: "放弃大小统计", exact: true }).filter({ visible: true });
+  assert.equal(await abandonButton.count() > 0, true);
+  assert.equal(await abandonButton.getAttribute("title"), "放弃这个卡住的任务（取消无效时使用）");
+  await abandonButton.click();
+  assert.equal(await page.evaluate(() => window.sizeAbandons.length), 1);
+  // 记录被移除后统计按钮恢复可用，否则用户会永久失去统计能力。
+  assert.equal(await page.getByRole("button", { name: "统计 npm 大小", exact: true }).isDisabled(), false);
+  assert.equal(await page.getByRole("button", { name: "放弃大小统计", exact: true }).count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS: on-demand sizes, bounded work, navigation retention, cancellation, partial diagnostics, cache sizing and narrow layout");
+  console.log("PASS: on-demand sizes, bounded work, navigation retention, cancellation, abandon-a-stuck-task, partial diagnostics, cache sizing and narrow layout");
 } finally { await browser.close(); }

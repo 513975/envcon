@@ -1,0 +1,91 @@
+{
+  "id": "imp06-abandon-stuck-size-task",
+  "title": "IMP-06 卡住的大小统计：从协作取消到可放弃",
+  "date": "2026-10-21",
+  "status": "implemented",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "统一扫描、安装、迁移、更新和删除的任务状态、阶段、取消、日志与后台恢复入口。",
+  "defect": {
+    "symptom": "大小统计一旦卡住，用户点「取消」也没有用：该任务永久停在「统计中」，所有统计按钮被禁用，只能重启应用。",
+    "rootCause": "`SizeTasks::cancel` 是**协作式**的：它只设置 `AtomicBool`，由 `measure` 在循环边界检查。但 `measure` 内的 `read_dir` / `symlink_metadata` 都是**同步阻塞调用**——在网络盘、云占位符或响应极慢的卷上，单次调用可能长时间不返回，`measure` 走不到检查点。任务于是停在 `running`，而 `start` 的互斥检查会一直返回「已有大小统计正在进行」，前端 `anyRunning` 也会禁用全部按钮。",
+    "whyItMatters": "这是唯一一个用户**无法自行恢复**的失效模式：其他模块的失败都能重试或重新预览，这里只能重启应用。",
+    "howFound": "在排查「任务级与条目级状态矛盾」时逐个模块核对，确认 install/package_scan/old_packages/uv_recovery 均不适用后，读 `size_tasks` 的 `cancel` 与 `measure` 发现取消不可抢占。"
+  },
+  "fix": {
+    "newMethod": "`SizeTasks::abandon(id)`：把记录从表中移除，让新统计可以开始。",
+    "distinction": "`cancel` 请求任务**尽快停止并保留部分结果**；`abandon` 放弃**卡住的记录**，使统计能力恢复。两者语义不同，因此不是给 `cancel` 加参数，而是独立方法。",
+    "alsoSignalsWorker": "`abandon` 同时设置 `cancel` 标志：对只是「慢」而非真正卡死的任务，工作线程会在下一个检查点停止，不会在无人观察的情况下跑完。",
+    "guards": [
+      "只允许放弃 `status == \"running\"` 的任务——已结束的任务不是卡住，而是已有结论",
+      "不存在的 id 报错而非静默成功"
+    ],
+    "staleResultSafety": "被放弃任务的线程完成时会发现记录已不存在（`if let Some(task)`），因此不会写回陈旧结果。",
+    "command": "`abandon_size_scan` 注册进 `lib.rs`；前端在「统计中」状态下同时显示取消与放弃两个按钮，放弃按钮的 title 注明「取消无效时使用」。"
+  },
+  "fixtures": [
+    {
+      "name": "abandon_releases_a_stuck_running_task_and_only_running_ones",
+      "asserts": [
+        "卡住的 running 任务确实阻塞新统计（先验证前提成立）",
+        "abandon 后记录被移除（`snapshots()` 为空）",
+        "abandon 同时给工作线程发出停止信号",
+        "统计能力恢复：同一路径可以重新 start",
+        "已结束（done）的任务不能被放弃，且错误信息说明「仍在运行」",
+        "已结束的记录必须保留",
+        "不存在的 id 报错"
+      ]
+    }
+  ],
+  "verification": {
+    "targetModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml size_tasks::tests -- --test-threads=1",
+      "result": "5 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "325 passed / 0 failed / 14 ignored"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1710 modules, built in 760ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "九套全部 PASS"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/size_tasks.rs",
+    "src-tauri/src/commands.rs",
+    "src-tauri/src/lib.rs",
+    "src/lib/api.ts",
+    "src/components/DirectorySize.tsx"
+  ],
+  "notVerified": [
+    "未在真实卡住的场景下验证（网络盘、云占位符）——夹具直接构造 `running` 记录，不触发真实阻塞 IO。",
+    "未验证被放弃的后台线程确实在下一个检查点退出（夹具只断言标志被设置，不等待线程）。",
+    "未覆盖「abandon 后原线程仍持有文件句柄」的情形。"
+  ],
+  "limitations": [
+    "`abandon` 不保证后台线程已停止，只保证用户重新获得统计能力；该线程仍会占用 IO 直到自己返回。",
+    "放弃是**不可逆**的：被移除的记录连同其部分结果一并消失，报告文件若已写出仍留在磁盘上。",
+    "前端只在 `running` 状态显示放弃按钮，因此已结束的任务无法误触。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "夹具在临时目录内构造任务记录；未触发真实阻塞 IO，未读写用户数据目录。"
+  }
+}

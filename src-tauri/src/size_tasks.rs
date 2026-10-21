@@ -54,6 +54,31 @@ impl SizeTasks {
         Ok(())
     }
 
+    /// 放弃一个卡住的任务记录。
+    ///
+    /// `cancel` 是**协作式**的：它设置标志，由 `measure` 在循环边界检查。但
+    /// `measure` 里的 `read_dir` / `symlink_metadata` 都是同步阻塞调用——在网络
+    /// 盘或云占位符上，单次调用可能长时间不返回，于是 `measure` 走不到检查点，
+    /// 任务永久停在 `running`。而 `start` 的互斥检查会一直拒绝新统计，前端也会
+    /// 因为 `anyRunning` 禁用所有按钮：用户点了取消也没有用，只能重启应用。
+    ///
+    /// `abandon` 把记录从表中移除，让新的统计可以开始。它**不保证**后台线程已经
+    /// 停止——那个线程完成时会发现记录已不存在而什么都不做（`if let Some(task)`），
+    /// 因此不会写回陈旧结果；但它仍会继续占用 IO 直到自己返回。这是明确的取舍：
+    /// 与其让用户永久失去统计能力，不如允许他开始新任务。
+    pub fn abandon(&self, id: u64) -> Result<()> {
+        let mut tasks = self.tasks.lock().unwrap();
+        let task = tasks.get(&id).ok_or_else(|| AppError::msg("大小统计任务不存在"))?;
+        if task.snapshot.status != "running" {
+            return Err(AppError::msg("只能放弃仍在运行的任务"));
+        }
+        // Signal the worker too, so a task that is merely slow (not stuck) stops
+        // at its next checkpoint instead of running to completion unobserved.
+        task.cancel.store(true, Ordering::Relaxed);
+        tasks.remove(&id);
+        Ok(())
+    }
+
     pub fn start(&self, key: String, path: PathBuf) -> Result<u64> {
         let identity = path.canonicalize()?;
         if !identity.is_dir() { return Err(AppError::msg("统计目标不是目录")); }
@@ -186,6 +211,53 @@ mod tests {
         tasks.tasks.lock().unwrap().get_mut(&0).unwrap().snapshot.status = "canceled".into();
         tasks.invalidate();
         assert!(tasks.snapshots().is_empty());
+    }
+
+    /// `cancel` 是协作式的：卡在同步 IO 上的任务走不到检查点，会永久停在
+    /// `running`。此时 `start` 的互斥检查会一直拒绝新统计，前端 `anyRunning`
+    /// 也会禁用所有按钮——用户点了取消也没用。`abandon` 移除记录，让统计能力
+    /// 恢复。
+    #[tokio::test]
+    async fn abandon_releases_a_stuck_running_task_and_only_running_ones() {
+        let dir = crate::test_support::TestDir::new();
+        let tasks = SizeTasks::default();
+        let mut stuck = initial();
+        stuck.path = dir.path().to_string_lossy().into();
+        let cancel = Arc::new(AtomicBool::new(false));
+        tasks
+            .tasks
+            .lock()
+            .unwrap()
+            .insert(0, Task { snapshot: stuck, cancel: cancel.clone() });
+
+        // 卡住的 running 任务会阻塞新统计。
+        assert!(tasks.start("other".into(), dir.path().into()).is_err());
+
+        tasks.abandon(0).unwrap();
+        // 记录被移除，且工作线程收到停止信号（慢任务在下一个检查点退出）。
+        assert!(tasks.snapshots().is_empty());
+        assert!(
+            cancel.load(Ordering::Relaxed),
+            "abandon must also signal the worker so a merely-slow task stops"
+        );
+        // 统计能力恢复。
+        assert!(tasks.start("other".into(), dir.path().into()).is_ok());
+
+        // 已结束的任务不能被「放弃」：那不是卡住，而是已有结论。
+        tasks
+            .tasks
+            .lock()
+            .unwrap()
+            .get_mut(&1)
+            .unwrap()
+            .snapshot
+            .status = "done".into();
+        let error = tasks.abandon(1).unwrap_err().to_string();
+        assert!(error.contains("仍在运行"), "unexpected: {error}");
+        assert_eq!(tasks.snapshots().len(), 1, "已结束的记录必须保留");
+
+        // 不存在的 id 报错而不是静默成功。
+        assert!(tasks.abandon(999).is_err());
     }
 
     #[tokio::test]

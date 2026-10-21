@@ -1,0 +1,87 @@
+{
+  "id": "imp08-update-execution-precheck",
+  "title": "IMP-08 更新执行前复核：拒绝过期预览",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "为删除、迁移和更新统一影响范围预览及执行前复核，覆盖预览后路径变化。",
+  "background": {
+    "previousState": "卸载（`uninstall_environment`）与迁移（`migration::execute`）都以 `expected_preview` 绑定执行：预览与执行之间环境变化时拒绝执行。更新侧没有这一层——`update_package_manager` 只接收工具名，执行器自己重新解析命令后直接运行。",
+    "gap": "用户确认的是一条具体命令作用于一个具体安装。预览之后若可执行文件换了、版本变了、参数集变了，旧实现仍会执行，而用户看到的与真正运行的可能不是同一件事。"
+  },
+  "implementation": {
+    "previewComparable": "`PackageManagerUpdatePreview` 与 `pkgtools::UpdateCapabilities` 增加 `Debug, Clone, PartialEq, Eq, Deserialize`，使预览可被比较、也可作为命令入参接收。",
+    "guard": "新增 `validate_update_execution_preview(expected, current)`：先检查当前是否已被阻断（阻断则报出具体原因，而非泛化的「预览已变化」），再整体比较两个预览。",
+    "executor": "`update_package_manager_inner` 增加 `expected: Option<&PackageManagerUpdatePreview>`。当有期望值时，用**本次真正要用的值**（解析到的程序、读到的版本、即将运行的 updater 与参数）重新调用 `package_manager_update_preview` 构建同一结构并比对。",
+    "whyRecompute": "比对的是重新计算出的结构，而不是调用方传来副本的自比较——否则检查永远通过，失去意义。",
+    "commandSignature": "`update_package_manager(tool, expected_preview)` 现在要求前端传入用户确认的预览。",
+    "batch": "`update_package_managers` 传 `None` 并在注释中说明原因：批量没有逐工具的确认可绑定，各工具在执行器内部自行重新判定就绪性。",
+    "frontend": "`api.updatePackageManager(tool, expectedPreview)` 新增参数；`PackageManagers.tsx` 的 `applyUpdate` 先捕获 `updatePreview`，缺失时直接报错并说明「没有已确认的预览，未执行任何命令」，不再静默执行。"
+  },
+  "fixtures": [
+    {
+      "name": "update_execution_refuses_a_preview_that_no_longer_matches",
+      "asserts": [
+        "相同预览放行——否则会阻断所有合法更新",
+        "可执行文件不同 → 拒绝（会动到另一个安装）",
+        "参数集不同 → 拒绝（是另一条命令）",
+        "版本变化 → 拒绝（记录的开始版本会失真）",
+        "管理器变为阻断 → 报出具体原因，且原因文本（Yarn Berry）完整保留"
+      ]
+    }
+  ],
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "305 passed / 0 failed / 14 ignored"
+    },
+    "targetFixture": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml update_execution_refuses_a_preview -- --test-threads=1",
+      "result": "1 passed / 0 failed"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/settings-ui.mjs tests/startup-ui.mjs tests/release-052-ui.mjs tests/download-ui.mjs tests/package-manager-update-ui.mjs tests/scans-ui.mjs tests/scan-ui.mjs tests/sizes-ui.mjs tests/packages-ui.mjs",
+      "result": "九套全部 PASS"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1710 modules transformed, built in 720ms"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/commands.rs",
+    "src-tauri/src/pkgtools.rs",
+    "src/lib/api.ts",
+    "src/pages/PackageManagers.tsx",
+    "ROADMAP.md"
+  ],
+  "notVerified": [
+    "未在真实包管理器上执行更新；全部夹具使用构造的预览结构，不触发任何进程。",
+    "未覆盖「预览后安装目录被整体替换但路径字符串不变」的情形——该场景下路径与版本都可能相同，当前逐字段比较无法识别。",
+    "删除与迁移各自的预览机制未与更新统一成同一套抽象；三者仍是三份独立实现。",
+    "批量更新不参与执行前复核（传 None），批量场景下的预览漂移未被拦截。",
+    "UI 夹具覆盖原有更新流程，但未新增断言验证「预览变化时前端展示拒绝原因」。"
+  ],
+  "limitations": [
+    "比较是结构相等：任一字段（含 notes 文案）变化都会拒绝。这偏保守，但避免了「看起来一样却执行了不同命令」。",
+    "版本字段来自执行前的 `--version` 读取；若读取失败，预览与执行器都会得到 None，此时版本维度不参与区分。",
+    "复核发生在拿到独占锁之后、写更新清单之前，因此拒绝不会留下审计记录。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "未执行任何包管理器命令、未写入真实 PATH 或注册表；夹具只比较内存中的预览结构。"
+  }
+}

@@ -488,11 +488,9 @@ export interface UvLegacyLayout {
 export interface UvRecoveryItem {
   name: string;
   version: string;
-  status:
-    | "recovered"
-    | "recovered-with-residue"
-    | "failed"
-    | "retained";
+  // 只有这三种：`retained` 不是条目状态，而是 `UvRecoveryReport.retained`
+  // 里的保留项——那些工具在预览阶段就被判定为不可自动恢复，从未被尝试。
+  status: "recovered" | "recovered-with-residue" | "failed";
   detail: string | null;
   removedEntrypoints: string[];
   newEntrypoints: string[];

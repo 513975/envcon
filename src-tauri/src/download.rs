@@ -10,6 +10,24 @@ use crate::error::{AppError, Result};
 use crate::sources::{DownloadSpec, InstallMethod, VerificationInfo};
 use sha2::{Digest, Sha256};
 
+/// How many times one download may be attempted before giving up.
+///
+/// Three is a compromise: enough to ride out a dropped connection or a single
+/// 5xx, few enough that a genuinely broken source reports quickly instead of
+/// hiding behind a long series of identical failures.
+const DOWNLOAD_ATTEMPTS: u32 = 3;
+
+/// Whether a failed attempt is worth repeating.
+///
+/// The distinction is the whole point of the retry: a transport error may
+/// succeed on the next attempt, while a content error (wrong length, wrong
+/// digest, invalid verification data) will hand back the same bytes every time.
+/// Retrying the latter would only multiply silent attempts behind one failure.
+enum Failure {
+    Transient(AppError),
+    Final(AppError),
+}
+
 pub struct DownloadManager {
     next_id: AtomicU64,
     pub active: Mutex<Vec<(u64, Arc<AtomicBool>)>>,
@@ -54,7 +72,7 @@ impl DownloadManager {
         let id = self.alloc();
         self.active.lock().await.push((id, cancel.clone()));
 
-        let result = self.download_inner(spec, dest, &cancel, &on_progress).await;
+        let result = self.download_with_retry(spec, dest, &cancel, &on_progress).await;
 
         self.active.lock().await.retain(|(i, _)| *i != id);
         if result.is_err() {
@@ -64,22 +82,66 @@ impl DownloadManager {
         result
     }
 
-    async fn download_inner(
+    /// Retry only what a retry can actually fix.
+    ///
+    /// A dropped connection, a timeout or a 5xx may succeed on the next attempt.
+    /// A length or digest mismatch will not: the same URL will hand back the same
+    /// bytes, so retrying a real corruption or a swapped asset just multiplies
+    /// the silent attempts behind one failure. Cancellation and disk errors are
+    /// likewise final — retrying them cannot help and would delay the report.
+    async fn download_with_retry(
         &self,
         spec: &DownloadSpec,
         dest: &Path,
         cancel: &AtomicBool,
         on_progress: &impl Fn(u64, Option<u64>, u64),
     ) -> Result<PathBuf> {
-        check_canceled(cancel)?;
+        let mut last = None;
+        for attempt in 1..=DOWNLOAD_ATTEMPTS {
+            check_canceled(cancel)?;
+            match self.download_once(spec, dest, cancel, on_progress).await {
+                Ok(path) => return Ok(path),
+                Err(Failure::Final(error)) => return Err(error),
+                Err(Failure::Transient(error)) => {
+                    last = Some(error);
+                    if attempt == DOWNLOAD_ATTEMPTS {
+                        break;
+                    }
+                    // Start the next attempt from a clean file: a partial body
+                    // left behind would make the length check measure the wrong
+                    // baseline. Reporting 0 also stops the UI from showing a
+                    // percentage that no longer describes the new attempt.
+                    let _ = tokio::fs::remove_file(dest.with_extension("part")).await;
+                    on_progress(0, None, 0);
+                    // Back off a little, and stay cancellable while waiting.
+                    let pause = Duration::from_millis(500 * u64::from(attempt));
+                    tokio::select! {
+                        biased;
+                        _ = wait_canceled(cancel) => return Err(canceled_error()),
+                        _ = tokio::time::sleep(pause) => {}
+                    }
+                }
+            }
+        }
+        Err(last.unwrap_or_else(|| AppError::msg("下载失败")))
+    }
+
+    async fn download_once(
+        &self,
+        spec: &DownloadSpec,
+        dest: &Path,
+        cancel: &AtomicBool,
+        on_progress: &impl Fn(u64, Option<u64>, u64),
+    ) -> std::result::Result<PathBuf, Failure> {
+        check_canceled(cancel).map_err(Failure::Final)?;
         if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            tokio::fs::create_dir_all(parent).await.map_err(|e| Failure::Final(e.into()))?;
         }
 
         let client = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) EnvCon/0.1")
             .build()
-            .map_err(AppError::Net)?;
+            .map_err(|e| Failure::Final(AppError::Net(e)))?;
 
         let request = client
             .get(&spec.url)
@@ -87,11 +149,25 @@ impl DownloadManager {
             .send();
         let resp = tokio::select! {
             biased;
-            _ = wait_canceled(cancel) => return Err(canceled_error()),
-            response = request => response?,
+            _ = wait_canceled(cancel) => return Err(Failure::Final(canceled_error())),
+            response = request => response.map_err(|e| Failure::Transient(AppError::Net(e)))?,
         }
+        // A 4xx is a wrong URL and will stay wrong; 5xx and 429 are worth
+        // another try. Both arrive as one status error, so the code is what
+        // decides, not the message.
         .error_for_status()
-        .map_err(|e| AppError::msg(format!("下载失败({}): {e}", spec.url)))?;
+        .map_err(|e| {
+            let retryable = e.status().is_some_and(|status| {
+                status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            });
+            // The URL may carry credentials once custom registries are
+            // supported; redact before it reaches the UI or the logs.
+            let error = AppError::msg(format!(
+                "下载失败({}): {e}",
+                crate::error::redact_url(&spec.url)
+            ));
+            if retryable { Failure::Transient(error) } else { Failure::Final(error) }
+        })?;
 
         let total: Option<u64> = resp
             .headers()
@@ -100,7 +176,9 @@ impl DownloadManager {
             .and_then(|v| v.parse().ok());
 
         let tmp_dest = dest.with_extension("part");
-        let mut file = tokio::fs::File::create(&tmp_dest).await?;
+        let mut file = tokio::fs::File::create(&tmp_dest)
+            .await
+            .map_err(|e| Failure::Final(e.into()))?;
         let mut stream = resp.bytes_stream();
         let mut digest = Sha256::new();
 
@@ -113,12 +191,16 @@ impl DownloadManager {
         loop {
             let chunk = tokio::select! {
                 biased;
-                _ = wait_canceled(cancel) => return Err(canceled_error()),
+                _ = wait_canceled(cancel) => return Err(Failure::Final(canceled_error())),
                 chunk = stream.next() => chunk,
             };
             let Some(chunk) = chunk else { break };
-            let chunk = chunk.map_err(AppError::Net)?;
-            file.write_all(&chunk).await?;
+            // A body that breaks off mid-stream is the classic retryable case:
+            // the connection dropped, not the content.
+            let chunk = chunk.map_err(|e| Failure::Transient(AppError::Net(e)))?;
+            // A write failure is the local disk's problem; retrying the network
+            // would only fetch the same bytes to fail writing again.
+            file.write_all(&chunk).await.map_err(|e| Failure::Final(e.into()))?;
             digest.update(&chunk);
             downloaded += chunk.len() as u64;
 
@@ -132,20 +214,27 @@ impl DownloadManager {
                 on_progress(downloaded, total, last_speed);
             }
         }
-        file.flush().await?;
-        check_canceled(cancel)?;
+        file.flush().await.map_err(|e| Failure::Final(e.into()))?;
+        check_canceled(cancel).map_err(Failure::Final)?;
         drop(file);
-        validate_content_length(total, downloaded)?;
-        validate_content_length(spec.expected_size, downloaded)?;
-        validate_digest(&spec.verification, &digest)?;
+        // Content checks are final by design: the same URL returns the same
+        // bytes, so a length or digest mismatch would fail identically on every
+        // attempt. Retrying here would hide a real corruption behind retries.
+        validate_content_length(total, downloaded).map_err(Failure::Final)?;
+        validate_content_length(spec.expected_size, downloaded).map_err(Failure::Final)?;
+        validate_digest(&spec.verification, &digest).map_err(Failure::Final)?;
         on_progress(downloaded, total, last_speed);
 
         // .part → 最终名
         let final_path = dest.to_path_buf();
         if final_path.exists() {
-            tokio::fs::remove_file(&final_path).await?;
+            tokio::fs::remove_file(&final_path)
+                .await
+                .map_err(|e| Failure::Final(e.into()))?;
         }
-        tokio::fs::rename(&tmp_dest, &final_path).await?;
+        tokio::fs::rename(&tmp_dest, &final_path)
+            .await
+            .map_err(|e| Failure::Final(e.into()))?;
         Ok(final_path)
     }
 }
@@ -847,5 +936,162 @@ mod tests {
             .is_ok());
         server.join().unwrap();
         assert_eq!(std::fs::read(destination).unwrap(), b"mirror");
+    }
+
+    /// Serve up to `DOWNLOAD_ATTEMPTS` requests, answering the first `failures`
+    /// with `status_line` and the rest with `body`.
+    ///
+    /// The accept loop is bounded by a wall-clock deadline, not just a counter:
+    /// a client that correctly refuses to retry opens only one connection, and a
+    /// plain `accept()` would then block forever and hang the test instead of
+    /// reporting the observation we are after.
+    fn counting_server(
+        failures: usize,
+        status_line: &'static str,
+        body: &'static [u8],
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<usize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let handle = std::thread::spawn(move || {
+            // Short deadline: a client that correctly refuses to retry opens
+            // only one connection, so the loop has to end on its own. Three
+            // seconds is enough for the retrying cases (which back off for
+            // 500ms) while keeping the non-retrying cases fast.
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let mut served = 0;
+            while served < DOWNLOAD_ATTEMPTS as usize && Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        // Accepted sockets inherit non-blocking mode on Windows
+                        // in some cases; make the read/write timeouts explicit.
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                        let mut request = [0; 4096];
+                        let _ = stream.read(&mut request);
+                        served += 1;
+                        if served <= failures {
+                            let _ = write!(
+                                stream,
+                                "{status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            );
+                        } else {
+                            let _ = write!(
+                                stream,
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = stream.write_all(body);
+                        }
+                        let _ = stream.flush();
+                    }
+                    Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+            served
+        });
+        (address, handle)
+    }
+
+    #[tokio::test]
+    async fn a_retryable_status_is_retried_and_can_succeed() {
+        let dir = crate::test_support::TestDir::new();
+        let (address, server) =
+            counting_server(1, "HTTP/1.1 503 Service Unavailable", b"retried");
+        let spec = DownloadSpec {
+            url: format!("http://{address}/asset.zip"),
+            method: InstallMethod::Unzip { strip_top: false },
+            verification: VerificationInfo::unverified(),
+            expected_size: Some(7),
+        };
+        let destination = dir.path().join("asset.zip");
+        let result = DownloadManager::new()
+            .download(&spec, &destination, |_, _, _| {})
+            .await;
+        let served = server.join().unwrap();
+        assert!(result.is_ok(), "one 503 must not fail the download");
+        assert_eq!(served, 2, "the server must see exactly two attempts");
+        assert_eq!(std::fs::read(&destination).unwrap(), b"retried");
+    }
+
+    #[tokio::test]
+    async fn retries_stop_at_the_attempt_limit() {
+        let dir = crate::test_support::TestDir::new();
+        // Every attempt fails, so the client must stop after the limit instead
+        // of looping forever against a persistently broken source.
+        let (address, server) =
+            counting_server(usize::MAX, "HTTP/1.1 503 Service Unavailable", b"never");
+        let spec = DownloadSpec {
+            url: format!("http://{address}/asset.zip"),
+            method: InstallMethod::Unzip { strip_top: false },
+            verification: VerificationInfo::unverified(),
+            expected_size: None,
+        };
+        let destination = dir.path().join("asset.zip");
+        let result = DownloadManager::new()
+            .download(&spec, &destination, |_, _, _| {})
+            .await;
+        let served = server.join().unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            served,
+            DOWNLOAD_ATTEMPTS as usize,
+            "attempts must stop at the limit, not continue indefinitely"
+        );
+        assert!(!destination.exists());
+        assert!(!destination.with_extension("part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_client_error_is_not_retried() {
+        let dir = crate::test_support::TestDir::new();
+        let (address, server) = counting_server(usize::MAX, "HTTP/1.1 404 Not Found", b"");
+        let spec = DownloadSpec {
+            url: format!("http://{address}/missing.zip"),
+            method: InstallMethod::Unzip { strip_top: false },
+            verification: VerificationInfo::unverified(),
+            expected_size: None,
+        };
+        let destination = dir.path().join("missing.zip");
+        let result = DownloadManager::new()
+            .download(&spec, &destination, |_, _, _| {})
+            .await;
+        let served = server.join().unwrap();
+        assert!(result.is_err());
+        // A 404 is a wrong URL: it will stay wrong, so retrying only delays the
+        // report and multiplies requests against someone else's server.
+        assert_eq!(served, 1, "a 404 must not be retried");
+    }
+
+    #[tokio::test]
+    async fn a_digest_mismatch_is_final_and_not_retried() {
+        let dir = crate::test_support::TestDir::new();
+        // Serves the same wrong bytes on every attempt.
+        let (address, server) = counting_server(0, "", b"wrong!!");
+        let spec = DownloadSpec {
+            url: format!("http://{address}/asset.zip"),
+            method: InstallMethod::Unzip { strip_top: false },
+            // A well-formed digest for different content: the transfer succeeds,
+            // the content does not match.
+            verification: VerificationInfo::trusted_sha256(
+                format!("{:x}", Sha256::digest(b"expected")),
+                "fixture publisher metadata",
+            ),
+            expected_size: Some(7),
+        };
+        let destination = dir.path().join("asset.zip");
+        let result = DownloadManager::new()
+            .download(&spec, &destination, |_, _, _| {})
+            .await;
+        let served = server.join().unwrap();
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("SHA-256"), "unexpected: {error}");
+        // The same URL returns the same bytes, so a second attempt would fail
+        // identically; retrying would only hide the mismatch behind retries.
+        assert_eq!(served, 1, "a digest mismatch must not be retried");
+        assert!(!destination.exists());
     }
 }

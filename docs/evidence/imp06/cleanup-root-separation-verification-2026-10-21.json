@@ -1,0 +1,63 @@
+{
+  "id": "imp06-cleanup-root-separation",
+  "title": "IMP-06 旧包清理的目录分离校验：两侧重定向与双向包含",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "各管理器使用隔离夹具验证查询、更新、重装、卸载和失败恢复；在线与离线测试分开。",
+  "background": {
+    "gap": "`old_packages::verify_separate` 是「清理旧包目录」与「新安装目录」之间的唯一防线：一旦两者重叠或被重定向，清理会删掉刚装好的东西。既有夹具只覆盖了 `source == destination` 与 **source 侧**重定向（`rejects_overlapping_and_redirected_cleanup_roots`、`rejects_cleanup_roots_with_redirected_ancestors`），`destination` 侧的三种情形——destination 是链接、destination 位于 source 之内、source 位于 destination 之内——**完全没有夹具**。",
+    "whyItMatters": "这三种情形都会让「删除旧包」变成「删除新装」。尤其 destination 位于 source 之内时，路径看起来完全不同，用户无法从界面上察觉。"
+  },
+  "implementation": {
+    "production": "无源码改动——`verify_separate` 已经用 `has_reparse_component`（两侧）与 `path_within`（双向）覆盖了这些情况。补的是把两侧边界都锁住。",
+    "fixture": "新增 `verify_separate_rejects_overlap_and_redirects_on_both_sides`。"
+  },
+  "fixtures": [
+    {
+      "name": "verify_separate_rejects_overlap_and_redirects_on_both_sides",
+      "asserts": [
+        "平行目录放行（不能过度拒绝，否则正常清理无法进行）",
+        "destination 是 Junction → 拒绝（清理会写到链接目标而非用户看到的路径）",
+        "destination 位于 source 之内 → 拒绝（清理 source 会连带删掉新安装）",
+        "source 位于 destination 之内 → 拒绝（清理后新目录里残留空旧树）",
+        "通过 Junction 别名形成的父子关系 → 同样拒绝（路径字符串不同，实际是同一棵树）"
+      ]
+    }
+  ],
+  "existingCoverage": {
+    "sourceEqualsDestination": "rejects_overlapping_and_redirected_cleanup_roots",
+    "sourceSideRedirect": "rejects_overlapping_and_redirected_cleanup_roots（source 本身是链接）",
+    "sourceSideAncestorRedirect": "rejects_cleanup_roots_with_redirected_ancestors（source 的父目录是链接）",
+    "reportPruningRedirect": "pruning_refuses_a_redirected_report_directory"
+  },
+  "verification": {
+    "targetModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml old_packages::tests -- --test-threads=1",
+      "result": "6 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "320 passed / 0 failed / 14 ignored"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/old_packages.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": ["src-tauri/src/old_packages.rs"],
+  "notVerified": [
+    "未在真实清理流程中触发这些拒绝（夹具直接调用 `verify_separate`，不经过 `execute` 的完整链路）。",
+    "未覆盖「source 与 destination 通过符号链接（非 Junction）指向同一位置」——夹具用 Junction，因为符号链接在 Windows 上需要额外权限。",
+    "未验证大小写差异、8.3 短名、UNC 路径等 Windows 路径等价形式。"
+  ],
+  "limitations": [
+    "`path_within` 基于规范化后的路径前缀比较，因此依赖两侧都能 `canonicalize` 成功；不存在的路径会在更早的 `?` 处报错而不是被判定为「不重叠」。",
+    "夹具创建的 Junction 在测试目录内，不触及真实用户目录。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "全部读写发生在 crate::test_support::TestDir 提供的临时目录；Junction 也在该目录内创建并清理。"
+  }
+}

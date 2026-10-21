@@ -126,7 +126,7 @@ pub(crate) fn self_update_channel_blocker(tool: &str, inv: &Invocation) -> Optio
 /// unsupported" would wrongly read as a manager limitation. The capability
 /// therefore states the shape of the entry point and, where the manager really
 /// does document one, hands back a command the user can run themselves.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCapabilities {
     /// The entry point installs "latest" and accepts no version argument, so
@@ -2714,5 +2714,51 @@ mod tests {
         assert_eq!(plain.status, "unresolved");
         // Reading never deletes or rewrites package files.
         assert!(global.join("node_modules").join("plain").is_dir());
+    }
+
+    /// 每个管理器的自更新命令都会**先展示给用户、再原样执行**，因此命令内容
+    /// 本身就是对外契约。此前只有 npm 与 pip 的间接覆盖，其余八个管理器的
+    /// 确切参数没有任何夹具——改动 `self_update_command` 的分支不会让测试失败。
+    ///
+    /// 这里同时锁定三类结果：能自更新的给出确切参数；不能自更新的给出**具体
+    /// 替代动作**而不是笼统失败；未知工具被拒绝。
+    #[test]
+    fn every_manager_self_update_command_is_pinned_or_refused_with_an_action() {
+        let dir = crate::test_support::TestDir::new();
+        let program = dir.path().join("tool.exe").to_string_lossy().into_owned();
+        let inv = Invocation { program, prefix: vec![] };
+
+        // 能自更新的：参数逐字锁定。
+        for (tool, expected) in [
+            ("pnpm", vec!["self-update"]),
+            ("bun", vec!["upgrade"]),
+            ("uv", vec!["self", "update"]),
+            ("composer", vec!["self-update"]),
+        ] {
+            let (updater, args) = self_update_command(tool, &inv)
+                .unwrap_or_else(|e| panic!("{tool} must build a command: {e}"));
+            assert_eq!(args, expected, "{tool} arguments");
+            // 没有改动可执行文件：这些管理器就地自更新。
+            assert_eq!(updater.program, inv.program, "{tool} must not retarget");
+            assert!(updater.prefix.is_empty(), "{tool} must not add a prefix");
+        }
+
+        // 不能自更新的：拒绝信息必须点名「该怎么做」，不能只说「不支持」。
+        for (tool, action) in [
+            ("pipx", "python -m pip install --upgrade pipx"),
+            ("cargo", "rustup update stable"),
+            ("dotnet", "更新 SDK"),
+        ] {
+            let error = self_update_command(tool, &inv)
+                .expect_err(&format!("{tool} must be refused"))
+                .to_string();
+            assert!(
+                error.contains(action),
+                "{tool} must name the real action ({action}): {error}"
+            );
+        }
+
+        // 未知工具被拒绝，且不会静默退化成某种默认命令。
+        assert!(self_update_command("not-a-manager", &inv).is_err());
     }
 }

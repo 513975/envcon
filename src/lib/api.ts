@@ -19,6 +19,7 @@ export const api = {
     cmd<number>("start_size_scan", { envType, name, cacheTool }),
   sizeScanStatus: () => cmd<import("./types").SizeSnapshot[]>("size_scan_status"),
   cancelSizeScan: (id: number) => cmd<void>("cancel_size_scan", { id }),
+  abandonSizeScan: (id: number) => cmd<void>("abandon_size_scan", { id }),
   getOverview: (force = false) =>
     scanRead<Overview>("overview", [], force),
   exportEnvironmentManifest: (path: string) =>
@@ -32,10 +33,10 @@ export const api = {
     cmd<import("./types").ManifestComparison>("import_environment_manifest", {
       path,
     }),
-  updatePackageManager: (tool: string) =>
+  updatePackageManager: (tool: string, expectedPreview: import("./types").PackageManagerUpdatePreview) =>
     cmd<import("./types").PackageManagerUpdateResult>(
       "update_package_manager",
-      { tool },
+      { tool, expectedPreview },
     ),
   previewPackageManagerUpdate: (tool: string) =>
     cmd<import("./types").PackageManagerUpdatePreview>(
@@ -127,6 +128,10 @@ export const api = {
     cmd<import("./types").AppUpdateStatus>("check_app_update"),
   reloadSettings: () => cmd<void>("reload_settings"),
   restoreSettingsBackup: () => cmd<void>("restore_settings_backup"),
+  listConfigHistory: () =>
+    cmd<{ file: string; stamp: number }[]>("list_config_history"),
+  restoreConfigHistory: (file: string) =>
+    cmd<void>("restore_config_history", { file }),
   setDownloadsDir: (dir: string) => cmd<void>("set_downloads_dir", { dir }),
   listPathBackups: () =>
     cmd<{ file: string; time: string }[]>("list_path_backups"),

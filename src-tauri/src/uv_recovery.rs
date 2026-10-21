@@ -11,13 +11,29 @@ use std::{
 };
 use tokio::process::Command;
 
+/// uv 恢复条目的终态。
+///
+/// 用枚举而不是 `String`：取值集合是封闭的，编译器应当阻止出现第四种。
+/// `retained` 刻意不在这里——保留项从未被尝试（预览阶段就判定为不可自动
+/// 恢复），记在报告顶层的 `retained` 里；把它混进条目会让「压根没试」与
+/// 「试了但失败」在界面上看起来一样。
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum UvRecoveryStatus {
+    /// 入口已重建，旧入口已清理。
+    Recovered,
+    /// 入口已重建，但旧入口未能全部清理；`detail` 说明残留。
+    RecoveredWithResidue,
+    /// 恢复失败，`detail` 说明原因。
+    Failed,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UvRecoveryItem {
     pub name: String,
     pub version: String,
-    /// `recovered`, `recovered-with-residue`, `failed` or `retained`.
-    pub status: String,
+    pub status: UvRecoveryStatus,
     pub detail: Option<String>,
     pub removed_entrypoints: Vec<String>,
     pub new_entrypoints: Vec<String>,
@@ -278,9 +294,9 @@ where
         name: tool.name.clone(),
         version: tool.version.clone().unwrap_or_default(),
         status: if residue.is_empty() {
-            "recovered".into()
+            UvRecoveryStatus::Recovered
         } else {
-            "recovered-with-residue".into()
+            UvRecoveryStatus::RecoveredWithResidue
         },
         detail: (!residue.is_empty()).then(|| format!("旧入口未能清理: {}", residue.join("；"))),
         removed_entrypoints: removed,
@@ -359,7 +375,7 @@ where
             Err(error) => items.push(UvRecoveryItem {
                 name: tool.name.clone(),
                 version: tool.version.clone().unwrap_or_default(),
-                status: "failed".into(),
+                status: UvRecoveryStatus::Failed,
                 detail: Some(error.to_string()),
                 removed_entrypoints: vec![],
                 new_entrypoints: vec![],
@@ -385,7 +401,12 @@ where
     }
     let recovered_all = items
         .iter()
-        .all(|item| matches!(item.status.as_str(), "recovered" | "recovered-with-residue"))
+        .all(|item| {
+            matches!(
+                item.status,
+                UvRecoveryStatus::Recovered | UvRecoveryStatus::RecoveredWithResidue
+            )
+        })
         && retained.is_empty();
     let pending_legacy = inspect_uv_layout(&root)?
         .tools
@@ -447,13 +468,17 @@ where
     }
 
     let layout = inspect_uv_layout(&root)?;
-    let failed = items.iter().any(|item| item.status == "failed");
+    let failed = items
+        .iter()
+        .any(|item| matches!(item.status, UvRecoveryStatus::Failed));
     let status = if layout.status == "clean" && retained.is_empty() && !failed {
         "complete"
-    } else if items
-        .iter()
-        .any(|item| matches!(item.status.as_str(), "recovered" | "recovered-with-residue"))
-    {
+    } else if items.iter().any(|item| {
+        matches!(
+            item.status,
+            UvRecoveryStatus::Recovered | UvRecoveryStatus::RecoveredWithResidue
+        )
+    }) {
         "partial"
     } else {
         "failed"
@@ -576,7 +601,7 @@ mod tests {
         .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(report.status, "complete", "{report:?}");
-        assert_eq!(report.items[0].status, "recovered");
+        assert_eq!(report.items[0].status, UvRecoveryStatus::Recovered);
         assert!(!legacy_entry.exists());
         assert!(proposed_bin.join("alpha.exe").is_file());
         assert!(proposed_cache.join("blob").is_file());
@@ -627,7 +652,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(report.status, "failed");
-        assert_eq!(report.items[0].status, "failed");
+        assert_eq!(report.items[0].status, UvRecoveryStatus::Failed);
         assert!(legacy_entry.is_file());
         assert!(!root.join("bin").read_dir().unwrap().next().is_none());
     }
@@ -678,7 +703,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(report.status, "partial");
-        assert_eq!(report.items[0].status, "recovered");
+        assert_eq!(report.items[0].status, UvRecoveryStatus::Recovered);
         assert!(!good_entry.exists());
         assert!(bad_entry.is_file());
         assert!(root.join("cache/blob").is_file());
@@ -687,6 +712,32 @@ mod tests {
             .retained
             .iter()
             .any(|value| value.contains("旧缓存目录保留")));
+
+        // `retained` 不是条目状态：beta 在预览阶段就判定为不可自动恢复，
+        // 从未被尝试，因此它只能出现在 `retained` 里，不能混进 `items`——
+        // 否则「尝试过并失败」与「压根没尝试」在 UI 上会看起来一样。
+        assert!(
+            report.items.iter().all(|item| item.name != "beta"),
+            "未被尝试的工具不能出现在条目里: {:?}",
+            report.items
+        );
+        // 枚举化后取值集合由类型系统保证；这里改为锁定**序列化字符串**，
+        // 那才是前端真正依赖的契约（kebab-case：`recovered` /
+        // `recovered-with-residue` / `failed`）。
+        for (status, expected) in [
+            (UvRecoveryStatus::Recovered, "recovered"),
+            (
+                UvRecoveryStatus::RecoveredWithResidue,
+                "recovered-with-residue",
+            ),
+            (UvRecoveryStatus::Failed, "failed"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(status).unwrap(),
+                serde_json::Value::String(expected.into()),
+                "{status:?} 的序列化字符串变化会直接破坏前端渲染"
+            );
+        }
     }
 
 }

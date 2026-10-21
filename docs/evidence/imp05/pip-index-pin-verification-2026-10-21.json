@@ -1,0 +1,79 @@
+{
+  "id": "imp05-pip-index-pin-and-normalize",
+  "title": "IMP-05 pip 重装的注入防线与 PEP 503 归一",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "各管理器使用隔离夹具验证查询、更新、重装、卸载和失败恢复；在线与离线测试分开。",
+  "background": {
+    "gap": "`pip_reinstall::index_pin` 决定一个「包名 + 版本」能否被拼成 `name==version` 交给 pip，它同时承担两个职责：拒绝**选项注入**（`--index-url`）与拒绝**换行注入**（把额外参数塞进版本字符串）。既有夹具 `rejects_options_paths_and_marks_direct_sources` 只有 3 条断言，边界完全没有锁定。`normalize` 是「同名包」的判定基础（PEP 503），判错会让两个不同包被误认为冲突，或让真正的重复漏过，同样只有间接覆盖。",
+    "whyItMatters": "pip 的参数解析允许 `name==version` 这种拼接形式，因此包名或版本里的任何一个特殊字符都可能把「安装一个包」变成「执行一条额外指令」。这是重装链路上唯一的注入面。"
+  },
+  "implementation": {
+    "production": "无源码改动——`index_pin` 与 `normalize` 的实现已正确。补的是把边界逐条锁住。",
+    "fixtures": [
+      "index_pin_accepts_only_an_alphanumeric_name_and_a_numeric_version",
+      "normalize_collapses_pep503_separators_and_flags_duplicates"
+    ]
+  },
+  "fixtures": [
+    {
+      "name": "index_pin_accepts_only_an_alphanumeric_name_and_a_numeric_version",
+      "accepts": [
+        "常规包名与版本（`requests`/`2.31.0`）",
+        "下划线、点、连字符都在允许集内（`my_package`、`zope.interface`、`a-b-c`）",
+        "PEP 440 后缀形式（`1!2.0+cpu`、`1.0.0rc1`、`1.0.post1`）",
+        "长度恰好 200（边界包含，两端共享同一上限）"
+      ],
+      "rejects": [
+        "选项注入：首字符非字母数字（`--index-url`、`-pkg`、`.pkg`）",
+        "尾字符是分隔符（`pkg-`、`pkg.`）",
+        "换行与回车注入（`1\\n--extra-index-url evil`、`1\\r2`）",
+        "空格与路径分隔符（`pkg name`、`pkg/name`、`pkg\\\\name`）",
+        "版本非数字开头（`abc`、`v1.0`）",
+        "版本含 `=`（`1==2` 会改写整个要求）",
+        "空名、空版本、长度 201"
+      ]
+    },
+    {
+      "name": "normalize_collapses_pep503_separators_and_flags_duplicates",
+      "asserts": [
+        "`A_B`、`a-b`、`a.b` 归一后相同（PEP 503）",
+        "连续分隔符折叠成一个，空段被丢弃（`a__b`、`a.-b` → `a-b`）",
+        "三个名字归一后相同的包只保留一份，且该份被标记为「同名包有多份元数据」",
+        "`pip`/`setuptools`/`wheel` 被标为「构建工具由新环境维护，不复制旧版本」",
+        "可复制的包 reason 为空",
+        "结果按归一化名排序，保证展示顺序稳定"
+      ]
+    }
+  ],
+  "verification": {
+    "targetModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml pip_reinstall::tests -- --test-threads=1",
+      "result": "4 passed / 0 failed / 1 ignored"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "322 passed / 0 failed / 14 ignored"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/pip_reinstall.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": ["src-tauri/src/pip_reinstall.rs"],
+  "notVerified": [
+    "未执行真实 pip；`offline_python_reads_old_metadata_and_installs_into_new_venv` 仍 ignored，需要 ENVCON_TEST_PYTHON 与离线 wheel。",
+    "未验证 `index_pin` 与 pip 真实参数解析的对应关系——夹具锁定的是本项目的允许集，不是 pip 的完整语法。",
+    "未覆盖 uninstall 侧与失败恢复的 per-manager 夹具。"
+  ],
+  "limitations": [
+    "允许集是白名单：新增合法的包名字符（例如某些私有索引使用的扩展字符）需要同步放宽 `index_pin`，否则会被误拒。",
+    "200 字符上限是代码常量，两侧共享；改动需同时改夹具。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "纯函数夹具，只处理内存中的字符串与结构体，不启动进程、不读写用户目录。"
+  }
+}

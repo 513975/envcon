@@ -675,4 +675,69 @@ mod tests {
             assert!(root.exists()); // The orchestrator never recursively removes leftovers.
         }
     }
+
+    /// `parse_command` 是「注册表字符串」与「启动一个进程」之间的唯一闸门，
+    /// 它的接受/拒绝边界属于安全面，不是解析细节。此前只断言了 4 个反例，
+    /// 这里补齐正例与各条逃逸路径：任何能让值从一个参数「越界」成 shell
+    /// 语法的输入都必须被拒绝。
+    #[test]
+    fn parse_command_accepts_only_an_exact_exe_with_literal_arguments() {
+        let dir = crate::test_support::TestDir::new();
+        let exe = dir.path().join("Uninstall.exe");
+        fs::write(&exe, b"fixture executable bytes; never executed").unwrap();
+        let quoted = format!("\"{}\"", exe.display());
+
+        // 真实卸载登记的形状：引号路径 + 参数。
+        let (path, args) = parse_command(&format!("{quoted} /S /norestart")).unwrap();
+        assert_eq!(path, exe);
+        assert_eq!(args, vec!["/S".to_string(), "/norestart".to_string()]);
+
+        // 只有路径、没有参数。
+        let (path, args) = parse_command(&quoted).unwrap();
+        assert_eq!(path, exe);
+        assert!(args.is_empty());
+
+        // 首尾空白被裁掉，而不是变成路径的一部分。
+        let (path, _) = parse_command(&format!("  {quoted}  ")).unwrap();
+        assert_eq!(path, exe);
+
+        // 无引号、路径本身不含空格的绝对路径同样接受。
+        let plain = dir.path().join("Setup.exe");
+        fs::write(&plain, b"fixture").unwrap();
+        let (path, args) = parse_command(&format!("{} /quiet", plain.display())).unwrap();
+        assert_eq!(path, plain);
+        assert_eq!(args, vec!["/quiet".to_string()]);
+
+        // 以下每一条都是把「一个 EXE + 字面参数」变成别的东西的路径。
+        for (command, why) in [
+            (format!("{quoted} /S & echo bad"), "shell 串联 &"),
+            (format!("{quoted} /S | more"), "管道 |"),
+            (format!("{quoted} > out.txt"), "输出重定向"),
+            (format!("{quoted} < in.txt"), "输入重定向"),
+            (format!("{quoted} ^& x"), "脱字符转义"),
+            (format!("{quoted} %PATH%"), "环境变量展开"),
+            (format!("{quoted} \"nested\""), "嵌套引号"),
+            (format!("{quoted}'"), "单引号"),
+        ] {
+            assert!(parse_command(&command).is_err(), "{why}: {command}");
+        }
+
+        // 引号未闭合：剩余字符串会被重新解释，必须拒绝。
+        assert!(parse_command(&format!("\"{} /S", exe.display())).is_err());
+        // 路径与参数之间必须有空白分隔，紧贴会被当作路径的一部分。
+        assert!(parse_command(&format!("\"{}\"/S", exe.display())).is_err());
+
+        // 只接受 .exe：脚本或 shell 宿主一律拒绝。
+        let bat = dir.path().join("uninstall.bat");
+        fs::write(&bat, b"fixture").unwrap();
+        assert!(parse_command(&format!("\"{}\"", bat.display())).is_err());
+
+        // 非绝对路径永不匹配，因此 `cmd.exe /c` 与 `msiexec.exe /x` 都进不来。
+        assert!(parse_command("cmd.exe /c uninstall").is_err());
+        assert!(parse_command("msiexec.exe /x {01234567-89ab-cdef-0123-456789abcdef}").is_err());
+        assert!(parse_command("Uninstall.exe /S").is_err());
+
+        // 父目录穿越被拒绝，避免指向登记范围之外的同名 EXE。
+        assert!(parse_command(&format!("\"{}\\..\\Uninstall.exe\"", dir.path().display())).is_err());
+    }
 }

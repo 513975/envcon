@@ -698,6 +698,14 @@ pub async fn start(plan: Plan, names: Vec<String>) -> Result<()> {
         if let Err(e) = install(&fresh, &selected).await {
             let _ = update(|t| {
                 t.status = "error".into();
+                // A mid-run failure leaves items at `pending`/`installing`, and
+                // the UI renders every item unconditionally: without this the
+                // list would show "重装失败" in the header while some packages
+                // still read "安装中" or "等待".
+                crate::package_managers::settle_unfinished_items(
+                    &mut t.items,
+                    "重装中断，该包未完成安装",
+                );
                 t.message = e.to_string();
             });
         }

@@ -1,4 +1,4 @@
-import { HardDrive, X } from "lucide-react";
+import { Ban, HardDrive, X } from "lucide-react";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { toast } from "../lib/toast";
@@ -16,7 +16,10 @@ export function DirectorySize({ path, envType = null, name = null, cacheTool = n
   return <div className="flex flex-wrap items-center gap-1.5 text-xs min-w-0">
     <span>{task ? `${task.complete ? "" : "已读取 "}${formatBytes(task.bytes)}` : "尚未统计大小"}</span>
     {task && <span className="text-zinc-500">{task.files} 文件 / {task.directories} 目录{task.status === "canceled" ? " · 已取消" : ""}{task.status === "partial" ? " · 部分结果" : ""}</span>}
-    {running ? <Button size="sm" variant="ghost" title="取消大小统计" aria-label="取消大小统计" onClick={() => api.cancelSizeScan(task.id).then(pollSizes).catch(e => toast.error("取消失败", String(e)))}><X className="size-3.5" /></Button> :
+    {running ? <>
+      <Button size="sm" variant="ghost" title="取消大小统计" aria-label="取消大小统计" onClick={() => api.cancelSizeScan(task.id).then(pollSizes).catch(e => toast.error("取消失败", String(e)))}><X className="size-3.5" /></Button>
+      <Button size="sm" variant="ghost" title="放弃这个卡住的任务（取消无效时使用）" aria-label="放弃大小统计" onClick={() => api.abandonSizeScan(task.id).then(pollSizes).catch(e => toast.error("放弃失败", String(e)))}><Ban className="size-3.5" /></Button>
+    </> :
       <Button size="sm" variant="ghost" title="统计目录大小" aria-label={`统计 ${name ?? cacheTool} 大小`} disabled={starting || anyRunning} onClick={() => startSize(envType, name, cacheTool).catch(e => toast.error("统计失败", String(e)))}><HardDrive className="size-3.5" /></Button>}
     {running && <span className="truncate max-w-64" title={task.currentPath}>统计中：{task.currentPath || path}</span>}
     {(task?.detail || error) && <span className="text-amber-700 dark:text-amber-400 break-all">{task?.detail ?? error}</span>}

@@ -31,9 +31,25 @@ interface Backup {
   time: string;
 }
 
+interface ConfigHistoryEntry {
+  file: string;
+  stamp: number;
+}
+
+/** 历史文件名里是纳秒时间戳；除以 1e6 得到毫秒，再交给本地时区格式化。 */
+function formatHistoryStamp(stamp: number): string {
+  if (!stamp) return "未知时间";
+  const d = new Date(stamp / 1_000_000);
+  if (Number.isNaN(d.getTime())) return "未知时间";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export function Settings() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [configHistory, setConfigHistory] = useState<ConfigHistoryEntry[]>([]);
+  const [confirmHistory, setConfirmHistory] = useState<ConfigHistoryEntry | null>(null);
   const [rootInput, setRootInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRecovery, setConfirmRecovery] = useState(false);
@@ -48,6 +64,13 @@ export function Settings() {
       const next = await api.getSettings();
       setSettings(next);
       setBackups(await api.listPathBackups());
+      // 历史列表是附加信息：它读失败（目录不可读、后端返回空）不应让整个
+      // 设置页进 catch 分支，否则用户会因为一个可选的回滚功能看不到主设置。
+      try {
+        setConfigHistory((await api.listConfigHistory()) ?? []);
+      } catch {
+        setConfigHistory([]);
+      }
       return next;
     } catch (e) {
       setLoadError(String(e));
@@ -105,6 +128,22 @@ export function Settings() {
       toast.success("PATH 已恢复", `已还原到 ${b.time} 的备份`);
     } catch (e) {
       toast.error("恢复失败", String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const restoreHistory = async (entry: ConfigHistoryEntry) => {
+    setBusy(`history:${entry.file}`);
+    try {
+      await api.restoreConfigHistory(entry.file);
+      const next = await load();
+      refreshOverview();
+      if (next?.configWarning) toast.error("配置仍不可用", next.configWarning);
+      else toast.success("配置已回滚", `已还原到 ${formatHistoryStamp(entry.stamp)} 的状态`);
+      setConfirmHistory(null);
+    } catch (e) {
+      toast.error("配置回滚失败", String(e));
     } finally {
       setBusy(null);
     }
@@ -171,7 +210,49 @@ export function Settings() {
           <Button size="sm" onClick={() => api.openPath(settings.dataDir).catch((e) => toast.error("打开失败", String(e)))}>打开配置目录</Button>
         </div>
         {!settings.hasConfigBackup && <p className="text-xs text-zinc-400">暂无可恢复的有效备份。</p>}
+        <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
+          <div className="text-xs font-medium text-zinc-600 dark:text-zinc-300 mt-2 mb-1">
+            配置历史（最近 {configHistory.length} 份）
+          </div>
+          {configHistory.length === 0 ? (
+            <p className="text-xs text-zinc-400">保存设置后会自动累积历史，可回滚到更早的状态。</p>
+          ) : (
+            <div className="divide-y divide-zinc-100 dark:divide-zinc-800 max-h-48 overflow-y-auto">
+              {configHistory.map((entry) => (
+                <div key={entry.file} className="flex items-center gap-3 py-1.5">
+                  <History className="size-3.5 text-zinc-400 shrink-0" />
+                  <span className="flex-1 text-xs text-zinc-600 dark:text-zinc-300">
+                    {formatHistoryStamp(entry.stamp)}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmHistory(entry)}
+                    loading={busy === `history:${entry.file}`}
+                    disabled={!!busy}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    回滚
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Card>
+      <ConfirmDialog
+        open={confirmHistory !== null}
+        onClose={() => setConfirmHistory(null)}
+        onConfirm={() => confirmHistory && restoreHistory(confirmHistory)}
+        loading={!!confirmHistory && busy === `history:${confirmHistory.file}`}
+        title="回滚配置历史"
+        confirmText="确认回滚"
+        message={
+          confirmHistory
+            ? `将把应用设置还原到 ${formatHistoryStamp(confirmHistory.stamp)} 的状态。当前配置会先另存一份到配置目录，环境文件与系统 PATH 不会被移动或修改。`
+            : ""
+        }
+      />
       <ConfirmDialog
         open={confirmRecovery}
         onClose={() => setConfirmRecovery(false)}

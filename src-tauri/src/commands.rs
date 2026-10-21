@@ -80,6 +80,16 @@ pub fn size_scan_status(state: State<'_, AppState>) -> Vec<crate::size_tasks::Si
 #[tauri::command]
 pub fn cancel_size_scan(state: State<'_, AppState>, id: u64) -> Result<()> { state.sizes.cancel(id) }
 
+/// 放弃一个卡住的大小统计。
+///
+/// 与 `cancel_size_scan` 的区别：取消是协作式的，卡在同步 IO 上的任务走不到
+/// 检查点，会永久停在 `running`，从而阻塞所有后续统计。放弃会把记录移除，让
+/// 用户重新获得统计能力。
+#[tauri::command]
+pub fn abandon_size_scan(state: State<'_, AppState>, id: u64) -> Result<()> {
+    state.sizes.abandon(id)
+}
+
 #[tauri::command]
 pub async fn query_scan(
     state: State<'_, AppState>,
@@ -556,7 +566,11 @@ enum PackageManagerUpdateStatus {
 /// A read-only description of what an update would do. Nothing here executes
 /// the update or writes to disk, so the user can see the exact program,
 /// arguments and installation that would be touched beforehand.
-#[derive(serde::Serialize)]
+///
+/// `PartialEq` exists so the executor can re-derive this same structure right
+/// before running and refuse to proceed when anything changed: what the user
+/// confirmed is one specific command against one specific installation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageManagerUpdatePreview {
     tool: String,
@@ -873,15 +887,39 @@ pub async fn package_manager_update_record(
     crate::update_journal::latest(&backups, tool.as_ref())
 }
 
+/// Refuse to run an update whose preview no longer matches what the user
+/// confirmed.
+///
+/// Uninstall and migration already bind execution to an `expected_preview`;
+/// the updater previously did not, so a command or installation that changed
+/// between preview and confirmation would still run. The preview is re-derived
+/// here rather than trusted from the caller, so a stale UI cannot execute a
+/// different command than the one it displayed.
+fn validate_update_execution_preview(
+    expected: &PackageManagerUpdatePreview,
+    current: &PackageManagerUpdatePreview,
+) -> Result<()> {
+    if let Some(reason) = &current.blocked {
+        return Err(AppError::msg(format!("该管理器当前不可更新：{reason}")));
+    }
+    if current != expected {
+        return Err(AppError::msg(
+            "更新预览已变化（命令、安装位置或版本与预览时不同），请重新预览后再确认执行",
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn update_package_manager(
     state: State<'_, AppState>,
     tool: crate::package_managers::ManagerId,
+    expected_preview: PackageManagerUpdatePreview,
 ) -> Result<PackageManagerUpdateResult> {
     // The guards must stay bound for the whole update: an unbound return value
     // would be dropped immediately and silently release every lock.
     let _guards = guard_update_exclusive(&state)?;
-    update_package_manager_inner(&state, tool.as_ref()).await
+    update_package_manager_inner(&state, tool.as_ref(), Some(&expected_preview)).await
 }
 
 /// The exclusive guards shared by the single and batch updaters. Taking them
@@ -923,9 +961,14 @@ fn guard_update_exclusive(state: &AppState) -> Result<UpdateGuards<'_>> {
 
 /// Update one manager. The caller must already hold the exclusive guards;
 /// keeping them out of here lets a batch hold them once for the whole run.
+///
+/// `expected` is the preview the user confirmed. When present, the preview is
+/// re-derived here and compared before any command runs, so a changed
+/// executable, version or argument set cannot slip through on a stale UI.
 async fn update_package_manager_inner(
     state: &AppState,
     id: &str,
+    expected: Option<&PackageManagerUpdatePreview>,
 ) -> Result<PackageManagerUpdateResult> {
     let inv = crate::pkgtools::find_invocation(state.with_cfg(|c| c.resolve_root()).as_deref(), id)
         .await
@@ -937,6 +980,19 @@ async fn update_package_manager_inner(
         return Err(AppError::msg(blocked));
     }
     let (updater, args) = crate::pkgtools::self_update_command(id, &inv)?;
+    // Rebuild the same structure the preview command produced, from the very
+    // values this run is about to use. Comparing against a recomputation (not
+    // against the caller's copy) is what makes the check meaningful.
+    if let Some(expected) = expected {
+        let current = package_manager_update_preview(
+            id,
+            Some(inv.program.clone()),
+            crate::pkgtools::display_version(&before),
+            Ok((updater.program.clone(), args.clone())),
+            Some(updater.program.eq_ignore_ascii_case(&inv.program)),
+        );
+        validate_update_execution_preview(expected, &current)?;
+    }
     if id == "pip"
         && crate::pkgtools::run(&updater, &["--version"], 15)
             .await
@@ -1037,7 +1093,11 @@ pub async fn update_package_managers(
             });
             continue;
         }
-        match update_package_manager_inner(&state, id).await {
+        // A batch run has no per-tool confirmation to bind to: the user
+        // confirmed the batch preview, and each item re-derives its own
+        // readiness inside the executor. Passing `None` keeps that explicit
+        // rather than pretending a single-tool preview exists.
+        match update_package_manager_inner(&state, id, None).await {
             Ok(result) => {
                 let outcome = batch_outcome_for(result.status);
                 items.push(PackageManagerBatchItem {
@@ -3662,6 +3722,49 @@ pub fn reload_settings(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn restore_settings_backup(state: State<'_, AppState>) -> Result<()> {
     state.with_cfg_mut(|c| c.restore_backup())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigHistoryInfo {
+    /// 历史文件绝对路径，回滚时原样传回。
+    pub file: String,
+    /// 归档时刻（文件名里的纳秒时间戳），用于展示排序。
+    pub stamp: u128,
+}
+
+#[tauri::command]
+pub fn list_config_history(state: State<'_, AppState>) -> Result<Vec<ConfigHistoryInfo>> {
+    let entries = state.with_cfg(|c| c.list_history());
+    // list_history 已按新到旧排好；这里只把文件名里的时间戳读出来给 UI。
+    Ok(entries
+        .into_iter()
+        .map(|path| {
+            let stamp = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .and_then(|n| n.strip_prefix("config-").map(|s| s.to_owned()))
+                .and_then(|s| s.split('-').next().map(|s| s.to_owned()))
+                .and_then(|s| s.parse::<u128>().ok())
+                .unwrap_or(0);
+            ConfigHistoryInfo {
+                file: path.to_string_lossy().to_string(),
+                stamp,
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn restore_config_history(state: State<'_, AppState>, file: String) -> Result<()> {
+    let path = PathBuf::from(&file);
+    // 只接受历史目录里的 JSON：这是用户可控的入参，不能让它指向任意文件。
+    let dir = state.with_cfg(|c| c.history_dir());
+    if !system::path_within(&dir, &path) || !path.extension().is_some_and(|e| e == "json") {
+        return Err(AppError::msg("请选择应用配置历史目录中的 JSON 文件"));
+    }
+    // with_cfg_mut 自己会取查询与扫描的 mutation 守卫，这里不再重复取。
+    state.with_cfg_mut(|c| c.restore_history(&path))
 }
 
 #[tauri::command]
@@ -6506,5 +6609,66 @@ mod tests {
             .contains("Yarn Berry"));
         // An unparseable version is not silently treated as Classic.
         assert!(package_manager_update_blocker("yarn", "").is_some());
+    }
+
+    #[test]
+    fn update_execution_refuses_a_preview_that_no_longer_matches() {
+        let base = package_manager_update_preview(
+            "npm",
+            Some("D:/node/npm.cmd".into()),
+            Some("10.0.0".into()),
+            Ok(("D:/node/npm.cmd".into(), vec!["install".into(), "--global".into(), "npm@latest".into()])),
+            Some(true),
+        );
+        // The unchanged case must pass, otherwise the guard would block every
+        // legitimate update.
+        assert!(validate_update_execution_preview(&base, &base.clone()).is_ok());
+
+        // A different executable means the update would touch another
+        // installation than the one the user confirmed.
+        let other_path = package_manager_update_preview(
+            "npm",
+            Some("D:/other/npm.cmd".into()),
+            Some("10.0.0".into()),
+            Ok(("D:/other/npm.cmd".into(), vec!["install".into(), "--global".into(), "npm@latest".into()])),
+            Some(true),
+        );
+        let error = validate_update_execution_preview(&base, &other_path).unwrap_err().to_string();
+        assert!(error.contains("更新预览已变化"), "unexpected: {error}");
+
+        // A different argument set is a different command, even for the same
+        // manager and version.
+        let other_args = package_manager_update_preview(
+            "npm",
+            Some("D:/node/npm.cmd".into()),
+            Some("10.0.0".into()),
+            Ok(("D:/node/npm.cmd".into(), vec!["install".into(), "--global".into(), "npm@9.0.0".into()])),
+            Some(true),
+        );
+        assert!(validate_update_execution_preview(&base, &other_args).is_err());
+
+        // A version that changed between preview and execution invalidates the
+        // preview too: the recorded starting version would be wrong.
+        let newer = package_manager_update_preview(
+            "npm",
+            Some("D:/node/npm.cmd".into()),
+            Some("11.0.0".into()),
+            Ok(("D:/node/npm.cmd".into(), vec!["install".into(), "--global".into(), "npm@latest".into()])),
+            Some(true),
+        );
+        assert!(validate_update_execution_preview(&base, &newer).is_err());
+
+        // A manager that became blocked must be reported with its reason, not
+        // as a generic mismatch: the user needs to know why it stopped.
+        let blocked = package_manager_update_preview(
+            "yarn",
+            Some("D:/node/yarn.cmd".into()),
+            Some("4.1.0".into()),
+            Err("Yarn Berry 请在所属项目中使用 yarn set version stable 更新".into()),
+            None,
+        );
+        let error = validate_update_execution_preview(&base, &blocked).unwrap_err().to_string();
+        assert!(error.contains("当前不可更新"), "unexpected: {error}");
+        assert!(error.contains("Yarn Berry"), "reason must survive: {error}");
     }
 }

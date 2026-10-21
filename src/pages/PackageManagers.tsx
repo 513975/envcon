@@ -370,9 +370,17 @@ export function PackageManagers() {
 
   const applyUpdate = async () => {
     if (!selectedTool || updating) return;
+    // Capture the preview the user actually confirmed. It is cleared in the
+    // `finally` below, and the backend re-derives its own copy to compare
+    // against this one before running anything.
+    const confirmed = updatePreview;
+    if (!confirmed) {
+      toast.error("请先预览更新", "没有已确认的预览，未执行任何命令");
+      return;
+    }
     setUpdating(true);
     try {
-      const result = await api.updatePackageManager(selectedTool);
+      const result = await api.updatePackageManager(selectedTool, confirmed);
       const detail = result.status === "commandFailed"
         ? `更新命令失败：${result.error ?? "未提供原因"}`
         : result.status === "verificationFailed"

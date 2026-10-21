@@ -1,0 +1,84 @@
+{
+  "id": "imp05-manager-self-update-commands",
+  "title": "IMP-05 十种管理器的自更新命令契约",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "各管理器使用隔离夹具验证查询、更新、重装、卸载和失败恢复；在线与离线测试分开。",
+  "background": {
+    "gap": "`self_update_command` 为每个管理器生成确切参数，这些参数会**先展示在预览对话框里、随后原样执行**，因此命令内容本身就是对外契约。此前只有 npm（`--prefix` 重定向）与 pip（解释器切换）有间接覆盖，其余八个管理器的确切参数**没有任何夹具**——改动分支不会让任何测试失败。",
+    "whyItMatters": "命令被改动而无人发现，意味着用户确认的命令与实际执行的命令可以不一致；这正是上一轮为更新侧补执行前复核要防的问题，但如果命令本身没有契约测试，复核也只是在比对两个同源的值。"
+  },
+  "implementation": {
+    "production": "无源码改动——`self_update_command` 的分支已正确。补的是把每个分支的确切输出锁住。",
+    "fixture": "新增 `every_manager_self_update_command_is_pinned_or_refused_with_an_action`。"
+  },
+  "fixtures": [
+    {
+      "name": "every_manager_self_update_command_is_pinned_or_refused_with_an_action",
+      "groups": [
+        {
+          "kind": "能自更新，参数逐字锁定",
+          "cases": [
+            "pnpm → [\"self-update\"]",
+            "bun → [\"upgrade\"]",
+            "uv → [\"self\", \"update\"]",
+            "composer → [\"self-update\"]"
+          ],
+          "alsoAsserts": [
+            "可执行文件不被重定向（就地自更新）",
+            "不额外添加 prefix"
+          ]
+        },
+        {
+          "kind": "不能自更新，拒绝信息必须点名替代动作",
+          "cases": [
+            "pipx → 必须含 `python -m pip install --upgrade pipx`",
+            "cargo → 必须含 `rustup update stable`",
+            "dotnet → 必须含「更新 SDK」"
+          ],
+          "rationale": "只说「不支持」会让用户无处可去；这三条都指向真正的所有者（解释器 / rustup / SDK 安装器）。"
+        },
+        {
+          "kind": "未知工具",
+          "cases": ["`not-a-manager` 被拒绝，且不静默退化成某种默认命令"]
+        }
+      ]
+    }
+  ],
+  "notCoveredHere": {
+    "npmAndYarn": "这两个需要 `node_modules/<tool>/package.json` 与 `npm.cmd` 才能确认前缀，已由既有夹具 `self_update_targets_original_installation` 覆盖（含「无法确认安装目录」的拒绝路径）。",
+    "pip": "需要解释器定位，同样已由 `self_update_targets_original_installation` 覆盖（`Scripts/pip.exe` → `python.exe -m pip`）。",
+    "installationShape": "Corepack shim 与 pip 安装的 uv 由 `corepack_and_pip_installed_managers_refuse_self_update_with_a_specific_reason` 与 `list_preview_and_executor_share_one_self_update_blocker` 覆盖。"
+  },
+  "verification": {
+    "targetFixture": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml every_manager_self_update_command -- --test-threads=1",
+      "result": "1 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "317 passed / 0 failed / 14 ignored"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/pkgtools.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": ["src-tauri/src/pkgtools.rs"],
+  "notVerified": [
+    "全部夹具只验证**命令构造**，未执行任何真实管理器；「在线与离线测试分开」中的在线部分仍未做。",
+    "未验证这些命令在真实管理器上的行为（例如 `pnpm self-update` 在 Corepack 之外的安装上是否真的成功）。",
+    "查询、重装、卸载三个维度在本条中只被既有夹具零散覆盖，没有像更新这样逐管理器锁定。",
+    "失败恢复（更新中断、部分写入）没有 per-manager 夹具。"
+  ],
+  "limitations": [
+    "锁定确切参数意味着任何命令变更都需要同步改夹具——这是有意的，命令是对外契约。",
+    "夹具不校验参数顺序之外的语义（例如 `--prefix` 是否真的被管理器接受）。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "夹具只调用纯函数 `self_update_command`，写入临时目录下的空文件；未启动任何进程。"
+  }
+}

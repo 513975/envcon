@@ -2,7 +2,7 @@
 mod native;
 pub(crate) mod node;
 mod types;
-pub use types::{ItemResult, Package};
+pub use types::{settle_unfinished_items, ItemResult, Package};
 pub mod commands;
 pub use native::{
     bin_env, bin_path, cache_env, cache_path, config_path, configured_env_path, default_source,

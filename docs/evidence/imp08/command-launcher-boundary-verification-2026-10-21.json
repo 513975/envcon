@@ -1,0 +1,103 @@
+{
+  "id": "imp08-command-launcher-boundary",
+  "title": "IMP-08 外部命令边界：注册表字符串到进程启动的唯一闸门",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "审计外部命令调用，保持结构化参数，验证参数注入和 Windows 启动器边界。",
+  "audit": {
+    "method": "逐文件检索 `Command::new` / `cmd.exe` / `powershell` 调用点，区分「结构化参数」与「字符串拼接后交给 shell」两类。",
+    "findings": [
+      {
+        "location": "pkgtools::execute / run / mutate",
+        "shape": "Command::new(&inv.program).args(args)",
+        "verdict": "结构化参数，无 shell 介入"
+      },
+      {
+        "location": "download::run_installer",
+        "shape": "Command::new(exe).args(args).stdout(piped).stderr(piped).creation_flags(0x08000000)",
+        "verdict": "结构化参数 + CREATE_NO_WINDOW，无 shell"
+      },
+      {
+        "location": "detect::probe::run_capture_with_env",
+        "shape": "Command::new(exe).args(args).creation_flags(0x08000000)",
+        "verdict": "结构化参数，无 shell"
+      },
+      {
+        "location": "installer_uninstall::execute",
+        "shape": "Command::new(executable).args(&plan.arguments)",
+        "verdict": "结构化参数；参数来自 parse_command 的白名单解析"
+      },
+      {
+        "location": "reinstall_process / global_reinstall / pip_reinstall / uv_recovery",
+        "shape": "Command::new(executable).args(...)",
+        "verdict": "结构化参数，无 shell"
+      },
+      {
+        "location": "detect::system（PowerShell 探测）",
+        "shape": "Command::new(powershell.exe).args([...])",
+        "verdict": "结构化参数；PowerShell 仅用于读取版本，脚本内容为常量"
+      }
+    ],
+    "conclusion": "生产路径中不存在「拼接字符串后交给 cmd.exe /c」的调用。唯一的字符串→进程转换点是 installer_uninstall::parse_command，它把注册表里的 UninstallString 转成 (PathBuf, Vec<String>)，因此该函数就是 Windows 启动器边界本身。"
+  },
+  "implementation": {
+    "production": "无源码改动——parse_command 的既有实现已经拒绝 shell 语法、非 EXE、非绝对路径与父目录穿越。缺的是把这些拒绝边界锁住的夹具：此前只有 4 个反例，且没有正例，无法证明「合法登记仍能通过」。",
+    "fixture": "新增 `parse_command_accepts_only_an_exact_exe_with_literal_arguments`。"
+  },
+  "fixtures": [
+    {
+      "name": "parse_command_accepts_only_an_exact_exe_with_literal_arguments",
+      "accepts": [
+        "引号路径 + 字面参数（真实卸载登记的形状）",
+        "引号路径 + 无参数",
+        "首尾空白被裁掉，而不是变成路径的一部分",
+        "无引号且路径不含空格的绝对路径"
+      ],
+      "rejects": [
+        "shell 串联 `&`",
+        "管道 `|`",
+        "输出/输入重定向 `>` `<`",
+        "脱字符转义 `^`",
+        "环境变量展开 `%PATH%`",
+        "嵌套引号与单引号",
+        "引号未闭合",
+        "路径与参数之间无空白分隔",
+        "非 .exe 入口（.bat 脚本）",
+        "相对路径 `cmd.exe /c uninstall`、`msiexec.exe /x {guid}`、`Uninstall.exe /S`",
+        "父目录穿越 `..\\`"
+      ]
+    }
+  ],
+  "whyItMatters": "这个函数是注册表内容与进程启动之间唯一的校验点。注册表可能被任意软件写入，因此 UninstallString 是不可信输入；任何漏判都意味着「读取一个注册表字符串」可以直接升级为「以应用权限执行任意命令」。",
+  "verification": {
+    "targetFixture": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml parse_command_accepts_only -- --test-threads=1",
+      "result": "1 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "315 passed / 0 failed / 14 ignored"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/installer_uninstall.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": ["src-tauri/src/installer_uninstall.rs"],
+  "notVerified": [
+    "未做动态注入测试（例如用真实恶意 UninstallString 触发端到端执行）；夹具只验证解析层的接受/拒绝。",
+    "未审计 Tauri 侧前端到后端的参数传递是否存在注入面（当前 IPC 参数是结构化 JSON，但未逐命令复核）。",
+    "未覆盖 `msiexec` 之外的 Windows 启动器（如 `rundll32`、`wscript`），因为实现直接拒绝非 EXE。",
+    "凭证类参数（token、密码）的脱敏属第 339 条，未在本条处理。"
+  ],
+  "limitations": [
+    "白名单式拒绝：新增一种合法参数形态需要同步放宽 parse_command，否则会被误拒（例如带空格但未加引号的参数当前会被拆成多个）。",
+    "参数按空白切分，不支持带空格的单个参数——这是刻意的保守取舍，因为要支持它就需要完整的 Windows 命令行解析。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "夹具只调用纯函数 parse_command 并写入临时目录下的空文件；未启动任何进程、未读真实注册表。"
+  }
+}

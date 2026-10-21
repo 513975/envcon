@@ -1,0 +1,76 @@
+{
+  "id": "imp06-uv-recovery-item-status-contract",
+  "title": "IMP-06 uv 恢复条目状态契约：移除从未产生的 retained 取值",
+  "date": "2026-10-21",
+  "status": "fixed",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "统一扫描、安装、迁移、更新和删除的任务状态、阶段、取消、日志与后台恢复入口。",
+  "context": {
+    "trigger": "在排查「任务级与条目级状态矛盾」时逐个核对五个任务模块。uv_recovery 的条目不会遗留未完成状态（items 在 Ok/Err 两条分支都会 push），但同一处检查暴露了另一个问题。",
+    "finding": "`UvRecoveryItem.status` 的 Rust 文档注释与前端 TS 类型都声明了四种取值：`recovered`、`recovered-with-residue`、`failed`、`retained`。但 `retained` **从未被后端产生**——`retain` 实际是 `UvRecoveryReport` 顶层的独立 `Vec<String>` 字段。"
+  },
+  "defect": {
+    "symptom": "契约声明了一个不存在的取值。任何按注释写 `if status === \"retained\"` 的调用方都会写一个永不触发的分支。",
+    "whyItMatters": "更实质的问题是语义：`retained` 记录的是**预览阶段就判定为不可自动恢复、从未被尝试**的工具，而 `failed` 记录的是**尝试过并失败**的工具。把两者混进同一个状态集合，会让「压根没试」和「试了但失败」在 UI 上看起来一样——用户无法判断是否值得人工重试。",
+    "howFound": "读 `UvRecoveryItem` 定义后核对 `recover_tool` 的所有 `status` 赋值点，确认只产生 `recovered`/`recovered-with-residue`/`failed` 三种。"
+  },
+  "fix": {
+    "rustComment": "改为只列三种取值，并明确说明 `retained` 不是条目状态、为什么放在报告顶层。",
+    "tsType": "把 `status` 从四值联合类型收紧为三值联合类型，并加注释说明 `retained` 的位置与原因。",
+    "whyNotAddRetainedToItems": "没有选择「补上 retained 状态」这个方向：保留项在预览阶段就被排除在 `recoverable` 之外，从未进入恢复循环。强行给它们造条目，等于把「未尝试」伪装成「已处理」。"
+  },
+  "fixtures": [
+    {
+      "name": "partial_recovery_keeps_blocked_tool_and_shared_cache（已扩展）",
+      "addedAssertions": [
+        "未被尝试的工具（beta）不得出现在 `items` 里——只能出现在 `retained`",
+        "`items` 中的所有状态必须是封闭集合 `recovered` / `recovered-with-residue` / `failed` 之一"
+      ],
+      "whyThese": "前一条锁住「未尝试 ≠ 已处理」的区分，后一条防止将来有人重新把 `retained` 塞进条目状态。"
+    }
+  ],
+  "verification": {
+    "targetModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml uv_recovery -- --test-threads=1",
+      "result": "5 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "325 passed / 0 failed / 14 ignored"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/uv_recovery.rs",
+    "src/lib/types.ts"
+  ],
+  "otherModulesChecked": {
+    "install.rs": "不适用——单一 `TaskStatus` 枚举，没有条目级列表。",
+    "package_scan.rs": "不适用——`Source` 只有 `error` 字段，没有「进行中」状态。",
+    "old_packages.rs": "不适用——每轮用 `match` 处理并立即写状态，且 `CleanupResult` 没有独立的任务级状态。",
+    "size_tasks.rs": "另有一个真实缺口（取消不可抢占），已在同日的 `abandon` 变更中修复。"
+  },
+  "notVerified": [
+    "未在真实 uv 布局上触发 partial 恢复——夹具使用临时目录构造的 receipt 与假启动器。",
+    "未验证前端对 `recovered-with-residue` 的展示（UI 直接显示原始状态字符串，未做本地化映射）。"
+  ],
+  "limitations": [
+    "前端把 `item.status` 原样拼进 toast，用户看到的是英文标识符（如 `recovered-with-residue`）而非中文说明。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "夹具在临时目录内构造 uv 布局与假启动器；未执行真实 uv 命令，未触碰用户数据目录。"
+  }
+}

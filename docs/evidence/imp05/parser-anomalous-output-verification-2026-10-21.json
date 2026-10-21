@@ -1,0 +1,130 @@
+{
+  "id": "imp05-parser-anomalous-output",
+  "title": "IMP-05 解析器异常输出夹具：snippet 与版本 token 边界",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "为解析器增加属性/异常输出测试，为下载增加网络失败、取消、校验失败与重试测试。",
+  "background": {
+    "gap": "`detect::probe` 中 `snippet` 是探测失败时唯一被用户读到的文本（拼进「输出没有可识别版本：…」），却完全没有夹具。它承担三个产品决策：多行压成一行、长度上限 120 字符、空输出不能返回空串。任何一处回归都只会表现为「错误提示变得难读或误导」，不会被现有测试发现。",
+    "scope": "本条分两半：解析器侧（本次补齐 snippet）与下载侧（网络失败、取消、校验失败已有覆盖，重试仍未实现）。"
+  },
+  "implementation": {
+    "production": "无源码改动——`snippet` 实现本身正确，缺的是把它锁住的夹具。",
+    "fixture": "新增 `snippet_flattens_bounds_and_never_returns_an_empty_reason`。"
+  },
+  "fixtures": [
+    {
+      "name": "snippet_flattens_bounds_and_never_returns_an_empty_reason",
+      "asserts": [
+        "多行输出（含空行）压成单行，中间以单个空格连接",
+        "CRLF 与制表符、连续空白同样归一",
+        "空字符串与纯空白都返回「命令没有输出」，而不是空串——空串会读作「没有错误」",
+        "短文本原样保留",
+        "恰好 120 字符不截断（边界包含）",
+        "121 字符被截断并追加省略号，总长 121",
+        "截断按字符而非字节计数：130 个多字节字符不会在 UTF-8 边界处 panic，前 120 个字符完整保留"
+      ]
+    },
+    {
+      "name": "version_token_rejects_non_versions_and_strips_only_trailing_punctuation",
+      "asserts": [
+        "裸整数（1、2026）不是版本——年份与构建计数在工具输出中随处可见，接受它们会把 2026 报成版本",
+        "无数字、空字符串都返回 None",
+        "v 前缀被隐式丢弃（扫描从首个数字开始），不需要特例",
+        "尾部 . - + 被裁掉；内部保留（20.1.0.windows.1 是完整版本）",
+        "引号、括号、逗号在扫描前被剥离",
+        "前导零原样保留（01.02.03）——规范化会捏造工具从未打印的值",
+        "版本内的字母数字保留（1.2.3-rc1、1.b2）",
+        "首个合格 token 胜出，靠前的被拒 token 会被跳过（2026 1.2.3 → 1.2.3）",
+        "major.minor 两段也接受（1.2）"
+      ]
+    },
+    {
+      "name": "strip_word_prefix_requires_a_space_then_a_digit",
+      "asserts": [
+        "正常形态 word + 空格 + 数字 被剥离",
+        "无空格（deno2.1.0）不剥离——该词是更长名字的一部分",
+        "空格后非数字（deno beta）不剥离，那是散文不是版本",
+        "两个空格时第三字符是空格而非数字，因此不剥离——刻意保守，调用方回退到整行",
+        "匹配大小写敏感且精确（Deno 2.1.0 不匹配 deno）",
+        "只有词本身时无可剥离内容"
+      ]
+    },
+    {
+      "name": "a_retryable_status_is_retried_and_can_succeed",
+      "asserts": [
+        "503 后重试并最终成功——单次服务端故障不应让下载失败",
+        "服务器恰好收到 2 次请求，证明是重试而非首次就成功"
+      ]
+    },
+    {
+      "name": "retries_stop_at_the_attempt_limit",
+      "asserts": [
+        "持续 503 时在 DOWNLOAD_ATTEMPTS 次后停止，不会无限循环",
+        "服务器收到的请求数恰等于上限",
+        "失败后不留下目标文件，也不留下 .part 残片"
+      ]
+    },
+    {
+      "name": "a_client_error_is_not_retried",
+      "asserts": [
+        "404 只请求 1 次——错误的 URL 不会因为重试而变对",
+        "重试 404 只会延迟报告并向他人服务器重复发请求"
+      ]
+    },
+    {
+      "name": "a_digest_mismatch_is_final_and_not_retried",
+      "asserts": [
+        "传输成功但摘要不符时报 SHA-256 错误",
+        "只请求 1 次——同一 URL 每次返回同样字节，重试会得到同样失败",
+        "重试摘要错误会把真实的内容损坏掩盖在重试背后",
+        "失败后不留下目标文件"
+      ]
+    }
+  ],
+  "retrySemantics": {
+    "attempts": 3,
+    "retried": "连接错误、请求发送失败、响应体中途断开、5xx、429",
+    "notRetried": "取消、本地磁盘写入失败、4xx（除 429）、长度不符、摘要不符、校验资料无效",
+    "rationale": "重试只能修复传输层问题。内容层失败（长度/摘要）意味着同一 URL 会返回同样错误的字节，重试只会把真实损坏掩盖在一串静默尝试背后。取消与磁盘错误重试也无意义。",
+    "progressOnRetry": "重试前删除 .part 并把进度回报为 0，避免 UI 显示一个不再描述新尝试的百分比。"
+  },
+  "verification": {
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "312 passed / 0 failed / 14 ignored"
+    },
+    "targetFixture": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml download::tests -- --test-threads=1",
+      "result": "16 passed / 0 failed（下载模块全部夹具，含新增 4 项重试夹具）"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/detect/probe.rs",
+      "result": "exit 0"
+    }
+  },
+  "changedFiles": ["src-tauri/src/detect/probe.rs"],
+  "alreadyCovered": {
+    "downloadNetworkFailure": "download_length_and_digest_failures_never_commit_partial_file —— 长度不符与摘要不符都不会提交半截文件。",
+    "downloadCancel": "download_cancels_while_waiting_for_headers_or_more_data —— 等待响应头与等待数据两个阶段都能取消。",
+    "checksumFailure": "checksum_states_are_distinguished_and_never_misreported_as_verified —— 校验状态彼此区分，未验证绝不报成通过。",
+    "contentLength": "content_length_verification_rejects_mismatch_but_allows_unknown_length。",
+    "tamperRecheck": "pre_install_recheck_detects_file_tampering_and_size_changes。"
+  },
+  "notVerified": [
+    "未在真实网络故障下验证重试（断线、超时、真实 5xx）；夹具用本地 TCP 服务器模拟状态码，不覆盖连接中途断开。",
+    "未在真实命令输出上验证 snippet 的展示效果（例如 npm 的超长 stderr）。",
+    "夹具直接调用私有函数，不经过 `probe_simple` 的完整失败路径。",
+    "`version_token` 的夹具覆盖了形态边界，但没有覆盖「同一行存在多个候选且首个候选应被拒绝」以外的歧义场景（例如两个都合格的候选）。"
+  ],
+  "limitations": [
+    "120 字符上限是代码常量，没有配置项；夹具锁定该值，改动它需要同时改夹具（这是有意为之）。",
+    "`snippet` 不区分 stdout 与 stderr：调用方已合并两者，夹具也按合并后的文本断言。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "纯函数夹具，不启动进程、不读写用户目录。"
+  }
+}

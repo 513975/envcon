@@ -434,6 +434,50 @@ mod tests {
         .is_err());
     }
 
+    /// `verify_separate` 是「清理旧包目录」与「新安装目录」之间的唯一防线：
+    /// 一旦两者重叠或被重定向，清理会删掉刚装好的东西。既有夹具只覆盖了
+    /// `source` 侧重定向与 `source == destination`，`destination` 侧的三种
+    /// 情形（重定向、被包含、包含 source）完全没有夹具。
+    #[test]
+    fn verify_separate_rejects_overlap_and_redirects_on_both_sides() {
+        let dir = crate::test_support::TestDir::new();
+        let old = dir.path().join("old");
+        let new = dir.path().join("new");
+        std::fs::create_dir_all(old.join("nested")).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        assert!(verify_separate(&old, &new).is_ok(), "平行目录必须放行");
+
+        // destination 被重定向：清理会写到链接目标，而不是用户看到的路径。
+        let new_link = dir.path().join("new-redirected");
+        junction::create(&new, &new_link).unwrap();
+        assert!(
+            verify_separate(&old, &new_link).is_err(),
+            "destination 是链接时必须拒绝"
+        );
+        std::fs::remove_dir(&new_link).unwrap();
+
+        // source 包含 destination：清理 source 会连带删掉新安装。
+        assert!(
+            verify_separate(&old, &old.join("nested")).is_err(),
+            "destination 位于 source 之内必须拒绝"
+        );
+
+        // destination 包含 source：清理后新目录里会残留一个已空的旧树。
+        assert!(
+            verify_separate(&old.join("nested"), &old).is_err(),
+            "source 位于 destination 之内必须拒绝"
+        );
+
+        // 通过 Junction 别名指向同一位置的父子关系同样要拒绝。
+        let alias = dir.path().join("old-alias");
+        junction::create(&old, &alias).unwrap();
+        assert!(
+            verify_separate(&alias.join("nested"), &old).is_err(),
+            "别名下的父子关系必须拒绝"
+        );
+        std::fs::remove_dir(&alias).unwrap();
+    }
+
     #[test]
     fn cleanup_report_pruning_keeps_the_newest_and_leaves_foreign_files_alone() {
         let dir = crate::test_support::TestDir::new();

@@ -1,0 +1,74 @@
+{
+  "id": "imp07-config-write-failure",
+  "title": "IMP-07 配置写入失败路径：旧配置与备份仍有效",
+  "date": "2026-10-21",
+  "status": "partial",
+  "owner": "Codex",
+  "targetVersion": "0.5.7",
+  "relatedRoadmapItem": "为文件配置增加 schema 版本、兼容检查和迁移；采用同目录临时文件、可靠替换和错误恢复。",
+  "acceptanceClause": "中断、磁盘满、权限拒绝、损坏配置及跨版本迁移测试后，旧配置或可恢复备份仍有效；不能静默重置用户设置；页面不显示过期配置结果。",
+  "background": {
+    "alreadyImplemented": [
+      "`SCHEMA_VERSION = 1`，保存时写入，读取时校验",
+      "高于当前支持的版本直接拒绝并给出原因，不静默重置",
+      "未知字段经 `serde(flatten)` 保留，迁移不丢数据",
+      "`atomic_write` 使用同目录临时文件 + `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`，失败时清理临时文件",
+      "并发保护：`lock_writer` 独占锁 + `ensure_unchanged` 内容比对"
+    ],
+    "gap": "验收条款里「权限拒绝、磁盘满之后旧配置或可恢复备份仍有效」这半句**没有夹具**。此前只覆盖了并发冲突（`stale_instance_and_locked_target_preserve_disk_and_memory`）与陈旧实例，没有覆盖「写入本身失败」——而这正是最危险的场景：若备份写失败后主配置仍被覆盖，用户会同时失去新旧两份配置。"
+  },
+  "implementation": {
+    "production": "无源码改动——`save()` 的实现顺序本身是正确的：先 `parse_settings(previous)` 校验、再 `atomic_write(backup)`、最后 `atomic_write(config)`。任何一步失败都会提前返回，主配置不会被碰。夹具的任务是把这个顺序锁住。",
+    "fixtureDesign": "用两种真实可达的方式制造失败，而不是伪造 mock：备份路径变成目录（让 `create_new` 失败）、主配置设为只读（让 `MoveFileExW` 替换失败——这是 Windows 上「权限拒绝」的真实形态）。"
+  },
+  "fixtures": [
+    {
+      "name": "a_failed_backup_write_leaves_the_original_config_untouched",
+      "asserts": [
+        "把备份路径变成目录后保存失败，且错误信息非空",
+        "主配置逐字节不变——既没被新值覆盖，也没被清空",
+        "`write_blocked` 不被置位：一次写失败不应永久锁死配置",
+        "失败不留下 `.tmp-` 临时文件残骸",
+        "障碍移除后保存恢复可用，证明失败没有损坏配置对象本身"
+      ]
+    },
+    {
+      "name": "a_failed_main_write_still_leaves_a_usable_backup",
+      "asserts": [
+        "主配置设为只读后保存失败（Windows 上 `MoveFileExW` 无法替换只读文件）",
+        "备份内容等于旧配置，且 `has_valid_backup()` 为真——可直接用于恢复",
+        "主配置仍是旧内容，没有被半写坏"
+      ]
+    }
+  ],
+  "processNote": "第一版夹具写错了两次，都由测试失败暴露：(1) 断言「失败后内存设置回到原值」，但夹具是直接改 `cfg.settings` 再调 `save()`，回滚本就由调用方命令负责（如 `set_downloads_dir`），不是 `save()` 的职责——该断言已删除并注明原因；(2) 用「把主配置路径换成目录」制造写失败，但 `ensure_unchanged()` 读取阶段就先失败了，根本走不到写备份那步——改为只读属性，才是真实的替换失败路径。",
+  "verification": {
+    "configModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml config::tests -- --test-threads=1",
+      "result": "12 passed / 0 failed（含新增 2 项）"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "314 passed / 0 failed / 14 ignored"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/config.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": ["src-tauri/src/config.rs"],
+  "notVerified": [
+    "未覆盖真正的磁盘满——需要填充整个卷，夹具用「路径不可写」等价替代。",
+    "跨版本迁移只有「拒绝更高版本」与「保留未知字段」两条，没有旧版本→新版本的字段重命名/语义变更迁移。",
+    "第三方管理器配置与注册表写入不适用文件原子写入，未纳入本条。",
+    "未在真实 %APPDATA%\\envcon 上制造权限拒绝；夹具在临时目录内构造。"
+  ],
+  "limitations": [
+    "只读属性在 Windows 上阻止替换，但在某些卷（如已启用特定 ACL 的共享）上失败形态可能不同。",
+    "夹具断言的是「主配置未被修改」，不保证临时文件在所有崩溃点都被清理（进程被强杀时仍可能残留 `.tmp-`）。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "全部读写发生在 crate::test_support::TestDir 提供的临时目录；未触碰真实 %APPDATA%\\envcon。"
+  }
+}

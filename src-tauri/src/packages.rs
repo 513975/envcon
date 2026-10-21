@@ -564,6 +564,101 @@ mod tests {
         assert!(rows[0].path.as_ref().unwrap().contains("site-packages"));
     }
 
+    /// `node_rows` 把每个依赖分成四种可观察状态（正常 / 缺少安装文件 / 版本
+    /// 与声明不一致 / 本地链接），每种都对应一条给用户看的 `detail`。既有夹具
+    /// 只覆盖了 `missing`，其余三种一旦回归（例如 `invalid: false` 被误判为
+    /// 不一致）不会有任何测试失败。
+    #[test]
+    fn node_rows_classifies_every_dependency_state_and_never_invents_one() {
+        let value = serde_json::json!([{
+            "path": "D:/project",
+            "dependencies": {
+                "ok": { "version": "1.0.0" },
+                "gone": { "missing": true },
+                "wrong": { "version": "2.0.0", "invalid": "1.9.0" },
+                "linked": { "version": "0.0.0", "link": true }
+            }
+        }]);
+        let rows = node_rows(&value).unwrap();
+        let detail = |name: &str| {
+            rows.iter()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("{name} missing"))
+                .detail
+                .clone()
+        };
+        assert_eq!(detail("ok"), None, "正常安装不应带 detail");
+        assert_eq!(detail("gone").as_deref(), Some("缺少安装文件"));
+        assert_eq!(detail("wrong").as_deref(), Some("版本与声明不一致"));
+        assert_eq!(detail("linked").as_deref(), Some("本地链接"));
+
+        // `invalid: false` 是 npm 表示「校验通过」的写法，不能被当成不一致。
+        let clean = serde_json::json!([{
+            "path": "D:/project",
+            "dependencies": { "fine": { "version": "1.0.0", "invalid": false } }
+        }]);
+        assert_eq!(node_rows(&clean).unwrap()[0].detail, None);
+
+        // 路径优先取依赖自身的 `path`，缺失时回退到项目根 + node_modules。
+        let own = serde_json::json!([{
+            "path": "D:/project",
+            "dependencies": { "x": { "version": "1.0.0", "path": "D:/elsewhere/x" } }
+        }]);
+        assert_eq!(
+            node_rows(&own).unwrap()[0].path.as_deref(),
+            Some("D:/elsewhere/x")
+        );
+        let fallback = serde_json::json!([{
+            "path": "D:/project",
+            "dependencies": { "y": { "version": "1.0.0" } }
+        }]);
+        let path = node_rows(&fallback).unwrap()[0].path.clone().unwrap();
+        assert!(path.replace('\\', "/").ends_with("project/node_modules/y"), "{path}");
+
+        // 同一个包出现在多个字段里只保留一行：结果按 (name, path) 去重。
+        let duplicated = serde_json::json!([{
+            "path": "D:/project",
+            "dependencies": { "dup": { "version": "1.0.0" } },
+            "devDependencies": { "dup": { "version": "1.0.0" } }
+        }]);
+        assert_eq!(node_rows(&duplicated).unwrap().len(), 1);
+    }
+
+    /// `pip_rows` 的 `direct_url` 是「从本地目录或 VCS 直接安装」的唯一信号；
+    /// 既有夹具只验证了路径，没有验证这条 detail。
+    #[test]
+    fn pip_rows_flags_direct_sources_and_keeps_plain_packages_clean() {
+        let rows = pip_rows(
+            &serde_json::json!({
+                "installed": [
+                    { "metadata": { "name": "plain", "version": "1.0" },
+                      "metadata_location": "D:/venv/Lib/site-packages/plain.dist-info" },
+                    { "metadata": { "name": "local", "version": "0.1" },
+                      "metadata_location": "D:/venv/Lib/site-packages/local.dist-info",
+                      "direct_url": { "url": "file:///D:/src/local" } }
+                ]
+            }),
+            true,
+        )
+        .unwrap();
+        let find = |name: &str| rows.iter().find(|p| p.name == name).unwrap();
+        assert_eq!(find("plain").detail, None);
+        assert_eq!(find("local").detail.as_deref(), Some("本地或直接来源"));
+
+        // 非 inspect 模式直接读顶层数组，且 editable 安装回退到项目路径。
+        let editable = pip_rows(
+            &serde_json::json!([{ "name": "editable", "version": "0.2",
+                "editable_project_location": "D:/src/editable" }]),
+            false,
+        )
+        .unwrap();
+        assert_eq!(editable[0].path.as_deref(), Some("D:/src/editable"));
+        assert_eq!(editable[0].detail, None);
+
+        // 缺包名必须报错，而不是产出一行无名记录。
+        assert!(pip_rows(&serde_json::json!({"installed":[{"metadata":{}}]}), true).is_err());
+    }
+
     #[tokio::test]
     #[ignore = "reads installed npm/pnpm/yarn/pip via ENVCON_TEST_ROOT without changing configuration"]
     async fn actual_managers_return_readable_lists() {

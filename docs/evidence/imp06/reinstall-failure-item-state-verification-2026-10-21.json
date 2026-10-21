@@ -1,0 +1,80 @@
+{
+  "id": "imp06-reinstall-failure-item-state",
+  "title": "IMP-06 重装中断时的条目状态收尾",
+  "date": "2026-10-21",
+  "status": "fixed",
+  "owner": "Codex",
+  "targetVersion": "0.5.8",
+  "relatedRoadmapItem": "统一扫描、安装、迁移、更新和删除的任务状态、阶段、取消、日志与后台恢复入口。",
+  "defect": {
+    "symptom": "重装任务中途失败时，界面标题显示「重装失败」，但同一条目列表里仍有包显示「安装中」或「等待」。",
+    "rootCause": "`pip_reinstall::start` 与 `global_reinstall::start` 的失败分支只设置任务级 `t.status = \"error\"`，未处理条目级状态。`install()` 是 `?` 早退的，因此失败点之后的条目仍停在 `pending`，正在安装的那条停在 `installing`。",
+    "whyItMatters": "前端 `PipReinstall.tsx` 与对应的 global 组件**无条件渲染全部条目**（`task.items.map(...)`），并把状态词映射成中文。因此任务级与条目级会给出互相矛盾的说法，且这份矛盾会随 `update()` 一起写入 `envcon-reinstall.json` 报告——事后审计看到的是同一份矛盾。",
+    "howFound": "读 `pip_reinstall.rs` 的 `install()` 与 `start()` 时注意到失败分支只改任务级；随后确认 `global_reinstall.rs` 有完全相同的问题，以及前端确实无条件渲染。"
+  },
+  "fix": {
+    "sharedFunction": "在 `package_managers::types` 新增 `settle_unfinished_items(items, reason)`：只把 `pending` 与 `installing` 落成 `failed` 并写入原因。",
+    "whyOnlyThoseTwo": "`installed` / `failed` / `canceled` 记录的是真实结果，覆盖它们等于篡改已记录的证据。",
+    "callSites": [
+      "pip_reinstall::start 的失败分支",
+      "global_reinstall::start 的失败分支"
+    ],
+    "reuse": "抽成共享函数而不是各写一份循环，是因为两处逻辑必须一致；写成两份就会在下次改动时漂移。"
+  },
+  "fixtures": [
+    {
+      "name": "settle_unfinished_items_closes_pending_and_installing_only",
+      "asserts": [
+        "`installing` → `failed` 并带上统一原因",
+        "`pending` → `failed` 并带上统一原因",
+        "`installed` 保持原状，`detail` 仍为空",
+        "已有的 `failed` 保留**原有**原因，不被通用原因覆盖",
+        "`canceled` 保持原状"
+      ]
+    },
+    {
+      "name": "settle_unfinished_items_is_a_noop_when_nothing_is_unfinished",
+      "asserts": [
+        "空列表不 panic",
+        "全部已完成时不做任何改动"
+      ]
+    }
+  ],
+  "verification": {
+    "targetFixture": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml package_managers::types::tests -- --test-threads=1",
+      "result": "2 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "324 passed / 0 failed / 14 ignored"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "whitespace": {
+      "command": "git diff --check -- src-tauri/src/package_managers/types.rs src-tauri/src/pip_reinstall.rs src-tauri/src/global_reinstall.rs",
+      "result": "exit 0，仅 CRLF 提示"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/package_managers/types.rs",
+    "src-tauri/src/package_managers/mod.rs",
+    "src-tauri/src/pip_reinstall.rs",
+    "src-tauri/src/global_reinstall.rs"
+  ],
+  "notVerified": [
+    "未在真实重装流程中触发中途失败——夹具直接调用 `settle_unfinished_items`，不经过 `install()` 的早退路径。",
+    "未验证前端在 `error` 状态下的实际渲染——本次修复的是后端产出的数据，UI 侧没有新增夹具。",
+    "未覆盖「失败发生在 `update()` 写报告之前」的情形：若 `update()` 本身失败，任务状态仍可能停在 running。"
+  ],
+  "limitations": [
+    "统一原因文本是固定字符串，不区分「环境创建失败」与「某个包安装失败」；真正的失败原因仍在任务级 `message` 里。",
+    "该修复只保证任务级与条目级不矛盾，不改变 `partial` 路径的既有语义（那条路径本来就会把 `pending` 标为 `canceled`）。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "夹具只操作内存中的结构体；未启动 pip 或任何包管理器，未读写用户目录。"
+  }
+}
