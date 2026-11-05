@@ -1,6 +1,6 @@
 [package]
 name = "envcon"
-version = "0.5.5"
+version = "0.6.0"
 description = "EnvCon — Windows 开发环境一站式管理工具"
 authors = ["island"]
 edition = "2021"
@@ -29,8 +29,10 @@ junction = "1"
 winreg = "0.55"
 windows-sys = { version = "0.60", features = [
   "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
   "Win32_Foundation",
   "Win32_Security",
+  "Win32_System_Registry",
   "Win32_System_JobObjects",
   "Win32_System_Threading",
   "Win32_Storage_FileSystem",

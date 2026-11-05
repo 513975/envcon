@@ -9,6 +9,7 @@ import type {
   VersionInfo,
   SourceInfo,
   EnvVarInfo,
+  EnvScope,
   UninstallPreview,
   UninstallResult,
 } from "./types";
@@ -65,6 +66,22 @@ export const api = {
     path: string,
     version: string | null,
   ) => cmd<string>("integrate_external_env", { envType, path, version }),
+  previewMoveEnvironment: (envType: EnvType, name: string) =>
+    cmd<{ envType: EnvType; name: string; source: string; target: string; files: number; bytes: number; links: number }>(
+      "preview_move_environment",
+      { envType, name },
+    ),
+  executeMoveEnvironment: (plan: {
+    envType: EnvType; name: string; source: string; target: string; files: number; bytes: number; links: number;
+  }) => cmd<{ target: string; source: string; files: number; bytes: number }>("execute_move_environment", { plan }),
+  previewDiscardMovedSource: (envType: EnvType, name: string, source: string) =>
+    cmd<{ envType: EnvType; name: string; source: string; files: number; bytes: number }>(
+      "preview_discard_moved_source",
+      { envType, name, source },
+    ),
+  executeDiscardMovedSource: (plan: {
+    envType: EnvType; name: string; source: string; files: number; bytes: number;
+  }) => cmd<void>("execute_discard_moved_source", { plan }),
   switchEnv: (envType: EnvType, name: string) =>
     cmd<import("./types").SwitchDiagnosis>("switch_env", { envType, name }),
   previewPathRepair: (envType: EnvType) =>
@@ -89,6 +106,10 @@ export const api = {
   openPath: (path: string) => cmd<void>("open_path", { path }),
   getPathState: () => cmd<PathState>("get_path_state"),
   saveUserPath: (entries: string[]) => cmd<void>("save_user_path", { entries }),
+  previewSystemPathEdit: (entries?: string[], expectedPath?: string) =>
+    cmd<import("./types").PathEditPlan>("preview_system_path_edit", { entries: entries ?? null, expectedPath: expectedPath ?? null }),
+  saveSystemPath: (plan: import("./types").PathEditPlan) =>
+    cmd<void>("save_system_path", { plan }),
   integrateCurrentToPath: () => cmd<string[]>("integrate_current_to_path"),
   getSources: (envType: EnvType) =>
     cmd<SourceInfo[]>("get_sources", { envType }),
@@ -138,8 +159,11 @@ export const api = {
   restorePathBackup: (file: string) =>
     cmd<void>("restore_path_backup", { file }),
   getEnvVars: () => cmd<EnvVarInfo[]>("get_env_vars"),
-  saveEnvVar: (name: string, value: string) =>
-    cmd<void>("save_env_var", { name, value }),
+  getCustomEnvVars: (scope: EnvScope) =>
+    cmd<{ name: string; value: string }[]>("get_custom_env_vars", { scope }),
+  isElevated: () => cmd<boolean>("is_elevated"),
+  saveEnvVar: (name: string, value: string, scope: EnvScope) =>
+    cmd<void>("save_env_var", { name, value, scope }),
   getToolConfigs: (force = false) =>
     scanRead<import("./types").ToolConfig[]>("tools", [], force),
   inspectUvLayout: (path: string) =>

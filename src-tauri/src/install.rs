@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -104,6 +104,35 @@ impl TargetReservation {
 impl Drop for TargetReservation {
     fn drop(&mut self) {
         self.targets.lock().unwrap().remove(&self.key);
+    }
+}
+
+struct RustupDownloadDir {
+    path: PathBuf,
+}
+
+impl RustupDownloadDir {
+    fn create(downloads: &Path, task_name: &str) -> Result<Self> {
+        std::fs::create_dir_all(downloads)?;
+        let path = downloads.join(format!(".rustup-{task_name}"));
+        // rustup dispatches by its executable name; isolate tasks by directory.
+        std::fs::create_dir(&path)?;
+        Ok(Self { path })
+    }
+
+    fn installer(&self) -> PathBuf {
+        self.path.join("rustup-init.exe")
+    }
+}
+
+impl Drop for RustupDownloadDir {
+    fn drop(&mut self) {
+        if crate::detect::system::has_reparse_component(&self.path) {
+            return;
+        }
+        let _ = std::fs::remove_file(self.installer());
+        // Never recursively delete leftovers or files created by another process.
+        let _ = std::fs::remove_dir(&self.path);
     }
 }
 
@@ -316,14 +345,23 @@ async fn run_install(
     app: &AppHandle,
     tasks: &Arc<Mutex<HashMap<u64, TaskInner>>>,
 ) -> Result<()> {
+    require_install_verification(env_type, &spec.verification)?;
+
     // 下载
     let file_stem = format!(
         "{}-{}-{}-{id}",
         env_type.folder().trim_end_matches('s'), target_name, std::process::id()
     );
-    let dest = cfg
-        .downloads_dir(root)
-        .join(format!("{}.{}", file_stem, spec.method.file_ext()));
+    let downloads = cfg.downloads_dir(root);
+    let rustup_download = if matches!(&spec.method, InstallMethod::RustupInit { .. }) {
+        Some(RustupDownloadDir::create(&downloads, &file_stem)?)
+    } else {
+        None
+    };
+    let dest = match &rustup_download {
+        Some(staging) => staging.installer(),
+        None => downloads.join(format!("{}.{}", file_stem, spec.method.file_ext())),
+    };
 
     let dl_app = app.clone();
     let cancel = tasks.lock().unwrap().get(&id).unwrap().cancel.clone();
@@ -390,6 +428,12 @@ async fn run_install(
                 let r = match unzip_result {
                     Ok(()) => async {
                         validate_unpacked(env_type, &expected_version, &tmp_dir).await?;
+                        if env_type == EnvType::PowerShell {
+                            let actual = crate::detect::probe::probe_version(env_type, &tmp_dir)
+                                .await
+                                .ok_or_else(|| AppError::msg("PowerShell 7 压缩包已解压，但无法读取 pwsh.exe 版本"))?;
+                            validate_powershell_version(&expected_version, Some(&actual))?;
+                        }
                         begin_installing(tasks, id, app, "正在完成安装…", false)?;
                         tokio::fs::rename(&tmp_dir, &final_dir)
                             .await
@@ -461,6 +505,51 @@ async fn run_install(
     result
 }
 
+fn require_install_verification(
+    env_type: EnvType,
+    verification: &sources::VerificationInfo,
+) -> Result<()> {
+    if env_type == EnvType::PowerShell {
+        match verification {
+            sources::VerificationInfo::TrustedSha256 { expected, source }
+                if source == "GitHub Releases API: PowerShell/PowerShell"
+                    && is_sha256(expected) =>
+            {
+                return Ok(());
+            }
+            sources::VerificationInfo::TrustedSha256 { .. } => {
+                return Err(AppError::msg(
+                    "PowerShell 7 安装所需的官方 SHA-256 校验资料无效",
+                ));
+            }
+            _ => {
+                return Err(AppError::msg(
+                    "PowerShell 7 安装必须先取得官方 SHA-256 摘要，当前下载源未提供可验证校验资料",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_powershell_version(expected: &str, actual: Option<&str>) -> Result<()> {
+    let Some(actual) = actual else {
+        return Err(AppError::msg(
+            "PowerShell 7 压缩包已解压，但无法读取 pwsh.exe 版本",
+        ));
+    };
+    if actual != expected {
+        return Err(AppError::msg(format!(
+            "PowerShell 7 版本校验失败：预期 {expected}，实际 {actual}"
+        )));
+    }
+    Ok(())
+}
+
 async fn validate_unpacked(env_type: EnvType, version: &str, dir: &Path) -> Result<()> {
     if !crate::detect::looks_like(env_type, dir) {
         return Err(AppError::msg(format!("{env_type:?} 压缩包缺少必要的可执行文件")));
@@ -480,6 +569,34 @@ async fn validate_unpacked(env_type: EnvType, version: &str, dir: &Path) -> Resu
                 "Platform Tools 版本校验失败：预期 {version}，实际 {}",
                 actual.unwrap_or("未知")
             )));
+        }
+        return Ok(());
+    }
+    // .NET SDK 的 zip 里 `sdk/<version>/` 的目录名就是 SDK 版本。读目录名而不是
+    // 执行 dotnet.exe：上面的注释已说明，未校验的二进制不能执行。
+    if env_type == EnvType::DotNet {
+        let sdk_dir = dir.join("sdk");
+        let found = std::fs::read_dir(&sdk_dir)
+            .map(|reader| {
+                reader
+                    .flatten()
+                    .any(|entry| entry.file_name().to_string_lossy() == version)
+            })
+            .unwrap_or(false);
+        if !found {
+            return Err(AppError::msg(format!(
+                ".NET SDK 版本校验失败：sdk/ 下没有 {version} 目录"
+            )));
+        }
+        return Ok(());
+    }
+    if env_type == EnvType::PowerShell {
+        for required in ["pwsh.exe", "pwsh.dll", "pwsh.deps.json", "pwsh.runtimeconfig.json"] {
+            if !dir.join(required).is_file() {
+                return Err(AppError::msg(format!(
+                    "PowerShell 7 压缩包结构不完整，缺少 {required}"
+                )));
+            }
         }
         return Ok(());
     }
@@ -564,6 +681,50 @@ fn recover_installer_failure(
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn rustup_download_keeps_installer_name_and_isolates_concurrent_tasks() {
+        let dir = crate::test_support::TestDir::new();
+        let first = RustupDownloadDir::create(dir.path(), "rust-stable-123-1").unwrap();
+        let second = RustupDownloadDir::create(dir.path(), "rust-stable-123-2").unwrap();
+        assert_ne!(first.installer(), second.installer());
+        for staging in [&first, &second] {
+            assert_eq!(staging.installer().file_name().unwrap(), "rustup-init.exe");
+            std::fs::write(staging.installer(), b"installer").unwrap();
+        }
+        let first_path = first.path.clone();
+        drop(first);
+        assert!(!first_path.exists());
+        assert!(second.installer().is_file());
+        let second_path = second.path.clone();
+        drop(second);
+        assert!(!second_path.exists());
+    }
+
+    #[test]
+    fn rustup_download_refuses_existing_directory_without_touching_its_files() {
+        let dir = crate::test_support::TestDir::new();
+        let existing = dir.path().join(".rustup-task");
+        std::fs::create_dir(&existing).unwrap();
+        std::fs::write(existing.join("rustup-init.exe"), b"existing").unwrap();
+        assert!(RustupDownloadDir::create(dir.path(), "task").is_err());
+        assert_eq!(std::fs::read(existing.join("rustup-init.exe")).unwrap(), b"existing");
+    }
+
+    #[test]
+    fn rustup_download_cleanup_keeps_unexpected_leftovers_and_sibling_data() {
+        let dir = crate::test_support::TestDir::new();
+        std::fs::write(dir.path().join("sibling"), b"keep").unwrap();
+        let staging = RustupDownloadDir::create(dir.path(), "task").unwrap();
+        let leftover = staging.path.join("unexpected.log");
+        std::fs::write(&leftover, b"keep").unwrap();
+        std::fs::write(staging.installer(), b"installer").unwrap();
+        let installer = staging.installer();
+        drop(staging);
+        assert!(!installer.exists());
+        assert_eq!(std::fs::read(leftover).unwrap(), b"keep");
+        assert_eq!(std::fs::read(dir.path().join("sibling")).unwrap(), b"keep");
+    }
 
     #[test]
     fn failed_install_preserves_files_and_allows_same_name_retry() {
@@ -660,6 +821,66 @@ mod tests {
         assert!(validate_unpacked(EnvType::Node, "22.0.0", dir.path()).await.is_err());
         std::fs::write(dir.path().join("node.exe"), b"not an executable").unwrap();
         assert!(validate_unpacked(EnvType::Node, "22.0.0", dir.path()).await.is_ok());
+    }
+
+    /// .NET 的 zip 解压后 `sdk/<version>/` 的目录名就是 SDK 版本。校验读目录名而
+    /// 不是执行 dotnet.exe——未校验的二进制不能执行。若不校验，下载 10.0.402 却
+    /// 解压出别的版本会被当成成功。
+    #[tokio::test]
+    async fn dotnet_archive_validation_reads_the_sdk_directory_name_not_the_binary() {
+        let dir = crate::test_support::TestDir::new();
+        std::fs::write(dir.path().join("dotnet.exe"), b"not an executable").unwrap();
+        // 只有 dotnet.exe 没有 sdk/：结构判定先拒绝。
+        assert!(validate_unpacked(EnvType::DotNet, "10.0.402", dir.path()).await.is_err());
+
+        std::fs::create_dir_all(dir.path().join("sdk/10.0.402")).unwrap();
+        assert!(validate_unpacked(EnvType::DotNet, "10.0.402", dir.path()).await.is_ok());
+        // 版本不符必须报错，而不是只看「有个 sdk 目录」。
+        let error = validate_unpacked(EnvType::DotNet, "10.0.404", dir.path())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("10.0.404"), "unexpected: {error}");
+    }
+
+    #[tokio::test]
+    async fn powershell_archive_validation_requires_the_portable_layout() {
+        let dir = crate::test_support::TestDir::new();
+        std::fs::write(dir.path().join("pwsh.exe"), b"fixture").unwrap();
+        assert!(validate_unpacked(EnvType::PowerShell, "7.6.0", dir.path()).await.is_err());
+        for name in ["pwsh.dll", "pwsh.deps.json", "pwsh.runtimeconfig.json"] {
+            std::fs::write(dir.path().join(name), b"fixture").unwrap();
+        }
+        assert!(validate_unpacked(EnvType::PowerShell, "7.6.0", dir.path()).await.is_ok());
+    }
+
+    #[test]
+    fn powershell_install_requires_a_trusted_official_sha256() {
+        let digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let trusted = crate::sources::VerificationInfo::trusted_sha256(
+            digest,
+            "GitHub Releases API: PowerShell/PowerShell",
+        );
+        assert!(require_install_verification(EnvType::PowerShell, &trusted).is_ok());
+        assert!(require_install_verification(EnvType::PowerShell, &crate::sources::VerificationInfo::unverified()).is_err());
+        assert!(require_install_verification(
+            EnvType::PowerShell,
+            &crate::sources::VerificationInfo::Invalid { reason: "bad digest".into() }
+        ).is_err());
+        assert!(require_install_verification(
+            EnvType::PowerShell,
+            &crate::sources::VerificationInfo::trusted_sha256(digest, "untrusted fixture")
+        ).is_err());
+    }
+
+    #[test]
+    fn powershell_version_validation_is_exact_and_fail_closed() {
+        assert!(validate_powershell_version("7.6.0", Some("7.6.0")).is_ok());
+        let mismatch = validate_powershell_version("7.6.0", Some("7.5.0"))
+            .unwrap_err()
+            .to_string();
+        assert!(mismatch.contains("预期 7.6.0") && mismatch.contains("实际 7.5.0"));
+        assert!(validate_powershell_version("7.6.0", None).is_err());
     }
 
     #[test]

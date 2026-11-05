@@ -26,6 +26,7 @@ import { useScanResult } from "../lib/scanClient";
 import { ScanStatus } from "../components/ScanStatus";
 import { DirectorySize } from "../components/DirectorySize";
 import { savedProjectDirs } from "../lib/scanPreferences";
+import { formatBytes } from "../lib/format";
 import { toast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
 import {
@@ -115,6 +116,15 @@ export function Environments() {
   const [confirmUninstall, setConfirmUninstall] = useState<ManagedEnv | null>(
     null,
   );
+  // 搬移：把已纳管的外部环境真正复制进受管目录。
+  const [movePreview, setMovePreview] = useState<{
+    envType: EnvType; name: string; source: string; target: string; files: number; bytes: number; links: number;
+  } | null>(null);
+  const [movingEnv, setMovingEnv] = useState<ManagedEnv | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  // 搬移完成后可选删除外部旧目录：不可恢复，需要独立确认。
+  const [discardTarget, setDiscardTarget] = useState<{ envType: EnvType; name: string; source: string; files: number; bytes: number } | null>(null);
+  const [discardError, setDiscardError] = useState<string | null>(null);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPreview | null>(null);
   const [previewingUninstall, setPreviewingUninstall] = useState(false);
   // 卸载会删除内容；停用只解除管理并保留全部文件。默认仍是历史行为。
@@ -405,6 +415,79 @@ export function Environments() {
     }
   };
 
+  /** 预览把外部纳管环境搬进受管目录。只读，不会改动任何文件。 */
+  const openMovePreview = async (env: ManagedEnv) => {
+    if (busy) return;
+    setMovingEnv(env);
+    setMovePreview(null);
+    setMoveError(null);
+    try {
+      setMovePreview(await api.previewMoveEnvironment(env.envType, env.name));
+    } catch (error) {
+      setMoveError(String(error));
+    }
+  };
+
+  /** 执行搬移。外部旧目录会保留，删除是之后单独的一步。 */
+  const doMove = async () => {
+    if (!movePreview || busy) return;
+    setBusy(`move:${movePreview.name}`);
+    try {
+      const result = await api.executeMoveEnvironment(movePreview);
+      setMovingEnv(null);
+      setMovePreview(null);
+      await load();
+      // 搬移成功后受管条目已变成真实目录，`isExternalLink` 变为 false，
+      // 卡片上不会再出现「搬入受管」入口——若此时不主动接手，用户就再也
+      // 找不到删除外部旧目录的入口。因此这里直接生成删除预览，作为可选的
+      // 第二步；用户取消不会留下任何未完成状态。
+      try {
+        setDiscardTarget(
+          await api.previewDiscardMovedSource(
+            movePreview.envType,
+            movePreview.name,
+            result.source,
+          ),
+        );
+      } catch (error) {
+        // 不能删除是正常结果（例如受管副本未覆盖全部内容），如实告知即可。
+        toast.error("外部旧目录暂不能删除", String(error));
+      }
+    } catch (error) {
+      setMoveError(String(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** 为已搬入的环境重新打开「删除外部旧目录」确认。来源由搬移记录提供。 */
+  const openDiscardFor = async (env: ManagedEnv, source: string) => {
+    if (busy) return;
+    setDiscardError(null);
+    setDiscardTarget(null);
+    try {
+      setDiscardTarget(await api.previewDiscardMovedSource(env.envType, env.name, source));
+    } catch (error) {
+      // 不能删除是正常结果（旧目录已被删、受管副本未覆盖等），如实告知。
+      toast.error("无法删除外部旧目录", String(error));
+    }
+  };
+
+  const doDiscard = async () => {
+    if (!discardTarget || busy) return;
+    setBusy(`discard:${discardTarget.name}`);
+    try {
+      await api.executeDiscardMovedSource(discardTarget);
+      setDiscardTarget(null);
+      toast.success("已删除外部旧目录", "受管副本未受影响");
+      await load();
+    } catch (error) {
+      setDiscardError(String(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const doScanSystem = async (force = true) => {
     setScanning(true);
     setSystemScanError(null);
@@ -539,6 +622,8 @@ export function Environments() {
 
       {/* 环境列表 */}
       {tab === "adb" && <p className="mb-3 text-xs text-zinc-500">管理 Android Platform Tools（ADB / Fastboot），已有 SDK 仅链接其 platform-tools 目录。切换版本不重启已运行的 ADB 服务；若版本未生效或卸载提示占用，可自行执行 adb kill-server 后重试。</p>}
+      {tab === "dotnet" && <p className="mb-3 text-xs text-zinc-500">管理 .NET SDK。仅安装 SDK 的目录会被纳入；只装了 .NET 运行库（有 dotnet.exe 但无 sdk 目录）的目录会被判为结构不完整，因为运行库无法编译项目。dotnet 命令入口直接是 current\dotnet，没有 bin 子层。</p>}
+      {tab === "powershell" && <p className="mb-3 text-xs text-zinc-500">管理 PowerShell 7。只识别包含 pwsh.exe 的独立目录；Windows PowerShell 5.1 的 powershell.exe 不会被替换或纳管。受管命令入口是 current\powershell\pwsh.exe。将它集成到用户 PATH 后，新开的终端和 agent 进程可调用 pwsh；已运行的 agent 需重启，若旧 pwsh 路径排在前面，请用 PATH 诊断/修复调整顺序。</p>}
       {/* 搜索、排序与健康过滤：只在已加载的列表上生效，不触发重新扫描 */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
@@ -647,6 +732,33 @@ export function Environments() {
                     >
                       <Wand2 className="size-3.5" />
                       预览 PATH 修复
+                    </Button>
+                  )}
+                  {env.isExternalLink && (
+                    <Button
+                      size="sm"
+                      loading={busy === `move:${env.name}`}
+                      disabled={busy !== null}
+                      title={`把 ${env.name} 的外部目录复制进受管目录（原目录保留）`}
+                      aria-label={`搬入受管目录 ${env.name}`}
+                      onClick={() => void openMovePreview(env)}
+                    >
+                      <FolderPlus className="size-3.5" />
+                      搬入受管
+                    </Button>
+                  )}
+                  {env.movedFrom && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950"
+                      disabled={busy !== null}
+                      title={`删除搬移前的外部旧目录：${env.movedFrom}`}
+                      aria-label={`删除外部旧目录 ${env.name}`}
+                      onClick={() => void openDiscardFor(env, env.movedFrom!)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      删除旧目录
                     </Button>
                   )}
                   <Button
@@ -1087,6 +1199,75 @@ export function Environments() {
                  ? " 原厂卸载成功后才会清理有来源证据的 PATH；用户级包、外部 venv、共享缓存及目录外数据仍可能保留。"
                  : " 此操作不调用原厂卸载器；安装器登记、用户级包、缓存及目录外数据可能保留，不能视为完整卸载。")}
             </p>
+          </>
+        }
+      />
+      {/* 搬入受管：只读预览 + 明确说明原目录会保留 */}
+      <ConfirmDialog
+        open={movingEnv !== null}
+        onClose={() => {
+          if (!busy) {
+            setMovingEnv(null);
+            setMovePreview(null);
+            setMoveError(null);
+          }
+        }}
+        onConfirm={() => void doMove()}
+        confirmText="确认搬入受管目录"
+        loading={busy?.startsWith("move:") ?? false}
+        confirmDisabled={!movePreview || !!moveError}
+        title={`搬入受管目录 ${movingEnv?.name ?? ""}`}
+        message={
+          <>
+            {moveError && <p role="alert" className="text-red-600 dark:text-red-400">无法搬入：{moveError}</p>}
+            {!movePreview && !moveError && <p>正在核对可复制范围，请稍候...</p>}
+            {movePreview && <>
+              <p>将把外部目录复制进受管目录，完成后受管条目是真实目录，不再依赖原位置。</p>
+              <ul className="mt-2 space-y-1 break-all">
+                <li><span className="font-medium">来源</span> — {movePreview.source}</li>
+                <li><span className="font-medium">目标</span> — {movePreview.target}</li>
+                <li>
+                  <span className="font-medium">范围</span> — {movePreview.files} 个文件 / {formatBytes(movePreview.bytes)}
+                  {movePreview.links > 0 ? ` / ${movePreview.links} 个链接按原样重建` : ""}
+                </li>
+              </ul>
+              <p className="mt-2 text-xs text-zinc-500">
+                复制完成后会逐字节校验；原外部目录仍然保留，可在下一步选择删除。
+                任一步失败都会保留原纳管链接与外部目录。
+              </p>
+            </>}
+          </>
+        }
+      />
+
+      {/* 删除外部旧目录：不可恢复，独立确认 */}
+      <ConfirmDialog
+        open={discardTarget !== null}
+        onClose={() => {
+          if (!busy) {
+            setDiscardTarget(null);
+            setDiscardError(null);
+          }
+        }}
+        onConfirm={() => void doDiscard()}
+        danger
+        confirmText="确认永久删除旧目录"
+        loading={busy?.startsWith("discard:") ?? false}
+        confirmDisabled={!!discardError}
+        title={`删除外部旧目录 ${discardTarget?.name ?? ""}`}
+        message={
+          <>
+            {discardError && <p role="alert" className="text-red-600 dark:text-red-400">删除失败：{discardError}</p>}
+            {discardTarget && <>
+              <p>受管副本已核对完整覆盖该目录，删除后不可恢复。</p>
+              <ul className="mt-2 space-y-1 break-all">
+                <li><span className="font-medium">待删除</span> — {discardTarget.source}</li>
+                <li><span className="font-medium">范围</span> — {discardTarget.files} 个文件 / {formatBytes(discardTarget.bytes)}</li>
+              </ul>
+              <p className="mt-2 text-xs text-zinc-500">
+                只删除这一个外部目录；受管副本不受影响。取消则保留它，之后不会再自动提示。
+              </p>
+            </>}
           </>
         }
       />

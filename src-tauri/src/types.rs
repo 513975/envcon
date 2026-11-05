@@ -20,9 +20,11 @@ pub enum EnvType {
     Gh,
     Mingw,
     Adb,
+    DotNet,
+    PowerShell,
 }
 
-pub const ALL_ENV_TYPES: [EnvType; 16] = [
+pub const ALL_ENV_TYPES: [EnvType; 18] = [
     EnvType::Jdk,
     EnvType::Python,
     EnvType::Node,
@@ -39,6 +41,8 @@ pub const ALL_ENV_TYPES: [EnvType; 16] = [
     EnvType::Gh,
     EnvType::Mingw,
     EnvType::Adb,
+    EnvType::DotNet,
+    EnvType::PowerShell,
 ];
 
 impl EnvType {
@@ -61,6 +65,8 @@ impl EnvType {
             EnvType::Gh => "ghs",
             EnvType::Mingw => "mingws",
             EnvType::Adb => "adbs",
+            EnvType::DotNet => "dotnets",
+            EnvType::PowerShell => "powershells",
         }
     }
 
@@ -83,6 +89,8 @@ impl EnvType {
             EnvType::Gh => "gh",
             EnvType::Mingw => "mingw",
             EnvType::Adb => "adb",
+            EnvType::DotNet => "dotnet",
+            EnvType::PowerShell => "powershell",
         }
     }
 
@@ -109,6 +117,10 @@ impl EnvType {
             EnvType::Gh => vec![cur.join("bin")],
             EnvType::Mingw => vec![cur.join("bin")],
             EnvType::Adb => vec![cur],
+            // .NET SDK 的 dotnet.exe 直接位于 SDK 根目录，没有 bin 子目录。
+            EnvType::DotNet => vec![cur],
+            // PowerShell ZIP 包的 pwsh.exe 直接位于根目录。
+            EnvType::PowerShell => vec![cur],
         }
     }
 }
@@ -130,6 +142,13 @@ pub struct ManagedEnv {
     pub identity_path: String,
     pub is_link_entry: bool,
     pub is_external_link: bool,
+    /// 搬移来源：该环境是从哪个外部目录搬进受管目录的。
+    ///
+    /// 搬移后受管位置是真实目录，不再有链接指向外部旧目录，因此只能靠这条记录
+    /// 回答「旧目录在哪」。为 `None` 表示没有搬移记录（或记录不可信），此时不提供
+    /// 删除入口——宁可少一个入口，也不能凭猜测去删目录。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

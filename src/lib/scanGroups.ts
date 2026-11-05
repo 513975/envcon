@@ -3,7 +3,7 @@ import type { ExternalEnv, ScanStatus } from "./types";
 export const SCAN_CATEGORIES = ["语言与运行时", "包管理器", "构建工具", "其他工具"] as const;
 export type ScanCategory = typeof SCAN_CATEGORIES[number];
 const managers = new Set(["npm", "pnpm", "yarn", "pip", "pipx", "uv", "poetry", "cargo", "composer", "conda"]);
-const runtimes = new Set(["java", "python", "node.js", "go", "rust", "php", "zig", "llvm", "deno", "bun", "gcc", ".net"]);
+const runtimes = new Set(["java", "python", "node.js", "go", "rust", "php", "zig", "llvm", "deno", "bun", "gcc", ".net", "powershell 7"]);
 
 export function scanToolName(tool: string) {
   return tool === "pip (Python 模块)" ? "pip" : tool;

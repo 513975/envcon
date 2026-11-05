@@ -23,7 +23,9 @@ try {
       export const api = {
         getSettings: async () => ({ configWarning: null }),
         getToolConfigs: async () => [], getCaches: async () => [], scanSystem: async () => ({tools: [], warnings: []}),
-        getSources: async () => [{id: 'mirror', label: 'Mirror'}, {id: 'official', label: 'Official'}],
+        getSources: async (type) => type === 'powershell'
+          ? [{id: 'official', label: 'Microsoft PowerShell GitHub'}]
+          : [{id: 'mirror', label: 'Mirror'}, {id: 'official', label: 'Official'}],
         listVersions: (type, source) => new Promise((resolve, reject) => {
           window.downloadTest.requests.push({type, source, resolve, reject});
         }),
@@ -50,11 +52,14 @@ try {
   const waitForRequest = (count) => page.waitForFunction(
     (n) => window.downloadTest?.requests.length === n, count,
   );
-  const resolve = (index, version, date = null, verification = null) => page.evaluate(({ index, version, date, verification }) => {
+  const resolve = (index, version, date = null, verification = null, url = null) => page.evaluate(({ index, version, date, verification, url }) => {
     window.downloadTest.requests[index].resolve([
-      { version, date, sizeBytes: null, note: null, verification, url: `https://example.test/${version}.zip` },
+      { version, date, sizeBytes: null, note: null, verification, url: url ?? `https://example.test/${version}.zip` },
     ]);
-  }, { index, version, date, verification });
+  }, { index, version, date, verification, url });
+  const resolveRows = (index, rows) => page.evaluate(({ index, rows }) => {
+    window.downloadTest.requests[index].resolve(rows);
+  }, { index, rows });
   await page.goto(process.argv[2] || "http://127.0.0.1:1420");
   await page.getByRole("button", { name: "下载中心", exact: true }).click();
   // Tasks that finished while the page was elsewhere are restored from the
@@ -150,6 +155,36 @@ try {
   await page.getByRole("button", { name: "下载", exact: true }).click();
   const installs = await page.evaluate(() => window.downloadTest.installs);
   assert.deepEqual(installs, [["go", "1.26.1", "go-1.26.1", "official", "https://example.test/1.26.1.zip"]]);
+
+  await page.getByRole("button", { name: "PowerShell 7", exact: true }).click();
+  await waitForRequest(5);
+  await page.getByText(/PowerShell 7.*稳定 Windows x64 ZIP/).waitFor();
+  const powershellUrl = "https://github.com/PowerShell/PowerShell/releases/download/v7.6.9/PowerShell-7.6.9-win-x64.zip";
+  await resolveRows(4, [
+    {
+      version: "7.6.9", date: "2026-10-25", sizeBytes: null, note: null,
+      verification: {
+        status: "trustedSha256",
+        expected: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        source: "GitHub Releases API: PowerShell/PowerShell",
+      },
+      url: powershellUrl,
+    },
+    {
+      version: "7.6.8", date: "2026-10-01", sizeBytes: null, note: null,
+      verification: { status: "unverified", reason: "missing digest" },
+      url: "https://github.com/PowerShell/PowerShell/releases/download/v7.6.8/PowerShell-7.6.8-win-x64.zip",
+    },
+  ]);
+  await page.getByText("7.6.9", { exact: true }).waitFor();
+  const powershellDownloads = page.getByRole("button", { name: "下载", exact: true });
+  assert.equal(await powershellDownloads.count(), 2);
+  assert.equal(await powershellDownloads.nth(1).isDisabled(), true);
+  await powershellDownloads.nth(0).click();
+  assert.deepEqual(
+    await page.evaluate(() => window.downloadTest.installs.at(-1)),
+    ["powershell", "7.6.9", "powershell-7.6.9", "official", powershellUrl],
+  );
 
   const cancelButtons = page.getByRole("button", { name: "取消", exact: true });
   assert.equal(await cancelButtons.count(), 3);

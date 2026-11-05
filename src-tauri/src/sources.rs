@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use futures_util::{stream, StreamExt};
+use futures_util::{future::join_all, stream, StreamExt};
 
 use crate::error::{AppError, Result};
 use crate::types::EnvType;
@@ -143,6 +143,9 @@ pub fn available_sources(env_type: EnvType) -> Vec<SourceInfo> {
         EnvType::Gh => vec![mirror("ghfast.top(GitHub)"), official("GitHub")],
         EnvType::Mingw => vec![mirror("ghfast.top(GitHub)"), official("GitHub")],
         EnvType::Adb => vec![official("Google Android SDK")],
+        // .NET SDK 只有微软官方分发，没有可靠的第三方镜像。
+        EnvType::DotNet => vec![official("Microsoft .NET")],
+        EnvType::PowerShell => vec![official("Microsoft PowerShell GitHub")],
     }
 }
 
@@ -210,7 +213,7 @@ async fn fetch_versions(env_type: EnvType, source: &str) -> Result<Vec<VersionIn
         }
         (EnvType::Gradle, _) => gradle_dir("https://services.gradle.org/distributions/").await,
 
-        (EnvType::Rust, _) => Ok(rust_channels()),
+        (EnvType::Rust, _) => rust_channels().await,
 
         (EnvType::Php, _) => php_releases().await,
         (EnvType::Llvm, _) => llvm_releases().await,
@@ -221,6 +224,8 @@ async fn fetch_versions(env_type: EnvType, source: &str) -> Result<Vec<VersionIn
         (EnvType::Gh, _) => gh_releases().await,
         (EnvType::Mingw, _) => mingw_releases().await,
         (EnvType::Adb, _) => android::releases().await,
+        (EnvType::DotNet, _) => dotnet_releases().await,
+        (EnvType::PowerShell, _) => powershell_releases().await,
     };
     let mut versions = result?;
     if versions.is_empty() {
@@ -629,6 +634,42 @@ pub fn download_spec_with_verification(
             Ok(DownloadSpec {
                 url: gh(url),
                 method: InstallMethod::Unzip { strip_top: true },
+                verification: VerificationInfo::default(),
+                expected_size: None,
+            })
+        }
+        EnvType::DotNet => {
+            let url = url_hint.ok_or_else(|| {
+                AppError::msg(".NET SDK 下载链接缺失,请刷新版本列表后重试")
+            })?;
+            // Windows 上 .NET SDK 只提供 zip（无官方 exe 安装器）。
+            // zip 内直接是 dotnet.exe 与 sdk/ 等目录，没有统一的顶层目录，
+            // 所以不能 strip_top：剥掉一层会把内容散到目标目录之外。
+            Ok(DownloadSpec {
+                url: url.to_string(),
+                method: InstallMethod::Unzip { strip_top: false },
+                verification: VerificationInfo::default(),
+                expected_size: None,
+            })
+        }
+        EnvType::PowerShell => {
+            if is_prerelease_version(version) || version.split('.').count() < 3 {
+                return Err(AppError::msg("PowerShell 7 仅支持稳定版本"));
+            }
+            let url = url_hint.ok_or_else(|| {
+                AppError::msg("PowerShell 7 下载链接缺失，请刷新版本列表后重试")
+            })?;
+            let expected_url = format!(
+                "https://github.com/PowerShell/PowerShell/releases/download/v{version}/PowerShell-{version}-win-x64.zip"
+            );
+            if !url.eq_ignore_ascii_case(&expected_url) {
+                return Err(AppError::msg(
+                    "PowerShell 7 下载链接与所选版本不匹配，或不是 Microsoft 官方 Windows x64 ZIP",
+                ));
+            }
+            Ok(DownloadSpec {
+                url: url.to_string(),
+                method: InstallMethod::Unzip { strip_top: false },
                 verification: VerificationInfo::default(),
                 expected_size: None,
             })
@@ -1269,38 +1310,111 @@ async fn gradle_dir(base: &str) -> Result<Vec<VersionInfo>> {
 }
 
 /// Rust: 提供 stable/beta/nightly
-fn rust_channels() -> Vec<VersionInfo> {
-    let rustup_checksum = |channel: &str| VerificationInfo::ChecksumFile {
+/// rust-lang.org 渠道清单里 `[pkg.rust] version` 形如
+/// `"1.99.1 (58cf8f9c3 2026-10-13)"`；括号内是 commit 与发布日期，对用户
+/// 有意义的是前面的语义版本，因此只取第一个空白之前的部分。
+fn rust_manifest_version(body: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        pkg: Option<Pkg>,
+    }
+    #[derive(Deserialize)]
+    struct Pkg {
+        rust: Option<RustPkg>,
+    }
+    #[derive(Deserialize)]
+    struct RustPkg {
+        version: Option<String>,
+    }
+    let manifest: Manifest = toml::from_str(body).ok()?;
+    manifest
+        .pkg?
+        .rust?
+        .version?
+        .split_whitespace()
+        .next()
+        .map(str::to_string)
+}
+
+/// 三个官方渠道及其说明。渠道名是下载依据（rustup 按渠道安装），
+/// 具体版本号只用于展示，两者不能混用。
+const RUST_CHANNELS: [(&str, &str); 3] = [
+    ("stable", "稳定版工具链"),
+    ("beta", "公测版工具链"),
+    ("nightly", "每日构建"),
+];
+
+/// 官方渠道的校验依据：三个渠道共用同一个 rustup 引导程序，
+/// 因此校验文件也相同。独立成纯函数，便于夹具在不联网的前提下核对。
+fn rust_channel_verification(channel: &str) -> VerificationInfo {
+    VerificationInfo::ChecksumFile {
         url: "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe.sha256".into(),
         filename: "rustup-init.exe".into(),
         source: format!("rust-lang.org 官方 SHA-256 校验文件（{channel} 渠道共用同一引导程序）"),
-    };
-    vec![
-        VersionInfo {
-            version: "stable".into(),
-            date: None,
-            size_bytes: None,
-            note: Some("稳定版工具链".into()),
-            url: None,
-            verification: rustup_checksum("stable"),
-        },
-        VersionInfo {
-            version: "beta".into(),
-            date: None,
-            size_bytes: None,
-            note: Some("公测版工具链".into()),
-            url: None,
-            verification: rustup_checksum("beta"),
-        },
-        VersionInfo {
-            version: "nightly".into(),
-            date: None,
-            size_bytes: None,
-            note: Some("每日构建".into()),
-            url: None,
-            verification: rustup_checksum("nightly"),
-        },
-    ]
+    }
+}
+
+async fn rust_channels() -> Result<Vec<VersionInfo>> {
+    let probes = RUST_CHANNELS.iter().map(|(channel, _)| async move {
+        let url = format!("https://static.rust-lang.org/dist/channel-rust-{channel}.toml");
+        let fetched = async {
+            let body = http()?
+                .get(&url)
+                .send()
+                .await?
+                .error_for_status()?
+                .text()
+                .await?;
+            Ok::<_, AppError>(body)
+        }
+        .await;
+        (*channel, fetched)
+    });
+    let results = join_all(probes).await;
+
+    // 单个渠道查询失败不能让整张表消失：渠道本身仍可安装，只是版本号未知。
+    // 如实标注，而不是猜一个版本号。
+    Ok(results
+        .into_iter()
+        .map(|(channel, fetched)| {
+            let (version_note, date) = match fetched {
+                Ok(body) => match rust_manifest_version(&body) {
+                    Some(version) => {
+                        let label = RUST_CHANNELS
+                            .iter()
+                            .find(|(name, _)| *name == channel)
+                            .map(|(_, label)| *label)
+                            .unwrap_or("");
+                        (format!("{version} · {label}"), None)
+                    }
+                    None => (
+                        format!("{} · 清单格式无法解析，具体版本号未知", channel_label(channel)),
+                        None,
+                    ),
+                },
+                Err(error) => (
+                    format!("{} · 版本号查询失败：{error}", channel_label(channel)),
+                    None,
+                ),
+            };
+            VersionInfo {
+                version: channel.into(),
+                date,
+                size_bytes: None,
+                note: Some(version_note),
+                url: None,
+                verification: rust_channel_verification(channel),
+            }
+        })
+        .collect())
+}
+
+fn channel_label(channel: &str) -> &'static str {
+    RUST_CHANNELS
+        .iter()
+        .find(|(name, _)| *name == channel)
+        .map(|(_, label)| *label)
+        .unwrap_or("工具链")
 }
 
 // ---------- GitHub Releases 通用 ----------
@@ -1319,6 +1433,7 @@ struct GhRelease {
     tag_name: String,
     published_at: Option<String>,
     prerelease: Option<bool>,
+    draft: Option<bool>,
     #[serde(default)]
     assets: Vec<GhAsset>,
 }
@@ -1433,6 +1548,155 @@ fn parse_llvm_releases(list: Vec<GhRelease>) -> Result<Vec<VersionInfo>> {
     if out.is_empty() {
         return Err(AppError::msg("未能解析 LLVM 版本列表"));
     }
+    Ok(out)
+}
+
+/// PowerShell 7: official GitHub releases, stable Windows x64 ZIP only.
+async fn powershell_releases() -> Result<Vec<VersionInfo>> {
+    let list = github_releases("PowerShell/PowerShell").await?;
+    parse_powershell_releases(list)
+}
+
+fn parse_powershell_releases(list: Vec<GhRelease>) -> Result<Vec<VersionInfo>> {
+    let mut out = Vec::new();
+    for release in list {
+        // GitHub's API normally supplies both flags, but a missing value must
+        // fail closed: a draft or ambiguous release must never become an
+        // install candidate merely because it happens to have a ZIP asset.
+        if release.prerelease != Some(false) || release.draft != Some(false) {
+            continue;
+        }
+        let Some(version) = release.tag_name.strip_prefix('v') else {
+            continue;
+        };
+        if is_prerelease_version(version) || version.split('.').count() < 3 {
+            continue;
+        }
+        let expected_asset = format!("PowerShell-{version}-win-x64.zip");
+        let expected_url = format!(
+            "https://github.com/PowerShell/PowerShell/releases/download/{}/{expected_asset}",
+            release.tag_name
+        );
+        let Some(asset) = release
+            .assets
+            .iter()
+            .find(|asset| {
+                asset.name.eq_ignore_ascii_case(&expected_asset)
+                    && asset.browser_download_url.eq_ignore_ascii_case(&expected_url)
+            })
+        else {
+            continue;
+        };
+        out.push(VersionInfo {
+            version: version.to_string(),
+            date: release.published_at,
+            size_bytes: asset.size,
+            note: Some("官方 Windows x64 ZIP；仅接受稳定版".into()),
+            url: Some(asset.browser_download_url.clone()),
+            verification: github_asset_verification(asset, "PowerShell/PowerShell"),
+        });
+    }
+    out.sort_by(|a, b| version_cmp(&b.version, &a.version));
+    out.dedup_by(|a, b| a.version == b.version);
+    if out.is_empty() {
+        return Err(AppError::msg("未能解析 PowerShell 7 官方稳定 Windows x64 ZIP 版本"));
+    }
+    Ok(out)
+}
+
+/// .NET SDK：官方 release-metadata 索引。
+///
+/// `releases-index.json` 每个通道（LTS/STS）给出一条当前 SDK 记录。这里只取
+/// 每通道的最新 SDK：要列出历史补丁版本必须再逐个展开通道的 `releases.json`，
+/// 请求量成倍增加，而实际用途是「装上能用的最新版」。
+///
+/// 微软不发布逐文件 SHA-256 清单（只有 releases.json 内的 SHA-512），因此这里
+/// 无法给出可信等价物，如实标为未验证而不是假装已校验。
+async fn dotnet_releases() -> Result<Vec<VersionInfo>> {
+    let json = http()?
+        .get("https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json")
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    parse_dotnet_releases(&json)
+}
+
+/// 判断一个 SDK 版本号是否是预发布版（RC / preview / alpha / beta）。
+///
+/// 微软的 `releases-index.json` 会把预览通道的 `latest-sdk` 填成 `11.0.100-rc.2.26504.105`
+/// 这样的版本号，`support-phase` 为 `go-live`。若不识别，用户会看到一个标着「STS」
+/// 的预览版，装完才发现不是正式发布。
+fn is_prerelease_version(version: &str) -> bool {
+    let lowered = version.to_ascii_lowercase();
+    ["-rc.", "-preview.", "-alpha", "-beta", "-rc", "-preview"]
+        .iter()
+        .any(|marker| lowered.contains(marker))
+}
+
+fn parse_dotnet_releases(json: &str) -> Result<Vec<VersionInfo>> {
+    #[derive(Deserialize)]
+    struct Index {
+        #[serde(rename = "releases-index", default)]
+        channels: Vec<Channel>,
+    }
+    #[derive(Deserialize)]
+    struct Channel {
+        #[serde(rename = "latest-sdk", default)]
+        latest_sdk: String,
+        #[serde(rename = "latest-release-date")]
+        latest_release_date: Option<String>,
+        #[serde(rename = "release-type")]
+        release_type: Option<String>,
+        #[serde(rename = "support-phase")]
+        support_phase: Option<String>,
+    }
+    let index: Index = serde_json::from_str(json)?;
+    let mut out: Vec<VersionInfo> = Vec::new();
+    for channel in index.channels {
+        let version = channel.latest_sdk.trim().to_string();
+        // 空版本无法拼出下载地址，跳过而不是生成一个必然 404 的链接。
+        if version.is_empty() {
+            continue;
+        }
+        // 备注要同时回答两个问题：这个版本是不是预览版，以及它是否还在支持期。
+        // 实测 support-phase 有四种取值（active / maintenance / go-live / eol），
+        // 其中 go-live 对应预览通道；eol 通道仍列出但明确标注，由用户自己判断。
+        let channel_kind = match channel.release_type.as_deref() {
+            Some("lts") => "LTS",
+            Some("sts") => "STS",
+            _ => "SDK",
+        };
+        let note = if is_prerelease_version(&version) || channel.support_phase.as_deref() == Some("go-live") {
+            Some(format!("预览版（{channel_kind}），非正式发布"))
+        } else {
+            match channel.support_phase.as_deref() {
+                Some("eol") => Some(format!("已停止支持（原 {channel_kind}）")),
+                Some("maintenance") => Some(format!("{channel_kind} · 维护期")),
+                _ => Some(channel_kind.to_string()),
+            }
+        };
+        out.push(VersionInfo {
+            version: version.clone(),
+            date: channel.latest_release_date,
+            size_bytes: None,
+            note,
+            url: Some(format!(
+                "https://builds.dotnet.microsoft.com/dotnet/Sdk/{version}/dotnet-sdk-{version}-win-x64.zip"
+            )),
+            verification: VerificationInfo::Unverified {
+                reason: "微软不提供逐文件 SHA-256 清单，下载后未做来源校验".into(),
+            },
+        });
+    }
+    if out.is_empty() {
+        return Err(AppError::msg("未能解析 .NET SDK 版本列表"));
+    }
+    out.sort_by(|a, b| version_cmp(&b.version, &a.version));
+    // 实测索引里 2.0 通道的 latest-sdk 是 2.1.202、1.0 通道是 1.1.14，跨通道重复。
+    // 按版本去重，保留排序后先出现的那条（版本号相同则备注等价）。
+    out.dedup_by(|a, b| a.version == b.version);
     Ok(out)
 }
 
@@ -1792,6 +2056,223 @@ mod tests {
     use super::*;
 
     #[test]
+    fn completeness_policy_keeps_python_launcher_disabled_and_gradle_binary_default() {
+        let python = download_spec(EnvType::Python, "3.14.0", r"D:\managed\python", "official",
+            Some("https://www.python.org/ftp/python/3.14.0/python-3.14.0-amd64.exe")).unwrap();
+        let InstallMethod::Installer { args, .. } = python.method else { panic!("expected Python installer") };
+        for required in ["InstallAllUsers=0", "Include_launcher=0", "PrependPath=0", "Shortcuts=0"] {
+            assert!(args.iter().any(|arg| arg == required), "{required}");
+        }
+        assert!(!args.iter().any(|arg| arg == "Include_launcher=1"));
+        for source in ["official", "mirror"] {
+            let gradle = download_spec(EnvType::Gradle, "9.0.0", "gradle", source, None).unwrap();
+            assert!(gradle.url.ends_with("/gradle-9.0.0-bin.zip"));
+            assert!(matches!(gradle.method, InstallMethod::Unzip { .. }));
+        }
+    }
+
+    #[test]
+    fn dotnet_index_takes_one_sdk_per_channel_and_labels_support_phase() {
+        // 覆盖四种通道状态：正常 LTS、正常 STS、已停止支持的 LTS、空版本。
+        let json = r#"{
+          "releases-index": [
+            {"latest-sdk": "10.0.100", "latest-release-date": "2026-11-11",
+             "release-type": "lts", "support-phase": "active"},
+            {"latest-sdk": "9.0.200", "latest-release-date": "2026-02-12",
+             "release-type": "sts", "support-phase": "active"},
+            {"latest-sdk": "8.0.404", "latest-release-date": "2025-11-11",
+             "release-type": "lts", "support-phase": "eol"},
+            {"latest-sdk": "", "release-type": "lts"}
+          ]
+        }"#;
+        let rows = parse_dotnet_releases(json).unwrap();
+        // 空版本被跳过，而不是生成一个必然 404 的下载链接。
+        assert_eq!(rows.len(), 3);
+        // 按版本号降序：10 > 9 > 8。
+        assert_eq!(rows[0].version, "10.0.100");
+        assert_eq!(rows[1].version, "9.0.200");
+        assert_eq!(rows[2].version, "8.0.404");
+        // 通道类型保留在 note 中，用户能区分 LTS 与 STS。
+        assert_eq!(rows[0].note.as_deref(), Some("LTS"));
+        assert_eq!(rows[1].note.as_deref(), Some("STS"));
+        // 已停止支持单独标注，不能与在用版本混为一谈。
+        assert_eq!(rows[2].note.as_deref(), Some("已停止支持（原 LTS）"));
+        // 日期原样保留。
+        assert_eq!(rows[0].date.as_deref(), Some("2026-11-11"));
+        // 下载地址由版本号推导，且是 Windows x64 zip。
+        assert_eq!(
+            rows[0].url.as_deref(),
+            Some("https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.100/dotnet-sdk-10.0.100-win-x64.zip")
+        );
+        // 微软不提供逐文件 SHA-256 清单，必须如实标为未验证。
+        assert!(matches!(
+            rows[0].verification,
+            VerificationInfo::Unverified { .. }
+        ));
+        // 无法解析的输入报错而不是返回空列表。
+        assert!(parse_dotnet_releases("not json").is_err());
+        assert!(parse_dotnet_releases(r#"{"releases-index": []}"#).is_err());
+    }
+
+    #[test]
+    fn powershell_catalog_keeps_only_stable_windows_x64_zip_assets() {
+        let digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let asset = |version: &str, name: &str, digest: Option<&str>| GhAsset {
+            name: name.into(),
+            size: Some(42),
+            browser_download_url: format!("https://github.com/PowerShell/PowerShell/releases/download/v{version}/{name}"),
+            digest: digest.map(str::to_string),
+        };
+        let releases = vec![
+            GhRelease {
+                tag_name: "v7.6.0".into(),
+                published_at: Some("2026-01-01T00:00:00Z".into()),
+                prerelease: Some(false),
+                draft: Some(false),
+                assets: vec![asset("7.6.0", "PowerShell-7.6.0-win-x64.zip", Some(&format!("sha256:{digest}")))],
+            },
+            GhRelease {
+                tag_name: "v7.7.0-preview.1".into(),
+                published_at: None,
+                prerelease: Some(true),
+                draft: Some(false),
+                assets: vec![asset("7.7.0-preview.1", "PowerShell-7.7.0-preview.1-win-x64.zip", None)],
+            },
+            GhRelease {
+                tag_name: "v7.5.0".into(),
+                published_at: None,
+                prerelease: Some(false),
+                draft: Some(false),
+                assets: vec![asset("7.5.0", "PowerShell-7.5.0-win-arm64.zip", None)],
+            },
+            GhRelease {
+                tag_name: "v7.4.0".into(),
+                published_at: None,
+                prerelease: None,
+                draft: Some(false),
+                assets: vec![asset("7.4.0", "PowerShell-7.4.0-win-x64.zip", Some(&format!("sha256:{digest}")))],
+            },
+            GhRelease {
+                tag_name: "v7.3.0".into(),
+                published_at: None,
+                prerelease: Some(false),
+                draft: Some(true),
+                assets: vec![asset("7.3.0", "PowerShell-7.3.0-win-x64.zip", Some(&format!("sha256:{digest}")))],
+            },
+            GhRelease {
+                tag_name: "v7.2.0".into(),
+                published_at: None,
+                prerelease: Some(false),
+                draft: Some(false),
+                assets: vec![asset("7.2.0", "PowerShell-7.6.0-win-x64.zip", Some(&format!("sha256:{digest}")))],
+            },
+            GhRelease {
+                tag_name: "v7.1.0".into(),
+                published_at: None,
+                prerelease: Some(false),
+                draft: Some(false),
+                assets: vec![asset("7.1.0", "PowerShell-7.1.0-win-x64.zip", None)],
+            },
+            GhRelease {
+                tag_name: "v7.0.0".into(),
+                published_at: None,
+                prerelease: Some(false),
+                draft: Some(false),
+                assets: vec![asset("7.0.0", "PowerShell-7.0.0-win-x64.zip", Some("sha512:abc"))],
+            },
+        ];
+        let rows = parse_powershell_releases(releases).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].version, "7.6.0");
+        assert_eq!(
+            rows[0].url.as_deref(),
+            Some("https://github.com/PowerShell/PowerShell/releases/download/v7.6.0/PowerShell-7.6.0-win-x64.zip")
+        );
+        assert_eq!(rows[0].size_bytes, Some(42));
+        assert!(rows[0].verification.is_trusted());
+        assert!(matches!(rows[1].verification, VerificationInfo::Unverified { .. }));
+        assert!(matches!(rows[2].verification, VerificationInfo::Invalid { .. }));
+    }
+
+    #[test]
+    fn powershell_download_spec_binds_version_to_the_exact_official_asset() {
+        let url = "https://github.com/PowerShell/PowerShell/releases/download/v7.6.0/PowerShell-7.6.0-win-x64.zip";
+        let spec = download_spec(EnvType::PowerShell, "7.6.0", "target", SOURCE_OFFICIAL, Some(url)).unwrap();
+        assert!(matches!(spec.method, InstallMethod::Unzip { strip_top: false }));
+        for invalid in [
+            "https://github.com/PowerShell/PowerShell/releases/download/v7.6.0/PowerShell-7.5.0-win-x64.zip",
+            "https://github.com.attacker.example/PowerShell/PowerShell/releases/download/v7.6.0/PowerShell-7.6.0-win-x64.zip",
+            "https://github.com/PowerShell/PowerShell/releases/download/v7.7.0-preview.1/PowerShell-7.7.0-preview.1-win-x64.zip",
+        ] {
+            assert!(
+                download_spec(EnvType::PowerShell, "7.6.0", "target", SOURCE_OFFICIAL, Some(invalid)).is_err(),
+                "accepted {invalid}"
+            );
+        }
+        assert!(download_spec(
+            EnvType::PowerShell,
+            "7.7.0-preview.1",
+            "target",
+            SOURCE_OFFICIAL,
+            Some("https://github.com/PowerShell/PowerShell/releases/download/v7.7.0-preview.1/PowerShell-7.7.0-preview.1-win-x64.zip")
+        ).is_err());
+    }
+
+    /// 线上索引的真实形状：预览通道的 `latest-sdk` 是 RC 版本号，`support-phase`
+    /// 为 `go-live`；且 2.0/1.0 通道的 latest-sdk 与 2.1/1.1 通道重复。
+    /// 若不识别这两点，用户会看到标着「STS」的预览版，以及重复的版本行。
+    #[test]
+    fn dotnet_index_flags_prereleases_and_dedupes_channels_sharing_a_version() {
+        let json = r#"{
+          "releases-index": [
+            {"latest-sdk": "11.0.100-rc.2.26504.105", "release-type": "sts", "support-phase": "go-live"},
+            {"latest-sdk": "9.0.319", "release-type": "sts", "support-phase": "maintenance"},
+            {"latest-sdk": "2.1.202", "release-type": "sts", "support-phase": "eol"},
+            {"latest-sdk": "2.1.202", "release-type": "lts", "support-phase": "eol"},
+            {"latest-sdk": "1.1.14", "release-type": "lts", "support-phase": "eol"},
+            {"latest-sdk": "1.1.14", "release-type": "sts", "support-phase": "eol"}
+          ]
+        }"#;
+        let rows = parse_dotnet_releases(json).unwrap();
+        // 两个重复版本各只保留一行。
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.iter().filter(|r| r.version == "2.1.202").count(), 1);
+        assert_eq!(rows.iter().filter(|r| r.version == "1.1.14").count(), 1);
+
+        let by_version = |v: &str| rows.iter().find(|r| r.version == v).unwrap();
+        // 预览版必须明确标注，不能伪装成普通 STS。
+        let preview = by_version("11.0.100-rc.2.26504.105").note.as_deref().unwrap();
+        assert!(preview.contains("预览版"), "unexpected: {preview}");
+        // 维护期与已停止支持要能区分开。
+        assert_eq!(
+            by_version("9.0.319").note.as_deref(),
+            Some("STS · 维护期")
+        );
+        assert_eq!(
+            by_version("2.1.202").note.as_deref(),
+            Some("已停止支持（原 STS）")
+        );
+        // 排序仍是版本号降序。
+        assert_eq!(rows[0].version, "11.0.100-rc.2.26504.105");
+    }
+
+    /// 预发布识别不能误伤正式版本号。
+    #[test]
+    fn dotnet_prerelease_detection_does_not_flag_stable_versions() {
+        for stable in ["10.0.402", "9.0.319", "8.0.426", "3.1.426", "1.1.14"] {
+            assert!(!super::is_prerelease_version(stable), "{stable}");
+        }
+        for preview in [
+            "11.0.100-rc.2.26504.105",
+            "10.0.100-preview.1.25080.6",
+            "9.0.100-alpha.1",
+            "9.0.100-beta.2",
+        ] {
+            assert!(super::is_prerelease_version(preview), "{preview}");
+        }
+    }
+
+    #[test]
     fn node_inventory_filters_windows_zip_sorts_and_keeps_history() {
         let mut input: Vec<_> = (0..150).map(|v| serde_json::json!({
             "version": format!("v22.{v}.0"), "date": "2026-09-01", "files": ["win-x64-zip"], "lts": "Jod"
@@ -2027,10 +2508,15 @@ mod tests {
     #[tokio::test]
     async fn rust_uses_the_publisher_checksum_for_the_official_lead_binary_only() {
         // The official channel resolves rustup-init.exe.sha256 into a trusted digest.
-        let channel = rust_channels()
-            .into_iter()
-            .find(|row| row.version == "stable")
-            .unwrap();
+        // Uses the pure builder so the fixture never depends on the network.
+        let channel = VersionInfo {
+            version: "stable".into(),
+            date: None,
+            size_bytes: None,
+            note: None,
+            url: None,
+            verification: rust_channel_verification("stable"),
+        };
         assert!(matches!(
             channel.verification,
             VerificationInfo::ChecksumFile { ref url, ref filename, .. }
@@ -2279,6 +2765,8 @@ mod tests {
             (EnvType::Gh, "2.102.0", Some("https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_windows_amd64.zip"), "zip"),
             (EnvType::Mingw, "16.2.0posix-14.0.0-ucrt-r2", Some("https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r2/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r2.zip"), "zip"),
             (EnvType::Adb, "37.0.1", Some("https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip"), "zip"),
+            (EnvType::DotNet, "10.0.100", Some("https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.100/dotnet-sdk-10.0.100-win-x64.zip"), "zip"),
+            (EnvType::PowerShell, "7.6.0", Some("https://github.com/PowerShell/PowerShell/releases/download/v7.6.0/PowerShell-7.6.0-win-x64.zip"), "zip"),
         ];
         assert_eq!(cases.len(), crate::types::ALL_ENV_TYPES.len());
         for (kind, version, hint, extension) in cases {
@@ -2313,12 +2801,14 @@ mod tests {
                 tag_name: "llvmorg-23.1.3".into(),
                 published_at: Some("2026-10-06T14:53:00Z".into()),
                 prerelease: Some(false),
+                draft: Some(false),
                 assets: vec![asset("LLVM-23.1.3-win64.msi")],
             },
             GhRelease {
                 tag_name: "llvmorg-22.1.8".into(),
                 published_at: Some("2026-09-16T14:53:00Z".into()),
                 prerelease: Some(false),
+                draft: Some(false),
                 assets: vec![asset("LLVM-22.1.8-win64.exe")],
             },
         ];
@@ -2610,6 +3100,66 @@ mod tests {
                 "verification": spec.verification,
                 "formatStructure": structure
             }));
+        }
+    }
+
+    #[test]
+    fn rust_manifest_version_keeps_the_semver_and_drops_the_commit_block() {
+        // Real shape from static.rust-lang.org: the version carries the commit
+        // hash and release date in parentheses. The row title is already the
+        // channel name, so the note only needs the human-meaningful version.
+        let body = r#"
+manifest-version = "2"
+date = "2026-10-15"
+
+[pkg.cargo]
+version = "0.100.0 (5f94df478 2026-08-27)"
+
+[pkg.rust]
+version = "1.99.1 (58cf8f9c3 2026-10-13)"
+
+[pkg.rust.target.x86_64-pc-windows-msvc]
+available = true
+"#;
+        assert_eq!(rust_manifest_version(body).as_deref(), Some("1.99.1"));
+
+        // Beta and nightly carry suffixes that must survive verbatim: trimming
+        // them would misreport which toolchain the channel actually serves.
+        let beta = "[pkg.rust]\nversion = \"1.100.0-beta.7 (fd8e211ae 2026-10-17)\"\n";
+        assert_eq!(
+            rust_manifest_version(beta).as_deref(),
+            Some("1.100.0-beta.7")
+        );
+        let nightly = "[pkg.rust]\nversion = \"1.101.0-nightly (19833af72 2026-10-20)\"\n";
+        assert_eq!(
+            rust_manifest_version(nightly).as_deref(),
+            Some("1.101.0-nightly")
+        );
+    }
+
+    #[test]
+    fn rust_manifest_version_reports_none_instead_of_inventing_a_version() {
+        // A manifest we cannot read is not something to paper over: the caller
+        // must be able to say "unknown" instead of showing a guessed number.
+        assert_eq!(rust_manifest_version("[pkg.cargo]\nversion = \"0.1\"\n"), None);
+        assert_eq!(rust_manifest_version(""), None);
+        assert_eq!(rust_manifest_version("not = valid = toml"), None);
+        // [pkg.rust] present but without a version key.
+        assert_eq!(rust_manifest_version("[pkg.rust]\nmissing = true\n"), None);
+    }
+
+    #[test]
+    fn rust_channels_cover_every_official_channel_with_a_checksum() {
+        // The channel list decides which rows appear in the UI; a missing
+        // channel would silently remove an install option.
+        let names: Vec<_> = RUST_CHANNELS.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, vec!["stable", "beta", "nightly"]);
+        for (channel, label) in RUST_CHANNELS {
+            assert!(!label.is_empty());
+            assert!(matches!(
+                rust_channel_verification(channel),
+                VerificationInfo::ChecksumFile { .. }
+            ));
         }
     }
 }

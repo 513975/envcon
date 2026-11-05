@@ -7,7 +7,6 @@ import {
   ArrowDown,
   Zap,
   FolderOpen,
-  Lock,
   Check,
   Variable,
   Wand2,
@@ -17,10 +16,11 @@ import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Spinner, Empty } from "../components/ui/Empty";
+import { SystemPathEditor } from "../components/SystemPathEditor";
 import { api } from "../lib/api";
 import { toast } from "../lib/toast";
 import { cn } from "../lib/format";
-import type { PathState, EnvVarInfo } from "../lib/types";
+import type { PathState, EnvVarInfo, EnvScope } from "../lib/types";
 
 export function Paths() {
   // PATH 状态
@@ -35,6 +35,14 @@ export function Paths() {
   const [envVars, setEnvVars] = useState<EnvVarInfo[] | null>(null);
   const [envVarEdits, setEnvVarEdits] = useState<Record<string, string>>({});
   const [envVarSaving, setEnvVarSaving] = useState<string | null>(null);
+  // 用户级与系统级是两套独立的值：同名变量在两个 hive 里可以不同。
+  const [envScope, setEnvScope] = useState<EnvScope>("user");
+  // 当前进程是否已具备管理员权限；系统级写入需要它（或走提权子进程）。
+  const [elevated, setElevated] = useState(false);
+  // 不在常见清单里的变量（用户自行添加的），按当前作用域读取。
+  const [customVars, setCustomVars] = useState<{ name: string; value: string }[] | null>(null);
+  const [newVarName, setNewVarName] = useState("");
+  const [newVarValue, setNewVarValue] = useState("");
 
   const loadPath = async () => {
     try {
@@ -52,6 +60,10 @@ export function Paths() {
       const vars = await api.getEnvVars();
       setEnvVars(vars);
       setEnvVarEdits({});
+      // 权限状态决定系统级写入是直接写还是走提权子进程，提示文案也不同。
+      setElevated(await api.isElevated().catch(() => false));
+      // 自定义变量按作用域读取；读失败降级为空表，不拖垮整页。
+      setCustomVars(await api.getCustomEnvVars(envScope).catch(() => []));
     } catch (e) {
       toast.error("读取环境变量失败", String(e));
     }
@@ -60,16 +72,23 @@ export function Paths() {
   useEffect(() => {
     loadPath();
     loadEnvVars();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [envScope]);
+
+  /** 当前作用域下某个变量的值。用户级与系统级是两套独立的值。 */
+  const valueOf = (v: EnvVarInfo) =>
+    envScope === "system" ? v.systemValue : v.value;
 
   const saveEnvVar = async (v: EnvVarInfo) => {
     const value = envVarEdits[v.name] ?? "";
     setEnvVarSaving(v.name);
     try {
-      await api.saveEnvVar(v.name, value);
+      await api.saveEnvVar(v.name, value, envScope);
       toast.success(
         value.trim() ? `${v.name} 已保存` : `${v.name} 已删除`,
-        "修改前已自动备份,新开终端即生效",
+        envScope === "system"
+          ? "已写入系统环境变量；修改前已自动备份，新开终端即生效"
+          : "修改前已自动备份，新开终端即生效",
       );
       await loadEnvVars();
     } catch (e) {
@@ -83,10 +102,10 @@ export function Paths() {
   const applyAllSuggested = async () => {
     if (!envVars) return;
     const targets = envVars.filter(
-      (v) => v.suggested && v.value !== v.suggested,
+      (v) => v.suggested && valueOf(v) !== v.suggested,
     );
     if (targets.length === 0) {
-      toast.info("无需更新", "所有可推导变量均已指向当前环境");
+      toast.info("无需更新", `所有可推导变量在${envScope === "system" ? "系统" : "用户"}级均已指向当前环境`);
       return;
     }
     setEnvVarSaving("__all__");
@@ -94,7 +113,7 @@ export function Paths() {
     const failures: string[] = [];
     for (const v of targets) {
       try {
-        await api.saveEnvVar(v.name, v.suggested!);
+        await api.saveEnvVar(v.name, v.suggested!, envScope);
         ok += 1;
       } catch (e) {
         failures.push(`${v.name}: ${String(e)}`);
@@ -171,7 +190,7 @@ export function Paths() {
   return (
     <PageShell
       title="路径管理"
-      desc="用户 PATH 与开发环境变量"
+      desc="用户 / 系统 PATH 与开发环境变量"
       actions={
         <Button size="sm" onClick={loadPath}>
           <RefreshCw className="size-3.5" />
@@ -276,25 +295,13 @@ export function Paths() {
         </div>
       </Card>
 
-      {/* 系统 PATH(只读) */}
-      <Card className="mt-5">
-        <CardHeader
-          title={
-            <span className="flex items-center gap-1.5">
-              <Lock className="size-3.5 text-zinc-400" />
-              系统 PATH(只读)
-            </span>
-          }
-          desc="修改系统 PATH 需要管理员权限,EnvCon 出于安全仅作展示"
-        />
-        <div className="px-4 py-2 divide-y divide-zinc-50 dark:divide-zinc-800/50">
-          {pathState?.system.map((p, i) => (
-            <div key={i} className="py-1.5 text-xs font-mono text-zinc-500 dark:text-zinc-400 selectable">
-              {p}
-            </div>
-          ))}
-        </div>
-      </Card>
+      <SystemPathEditor entries={pathState?.system} onSaved={async () => {
+        try {
+          setPathState(await api.getPathState());
+        } catch (e) {
+          toast.error("读取 PATH 失败", String(e));
+        }
+      }} />
 
       {/* 环境变量管理 */}
       <Card className="mt-5">
@@ -305,7 +312,11 @@ export function Paths() {
               开发环境变量
             </span>
           }
-          desc="JAVA_HOME / GOPATH 等用户级变量;修改前自动备份,新开终端即生效"
+          desc={
+            envScope === "system"
+              ? "系统级变量（HKLM），对所有用户生效；写入需要管理员权限，会弹出一次授权"
+              : "用户级变量（HKCU），仅对当前用户生效；修改前自动备份，新开终端即生效"
+          }
           actions={
             <>
               <Button
@@ -322,24 +333,73 @@ export function Paths() {
             </>
           }
         />
+        {/* 作用域切换：用户级与系统级是两套独立的值，必须让用户看清在改哪一套 */}
+        <div
+          role="group"
+          aria-label="环境变量作用域"
+          className="flex flex-wrap items-center gap-1.5 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800"
+        >
+          <button
+            type="button"
+            aria-pressed={envScope === "user"}
+            disabled={envVarSaving !== null}
+            onClick={() => {
+              setEnvScope("user");
+              setEnvVarEdits({});
+            }}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-xs",
+              envScope === "user"
+                ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                : "border-zinc-200 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400",
+            )}
+          >
+            用户级（HKCU）
+          </button>
+          <button
+            type="button"
+            aria-pressed={envScope === "system"}
+            disabled={envVarSaving !== null}
+            onClick={() => {
+              setEnvScope("system");
+              setEnvVarEdits({});
+            }}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-xs",
+              envScope === "system"
+                ? "border-amber-500 bg-amber-50 font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                : "border-zinc-200 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400",
+            )}
+          >
+            系统级（HKLM）
+          </button>
+          {envScope === "system" && !elevated && (
+            <span className="text-[11px] text-amber-600 dark:text-amber-400">
+              写入时会弹出一次管理员授权
+            </span>
+          )}
+        </div>
         {!envVars ? (
           <Spinner />
         ) : (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {envVars.map((v) => {
               const editing = envVarEdits[v.name] !== undefined;
-              const value = envVarEdits[v.name] ?? v.value ?? "";
+              // 必须按当前作用域取值：切到系统级后仍读 v.value 会让用户以为
+              // 系统级变量等于用户级的值，进而覆盖掉真实的系统级配置。
+              const value = envVarEdits[v.name] ?? valueOf(v) ?? "";
               const matchesSuggested =
-                v.suggested != null && v.value === v.suggested;
+                v.suggested != null && valueOf(v) === v.suggested;
               return (
-                <div key={v.name} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="w-40 shrink-0">
-                    <div className="text-xs font-semibold font-mono">{v.name}</div>
-                    <div className="text-[10px] text-zinc-400">{v.label}</div>
+                <div key={v.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
+                  <div className="w-full min-w-0 shrink-0 sm:w-40">
+                    <div className="truncate text-xs font-semibold font-mono">{v.name}</div>
+                    <div className="truncate text-[10px] text-zinc-400">{v.label}</div>
                   </div>
                   <input
                     value={value}
                     placeholder={v.suggested ?? "未设置"}
+                    aria-label={`${v.name} 的值`}
                     onChange={(e) =>
                       setEnvVarEdits((m) => ({ ...m, [v.name]: e.target.value }))
                     }
@@ -347,11 +407,11 @@ export function Paths() {
                       e.key === "Enter" && editing && saveEnvVar(v)
                     }
                     className={cn(
-                      "flex-1 h-7 rounded-md border bg-transparent px-2 text-xs font-mono outline-none transition-colors",
+                      "min-w-0 flex-1 h-7 rounded-md border bg-transparent px-2 text-xs font-mono outline-none transition-colors",
                       editing
                         ? "border-emerald-500"
                         : "border-transparent hover:border-zinc-200 dark:hover:border-zinc-700",
-                      v.value == null && !editing && "text-zinc-400",
+                      valueOf(v) == null && !editing && "text-zinc-400",
                     )}
                   />
                   {matchesSuggested && !editing && <Badge color="green">已指向当前</Badge>}
@@ -367,7 +427,7 @@ export function Paths() {
                         保存
                       </Button>
                     )}
-                    {!editing && v.suggested && v.value !== v.suggested && (
+                    {!editing && v.suggested && valueOf(v) !== v.suggested && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -382,7 +442,7 @@ export function Paths() {
                         <Wand2 className="size-3.5" />
                       </Button>
                     )}
-                    {v.value != null && !editing && (
+                    {valueOf(v) != null && !editing && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -392,7 +452,7 @@ export function Paths() {
                           setEnvVarEdits((m) => ({ ...m, [v.name]: "" }));
                           setTimeout(() => {
                             api
-                              .saveEnvVar(v.name, "")
+                              .saveEnvVar(v.name, "", "user")
                               .then(() => {
                                 toast.success(`${v.name} 已删除`);
                                 loadEnvVars();
@@ -410,6 +470,102 @@ export function Paths() {
             })}
           </div>
         )}
+
+        {/* 自定义变量：常见清单之外的名字，用户自行添加 */}
+        <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              自定义变量
+            </span>
+            <span className="text-[11px] text-zinc-400">
+              {envScope === "system" ? "写入系统级（需授权）" : "写入用户级"}
+            </span>
+          </div>
+          {customVars === null ? (
+            <Spinner />
+          ) : customVars.length === 0 ? (
+            <p className="text-[11px] text-zinc-400">暂无自定义变量</p>
+          ) : (
+            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {customVars.map((v) => (
+                <div key={v.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                  <div className="w-full min-w-0 truncate text-xs font-semibold font-mono sm:w-40 sm:shrink-0" title={v.name}>
+                    {v.name}
+                  </div>
+                  <span className="flex-1 truncate text-xs font-mono text-zinc-500" title={v.value}>
+                    {v.value}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+                    title={`删除 ${v.name}`}
+                    aria-label={`删除变量 ${v.name}`}
+                    loading={envVarSaving === `custom:${v.name}`}
+                    onClick={async () => {
+                      setEnvVarSaving(`custom:${v.name}`);
+                      try {
+                        await api.saveEnvVar(v.name, "", envScope);
+                        toast.success(`${v.name} 已删除`);
+                        await loadEnvVars();
+                      } catch (e) {
+                        toast.error("删除失败", String(e));
+                      } finally {
+                        setEnvVarSaving(null);
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Plus className="size-3.5 shrink-0 text-zinc-400" />
+            <input
+              value={newVarName}
+              onChange={(e) => setNewVarName(e.target.value)}
+              placeholder="变量名，如 MY_TOOL_HOME"
+              aria-label="新变量名"
+              className="w-full min-w-0 h-7 rounded-md border border-transparent bg-transparent px-2 text-xs font-mono outline-none transition-colors hover:border-zinc-200 focus:border-emerald-500 dark:hover:border-zinc-700 sm:w-40 sm:shrink-0"
+            />
+            <input
+              value={newVarValue}
+              onChange={(e) => setNewVarValue(e.target.value)}
+              placeholder="值"
+              aria-label="新变量值"
+              className="min-w-0 flex-1 h-7 rounded-md border border-transparent bg-transparent px-2 text-xs font-mono outline-none transition-colors hover:border-zinc-200 focus:border-emerald-500 dark:hover:border-zinc-700"
+            />
+            <Button
+            size="sm"
+            aria-label="添加环境变量"
+            loading={envVarSaving === "__new__"}
+            disabled={!newVarName.trim()}
+              onClick={async () => {
+                setEnvVarSaving("__new__");
+                try {
+                  await api.saveEnvVar(newVarName.trim(), newVarValue, envScope);
+                  toast.success(
+                    `${newVarName.trim()} 已保存`,
+                    envScope === "system" ? "已写入系统环境变量" : "已写入用户环境变量",
+                  );
+                  setNewVarName("");
+                  setNewVarValue("");
+                  await loadEnvVars();
+                } catch (e) {
+                  toast.error("保存失败", String(e));
+                } finally {
+                  setEnvVarSaving(null);
+                }
+              }}
+            >
+              <Check className="size-3.5" />
+              添加
+            </Button>
+          </div>
+        </div>
       </Card>
 
     </PageShell>

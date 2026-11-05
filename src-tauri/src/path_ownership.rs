@@ -66,10 +66,61 @@ fn owned_at(journal: &Journal, current: &str) -> Vec<String> {
 pub(crate) enum Change<'a> {
     Append(&'a [String]),
     Replace(&'a [String]),
+    Edit(&'a EditPlan),
     Remove(&'a CleanupPlan, &'a [String]),
     /// Move already-present managed entries ahead of the entries that shadow
     /// them. Nothing is added, removed or rewritten.
     Reorder(&'a ReorderPlan),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditPlan {
+    pub expected_path: String,
+    pub journal_snapshot: String,
+    pub entries: Vec<String>,
+    pub resulting_path: String,
+    pub sources: Vec<String>,
+}
+
+/// Preserve untouched legacy segments exactly; validate only new spellings.
+pub(crate) fn preview_edit(journal_path: &Path, current: &str, entries: &[String]) -> Result<EditPlan> {
+    let journal = load(journal_path)?;
+    let original = current.split(';').collect::<Vec<_>>();
+    let owned = owned_at(&journal, current);
+    for entry in entries {
+        if entry.contains([';', '\0', '\r', '\n']) {
+            return Err(AppError::msg("PATH 单项不能包含分号、空字符或换行"));
+        }
+        if original.contains(&entry.as_str()) { continue; }
+        let expanded_root = entry.strip_prefix('%')
+            .and_then(|tail| tail.split_once('%'))
+            .is_some_and(|(name, tail)| !name.is_empty() && tail.starts_with(['\\', '/'])
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+        if entry.trim() != entry || entry.contains('"')
+            || !(Path::new(entry).is_absolute() || expanded_root)
+        {
+            return Err(AppError::msg("新增或修改的 PATH 项必须是绝对路径（可用 %变量%），且不能带引号或首尾空白"));
+        }
+        if entries.iter().filter(|other| key(other) == key(entry)).count() > 1 {
+            return Err(AppError::msg("不能新增重复的 PATH 项"));
+        }
+    }
+    let resulting_path = entries.join(";");
+    if resulting_path.encode_utf16().count() >= 32767 {
+        return Err(AppError::msg("PATH 超过 Windows 环境变量长度限制"));
+    }
+    Ok(EditPlan {
+        expected_path: current.into(),
+        journal_snapshot: format!("{:x}", Sha256::digest(serde_json::to_vec(&journal)?)),
+        entries: entries.to_vec(),
+        resulting_path,
+        sources: entries.iter().map(|entry| {
+            if owned.contains(entry) { "EnvCon 已记录；手工保存后不再自动认领" }
+            else if original.contains(&entry.as_str()) { "共享 / 来源未确认" }
+            else { "本次手工新增 / 修改；不自动认领" }.into()
+        }).collect(),
+    })
 }
 
 /// Read-only plan for fixing a shadowed command by ordering, not by deleting.
@@ -293,6 +344,15 @@ pub(crate) fn apply(
             owned.clear();
             ("manual", entries.join(";"))
         }
+        Change::Edit(plan) => {
+            if plan.expected_path != before
+                || preview_edit(journal_path, &before, &plan.entries)? != *plan
+            {
+                return Err(AppError::msg("PATH 或来源记录已变化，请重新读取并预览"));
+            }
+            owned.clear();
+            ("manual", plan.resulting_path.clone())
+        }
         Change::Reorder(plan) => {
             // Recompute from the live value so a stale preview cannot reorder a
             // different PATH. Only ordering may change; the set must be equal.
@@ -379,6 +439,68 @@ mod tests {
         FixtureStore { value: value.into(), writes: 0, fail_write: false, corrupt_write: false }
     }
     fn entries(values: &[&str]) -> Vec<String> { values.iter().map(|v| (*v).into()).collect() }
+
+    #[test]
+    fn manual_edit_preserves_legacy_segments_and_rejects_stale_or_tampered_plans() {
+        let dir = crate::test_support::TestDir::new();
+        let journal = dir.path().join("system/journal.json");
+        let original = r"%SystemRoot%\system32;; C:\legacy ;C:\Windows;";
+        let requested = entries(&[r"%SystemRoot%\system32", "", " C:\\legacy ", r"C:\Windows", "", r"D:\tools"]);
+        let plan = preview_edit(&journal, original, &requested).unwrap();
+        assert_eq!(plan.resulting_path, format!("{original};D:\\tools"));
+        assert_eq!(plan.sources[0], "共享 / 来源未确认");
+        let mut backend = store(original);
+        let mut tampered = plan.clone();
+        tampered.resulting_path = r"C:\overwritten".into();
+        assert!(apply(&mut backend, &journal, Change::Edit(&tampered)).is_err());
+        assert_eq!(backend.writes, 0);
+        backend.value.push_str(r";D:\external");
+        assert!(apply(&mut backend, &journal, Change::Edit(&plan)).is_err());
+        assert_eq!(backend.writes, 0);
+        backend.value = original.into();
+        apply(&mut backend, &journal, Change::Edit(&plan)).unwrap();
+        assert_eq!(backend.value, plan.resulting_path);
+        let last = load(&journal).unwrap().records.pop().unwrap();
+        assert_eq!(last.status, "verified");
+        assert!(last.owned.is_empty());
+        // The same PATH with a different journal is still a stale preview.
+        backend.value = original.into();
+        assert!(apply(&mut backend, &journal, Change::Edit(&plan)).is_err());
+        assert_eq!(backend.writes, 1);
+    }
+
+    #[test]
+    fn manual_edit_validates_new_entries_and_does_not_claim_existing_ones() {
+        let dir = crate::test_support::TestDir::new();
+        let journal = dir.path().join("journal.json");
+        for bad in ["relative", "", "C:\\one;C:\\two", "C:\\bad\0", "C:\\bad\n", "\"C:\\quoted\"", " C:\\space", "%ROOT%relative"] {
+            assert!(preview_edit(&journal, r"C:\Windows", &entries(&[bad])).is_err(), "{bad:?}");
+        }
+        assert!(preview_edit(&journal, "", &entries(&[r"D:\one", r"d:/one"])).is_err());
+        assert!(preview_edit(&journal, "", &entries(&[&format!("C:\\{}", "x".repeat(32767))])).is_err());
+        let mut backend = store(r"C:\Windows");
+        let owned = entries(&[r"D:\managed"]);
+        apply(&mut backend, &journal, Change::Append(&owned)).unwrap();
+        let plan = preview_edit(&journal, &backend.value, &entries(&[r"C:\Windows", r"D:\managed", r"%TOOLS%\bin"])).unwrap();
+        assert!(plan.sources[1].starts_with("EnvCon"));
+        apply(&mut backend, &journal, Change::Edit(&plan)).unwrap();
+        assert!(preview_cleanup(&journal, &backend.value, &owned, &[]).unwrap().removed.is_empty());
+    }
+
+    #[test]
+    fn manual_edit_failure_is_unverified_and_scopes_keep_independent_journals() {
+        let dir = crate::test_support::TestDir::new();
+        let user = dir.path().join("ownership/journal.json");
+        let system = dir.path().join("ownership-system/journal.json");
+        let mut backend = store(r"C:\Windows");
+        apply(&mut backend, &user, Change::Append(&entries(&[r"D:\managed"]))).unwrap();
+        let user_bytes = fs::read(&user).unwrap();
+        let plan = preview_edit(&system, &backend.value, &entries(&[r"D:\new"])).unwrap();
+        backend.corrupt_write = true;
+        assert!(apply(&mut backend, &system, Change::Edit(&plan)).is_err());
+        assert_eq!(fs::read(&user).unwrap(), user_bytes);
+        assert_eq!(load(&system).unwrap().records.last().unwrap().status, "unverified");
+    }
 
     #[test]
     fn reorder_moves_only_the_managed_entry_and_keeps_every_other_segment() {

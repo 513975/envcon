@@ -571,35 +571,64 @@ pub async fn run_rustup_init(
     dist_server: Option<&str>,
     on_line: impl Fn(String),
 ) -> Result<()> {
+    if exe.file_name() != Some(std::ffi::OsStr::new("rustup-init.exe")) {
+        return Err(AppError::msg(
+            "rustup-init 安装器必须保留文件名 rustup-init.exe；其他名称可能被误识别为 Rust 工具代理",
+        ));
+    }
     std::fs::create_dir_all(rustup_home)?;
     std::fs::create_dir_all(cargo_home)?;
 
-    let mut cmd = tokio::process::Command::new(exe);
-    cmd.args([
-        "-y",
-        "--no-modify-path",
-        "--default-toolchain",
-        channel,
-        "--profile",
-        "minimal",
-    ])
-    .env("RUSTUP_HOME", rustup_home)
-    .env("CARGO_HOME", cargo_home)
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::piped())
-    .kill_on_drop(true)
-    .creation_flags(0x08000000);
-    if let Some(server) = dist_server {
-        cmd.env("RUSTUP_DIST_SERVER", server)
-            .env("RUSTUP_UPDATE_ROOT", format!("{server}/rustup"));
-    }
-
-    let child = cmd
-        .spawn()
-        .map_err(|e| AppError::msg(format!("启动 rustup-init 失败: {e}")))?;
-
-    monitor_installer(child, on_line).await
+    run_rustup_steps(exe, channel, rustup_home, cargo_home, dist_server, |mut cmd| {
+        let on_line = &on_line;
+        async move {
+            let child = cmd.spawn()
+                .map_err(|e| AppError::msg(format!("启动 Rust 安装/组件验证失败: {e}")))?;
+            monitor_installer(child, on_line).await
+        }
+    }).await
 }
+
+async fn run_rustup_steps<F, Fut>(
+    exe: &Path,
+    channel: &str,
+    rustup_home: &Path,
+    cargo_home: &Path,
+    dist_server: Option<&str>,
+    mut run: F,
+) -> Result<()>
+where
+    F: FnMut(tokio::process::Command) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let rustup = cargo_home.join("bin/rustup.exe");
+    // Never use a PATH-resolved rustup or a repository's toolchain override.
+    let steps: [(&Path, Vec<&str>, &str); 4] = [
+        (exe, vec!["-y", "--no-modify-path", "--default-toolchain", channel, "--profile", "minimal"], "安装基础工具链"),
+        (&rustup, vec!["component", "add", "--toolchain", channel, "clippy", "rustfmt"], "补装 clippy / rustfmt"),
+        (&rustup, vec!["run", channel, "cargo-clippy", "--version"], "验证 clippy"),
+        (&rustup, vec!["run", channel, "cargo-fmt", "--version"], "验证 rustfmt"),
+    ];
+    for (program, args, stage) in steps {
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(args)
+            .env("RUSTUP_HOME", rustup_home)
+            .env("CARGO_HOME", cargo_home)
+            .env("RUSTUP_TOOLCHAIN", channel)
+            .current_dir(cargo_home)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .creation_flags(0x08000000);
+        if let Some(server) = dist_server {
+            cmd.env("RUSTUP_DIST_SERVER", server)
+                .env("RUSTUP_UPDATE_ROOT", format!("{server}/rustup"));
+        }
+        run(cmd).await.map_err(|e| AppError::msg(format!("Rust {stage}失败：{e}")))?;
+    }
+    Ok(())
+}
+
 
 impl InstallMethod {
     /// 下载的文件扩展名
@@ -615,6 +644,66 @@ impl InstallMethod {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[tokio::test]
+    async fn rustup_bootstrap_rejects_proxy_names_before_creating_homes() {
+        let dir = crate::test_support::TestDir::new();
+        let rustup_home = dir.path().join("rustup-home");
+        let cargo_home = dir.path().join("cargo-home");
+        let error = run_rustup_init(
+            &dir.path().join("rust-rust-stable-11132-4.exe"), "stable",
+            &rustup_home, &cargo_home, None, |_| {},
+        ).await.unwrap_err();
+        assert!(error.to_string().contains("rustup-init.exe"));
+        assert!(!rustup_home.exists());
+        assert!(!cargo_home.exists());
+    }
+
+    #[tokio::test]
+    async fn rustup_install_pins_homes_channel_components_and_probes() {
+        let dir = crate::test_support::TestDir::new();
+        let exe = dir.path().join("rustup-init.exe");
+        let rustup_home = dir.path().join("rustup-home");
+        let cargo_home = dir.path().join("cargo-home");
+        let mut calls = Vec::new();
+        run_rustup_steps(&exe, "beta", &rustup_home, &cargo_home, Some("https://mirror.test"), |cmd| {
+            let cmd = cmd.as_std();
+            assert_eq!(cmd.get_current_dir(), Some(cargo_home.as_path()));
+            let env = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.unwrap().to_string_lossy().into_owned()))
+                .collect::<std::collections::HashMap<_, _>>();
+            assert_eq!(env["RUSTUP_HOME"], rustup_home.to_string_lossy());
+            assert_eq!(env["CARGO_HOME"], cargo_home.to_string_lossy());
+            assert_eq!(env["RUSTUP_TOOLCHAIN"], "beta");
+            assert_eq!(env["RUSTUP_DIST_SERVER"], "https://mirror.test");
+            assert_eq!(env["RUSTUP_UPDATE_ROOT"], "https://mirror.test/rustup");
+            calls.push((PathBuf::from(cmd.get_program()), cmd.get_args().map(|v| v.to_string_lossy().into_owned()).collect::<Vec<_>>()));
+            std::future::ready(Ok(()))
+        }).await.unwrap();
+        assert_eq!(calls[0], (exe, vec!["-y", "--no-modify-path", "--default-toolchain", "beta", "--profile", "minimal"].into_iter().map(str::to_owned).collect()));
+        let rustup = cargo_home.join("bin/rustup.exe");
+        for (i, expected) in [
+            vec!["component", "add", "--toolchain", "beta", "clippy", "rustfmt"],
+            vec!["run", "beta", "cargo-clippy", "--version"],
+            vec!["run", "beta", "cargo-fmt", "--version"],
+        ].into_iter().enumerate() {
+            assert_eq!(calls[i + 1].0, rustup);
+            assert_eq!(calls[i + 1].1, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn rustup_install_stops_on_every_failed_stage_including_shim_probes() {
+        for failed in 0..4 {
+            let mut calls = 0;
+            let result = run_rustup_steps(Path::new("init.exe"), "stable", Path::new("rustup-home"), Path::new("cargo-home"), None, |_| {
+                let result = if calls == failed { Err(AppError::msg("component unavailable")) } else { Ok(()) };
+                calls += 1;
+                std::future::ready(result)
+            }).await;
+            assert!(result.unwrap_err().to_string().contains("component unavailable"));
+            assert_eq!(calls, failed + 1);
+        }
+    }
 
     #[test]
     fn content_length_verification_rejects_mismatch_but_allows_unknown_length() {

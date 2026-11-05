@@ -27,6 +27,8 @@ export function EnvTypeBadge({
     gh: "G",
     mingw: "C",
     adb: "A",
+    dotnet: "D",
+    powershell: "P",
   }[type];
   const box = size === "lg" ? "size-10 text-lg" : size === "sm" ? "size-6 text-[11px]" : "size-8 text-sm";
   return (

@@ -29,7 +29,8 @@ try {
           {tool: 'Python', status: 'available', entryCount: 1, detail: null},
           {tool: 'Java', status: 'available', entryCount: 3, detail: null},
           {tool: 'Go', status: 'notDiscovered', entryCount: 0, detail: '本次范围内未发现'},
-          {tool: 'Rust', status: 'notDiscovered', entryCount: 0, detail: '本次范围内未发现'}
+          {tool: 'Rust', status: 'notDiscovered', entryCount: 0, detail: '本次范围内未发现'},
+          {tool: 'PowerShell 7', status: 'available', entryCount: 1, detail: null}
         ], tools: [
           {tool: 'Java', version: '21.0.8', path: 'D:/Java/jdk-21/bin/java.exe', command: 'java.exe', source: 'PATH', envType: 'jdk', isPreferred: true, error: null, scanStatus: 'available', installRoot: 'D:/Java/jdk-21'},
           {tool: 'Java', version: '21.0.8', path: 'E:/Other/jdk-21/bin/java.exe', command: 'java.exe', source: '常见安装目录', envType: 'jdk', isPreferred: false, error: null, scanStatus: 'available'},
@@ -43,7 +44,8 @@ try {
           {tool: 'pip', version: '26.1.2', path: 'D:/Python/Scripts/pip.exe', command: 'pip.exe', source: 'EnvCon', envType: null, isPreferred: false, error: null, scanStatus: 'available'},
           {tool: 'Maven', version: '3.9.11', path: 'D:/Maven/bin/mvn.cmd', command: 'mvn.cmd', source: 'MAVEN_HOME', envType: 'maven', isPreferred: false, error: null, scanStatus: 'available'},
           {tool: 'Git', version: null, path: 'D:/Git/cmd/git.exe', command: 'git.exe', source: 'PATH', envType: null, isPreferred: true, error: '权限不足: 访问被拒绝', scanStatus: 'permissionDenied'},
-          {tool: 'pip (Python 模块)', version: null, path: 'D:/Projects/.venv/Scripts/python.exe', command: 'python.exe -m pip', source: '项目目录', envType: null, isPreferred: false, error: '命令退出码 1: No module named pip', scanStatus: 'commandFailed'}
+          {tool: 'pip (Python 模块)', version: null, path: 'D:/Projects/.venv/Scripts/python.exe', command: 'python.exe -m pip', source: '项目目录', envType: null, isPreferred: false, error: '命令退出码 1: No module named pip', scanStatus: 'commandFailed'},
+          {tool: 'PowerShell 7', version: '7.6.9', path: 'C:/Program Files/PowerShell/7/pwsh.exe', command: 'pwsh.exe', source: '常见安装目录', envType: 'powershell', isPreferred: false, error: null, scanStatus: 'available', installRoot: 'C:/Program Files/PowerShell/7'}
         ], warnings: ['已达到扫描深度 6: D:/Projects/nested']}; },
         openPath: async path => { window.scanOpened.push(path); }
       };`,
@@ -58,9 +60,10 @@ try {
   await page.getByText("D:/Projects", { exact: true }).waitFor();
   await page.getByRole("button", { name: /^(开始扫描|重新扫描)$/ }).click();
   await page.getByText("11.18.0", { exact: true }).waitFor();
-  assert.equal(await page.locator("[data-scan-tool]").count(), 7);
+  await page.getByText("PowerShell 7", { exact: true }).first().waitFor();
+  assert.equal(await page.locator("[data-scan-tool]").count(), 8);
   assert.equal(await page.getByRole("button", { name: /收起 .* 扫描结果/ }).count(), 0);
-  await page.getByText("10 个入口", { exact: true }).waitFor();
+  await page.getByText("11 个入口", { exact: true }).waitFor();
   await page.getByText("2 个入口待检查", { exact: true }).waitFor();
   await page.getByLabel("核心工具扫描状态").getByText("扫描范围内未发现", { exact: true }).first().waitFor();
   await page.getByText("权限不足", { exact: true }).first().waitFor();

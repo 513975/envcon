@@ -54,6 +54,13 @@ async fn read_env_entry(
     let is_current = current.target.as_ref().is_some_and(|target| {
         path.canonicalize().ok().as_ref() == Some(target)
     }) || (current.read.is_none() && current.name.as_deref() == Some(name.as_str()));
+    // 只有真实目录才可能有搬移记录：仍是链接说明还没搬，旧目录就是链接目标。
+    // 必须在 `name` 被移动进结构体之前读取。
+    let moved_from = if is_junction {
+        None
+    } else {
+        crate::move_journal::read(root, env_type, &name)
+    };
     // 启动扫描只读取结构和版本；递归统计大小会阻塞每个环境，改为按需统计。
     Some(ManagedEnv {
         name,
@@ -68,6 +75,7 @@ async fn read_env_entry(
         identity_path: identity.to_string_lossy().to_string(),
         is_link_entry: is_junction,
         is_external_link: is_junction && !system::path_within(root, &identity),
+        moved_from,
     })
 }
 
@@ -233,6 +241,16 @@ pub(crate) fn structure_problem(env_type: EnvType, root: &Path) -> Option<String
                 Some("不是有效的 Android Platform Tools 安装".into())
             }
         }
+        // 区分两种失败：都没有 dotnet.exe，和「有 dotnet.exe 但没有 sdk\」。
+        // 后者是只装了 .NET Runtime（运行库），不能当作 SDK 管理。
+        EnvType::DotNet => match required("dotnet.exe") {
+            Some(missing) => Some(missing),
+            None if !root.join("sdk").is_dir() => {
+                Some("缺少 sdk 目录；这可能是只装了 .NET 运行库，而不是 SDK".into())
+            }
+            None => None,
+        },
+        EnvType::PowerShell => required("pwsh.exe"),
     }
 }
 

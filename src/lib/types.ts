@@ -15,7 +15,9 @@ export type EnvType =
   | "git"
   | "gh"
   | "mingw"
-  | "adb";
+  | "adb"
+  | "dotnet"
+  | "powershell";
 
 export const ENV_TYPE_META: Record<
   EnvType,
@@ -37,11 +39,13 @@ export const ENV_TYPE_META: Record<
   gh: { label: "GitHub CLI", folder: "ghs", junction: "gh", color: "text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-950/50" },
   mingw: { label: "C/C++", folder: "mingws", junction: "mingw", color: "text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-950/50" },
   adb: { label: "ADB", folder: "adbs", junction: "adb", color: "text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-950/50" },
+  dotnet: { label: ".NET SDK", folder: "dotnets", junction: "dotnet", color: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50" },
+  powershell: { label: "PowerShell 7", folder: "powershells", junction: "powershell", color: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-950/50" },
 };
 
 export const ALL_ENV_TYPES: EnvType[] = [
   "jdk", "python", "node", "go", "rust", "maven", "gradle",
-  "php", "llvm", "zig", "deno", "bun", "git", "gh", "mingw", "adb",
+  "php", "llvm", "zig", "deno", "bun", "git", "gh", "mingw", "adb", "dotnet", "powershell",
 ];
 
 /** 管理器内的已装环境 */
@@ -58,6 +62,8 @@ export interface ManagedEnv {
   identityPath: string;
   isLinkEntry: boolean;
   isExternalLink: boolean;
+  /** 搬移来源：该环境从哪个外部目录搬进受管目录。为 null 表示没有（或记录不可信）。 */
+  movedFrom?: string | null;
 }
 
 export interface UninstallScopeItem {
@@ -376,8 +382,19 @@ export interface EnvVarInfo {
   name: string;
   label: string;
   value: string | null;
+  /** 系统级值（HKLM）；修改需要管理员权限。 */
+  systemValue: string | null;
   suggested: string | null;
 }
+
+/** 不在常见清单里的环境变量（用户自行添加的）。 */
+export interface CustomEnvVar {
+  name: string;
+  value: string;
+}
+
+/** 环境变量作用域。系统级写入需要提权。 */
+export type EnvScope = "user" | "system";
 
 /** 包管理器路径配置(npm/pnpm/yarn/pip) */
 export interface ToolConfig {
@@ -717,3 +734,10 @@ export type InstallTask =
       | { status: "error"; message: string }
       | { status: "canceled" }
     );
+export interface PathEditPlan {
+  expectedPath: string;
+  journalSnapshot: string;
+  entries: string[];
+  resultingPath: string;
+  sources: string[];
+}

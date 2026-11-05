@@ -66,6 +66,10 @@ function defaultTargetName(envType: EnvType, version: string): string {
       return `mingw-${v.split("-")[0]}`;
     case "adb":
       return `platform-tools-${v}`;
+    case "dotnet":
+      return `dotnet-${v}`;
+    case "powershell":
+      return `powershell-${v}`;
   }
 }
 
@@ -175,6 +179,10 @@ export function Download() {
     if (!sourcesReady || loading || !versions?.includes(v)) return;
     if (v.verification?.status === "invalid") {
       toast.error("校验资料不可用", "当前校验依据无效，已阻止下载；请刷新或切换到官方来源。");
+      return;
+    }
+    if (envType === "powershell" && v.verification?.status !== "trustedSha256") {
+      toast.error("PowerShell 7 未验证", "必须取得 Microsoft GitHub 官方 SHA-256 后才能开始受管安装。");
       return;
     }
     const name = targetNames[v.version] ?? defaultTargetName(envType, v.version);
@@ -331,11 +339,16 @@ export function Download() {
         <div className="px-4 py-2 text-xs text-zinc-500 space-y-1" role="status">
           <p>仅列出当前适配器支持的 Windows x64 版本。镜像可能滞后；刷新会重新联网查询。</p>
           {envType === "jdk" && <p>{source === "mirror" ? "镜像列出常用 LTS 主版本的最新构建；更多主版本请切换官方源。" : "官方列出可用主版本的最新构建，不包含每个历史补丁。"}</p>}
-          {envType === "rust" && <p>Rust 按 stable / beta / nightly 渠道安装，由 rustup 获取对应最新版本。</p>}
+          {envType === "rust" && <p>Rust 按 stable / beta / nightly 渠道安装，由 rustup 获取对应最新版本；包含 clippy 与 rustfmt 并验证命令可用，不含离线文档。已有安装不会自动补装组件。</p>}
           {["llvm", "deno", "bun", "git", "gh", "mingw"].includes(envType) && <p>GitHub 源查询最近 100 个发布记录后筛选兼容安装包，不代表完整历史归档。</p>}
           {envType === "adb" && <p>Android SDK Platform Tools，包含 ADB 和 Fastboot。仅列出 Google 当前索引提供的 Windows 稳定版，不代表完整历史版本。使用需遵守 Android SDK 许可条款。</p>}
           {envType === "python" && <p>Python 官方源用发布清单确认正式日期与 Windows x64 安装器；华为镜像按目录逐项确认对应安装器文件。镜像目录修改时间不是发布日期；若官方日期接口不可用，日期显示未知。</p>}
+          {envType === "python" && <p>不安装共享的 py.exe 启动器，也不接管 .py 文件关联；请使用 python、python -m pip 和 python -m venv。版本切换由 EnvCon current 完成，不保证 py -3.x 跟随切换。</p>}
+          {envType === "gradle" && <p>默认下载 bin 发行包，包含构建所需二进制，不含 Gradle 自身源码与离线文档；IDE 源码浏览可能需另外下载，未默认改用体积更大的 all 包。</p>}
+          {envType === "llvm" && <p>仅支持 Windows x64 NSIS .exe；静默安装的组件范围尚未实测，不保证包含全部运行库、sanitizer 或完整 MSVC / Windows SDK。</p>}
           {envType === "maven" && <p>Maven 仅适配 3.x；官方当前分发目录不包含全部历史版本。</p>}
+          {envType === "dotnet" && <p>.NET SDK 按官方发布通道列出当前版本：LTS 与 STS 各一条，已停止支持的通道会标注但仍可见。Windows 只提供 zip 包，安装后 sdk/ 目录随之落地；微软不发布逐文件 SHA-256 清单，因此下载显示为「未验证」。</p>}
+          {envType === "powershell" && <p>PowerShell 7 仅列出 Microsoft 官方 GitHub 的稳定 Windows x64 ZIP。安装入口是独立的 pwsh，不替换 Windows PowerShell 5.1 的 powershell.exe；必须取得官方 SHA-256 后才允许受管安装。</p>}
           {versions?.some(v => v.note?.includes("离线缓存")) && <p role="alert" className="text-amber-700 dark:text-amber-400">在线查询失败，正在展示离线缓存，版本可能过期。请检查网络后刷新或切换源。</p>}
         </div>
         {loading || !sourcesReady ? (
@@ -394,6 +407,8 @@ export function Download() {
           <div className="max-h-[420px] overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-800/50">
             {filtered.slice(0, visibleCount).map((v) => {
               const name = targetNames[v.version] ?? defaultTargetName(envType, v.version);
+              const powershellUnverified =
+                envType === "powershell" && v.verification?.status !== "trustedSha256";
               return (
                 <div
                   key={v.version}
@@ -459,7 +474,8 @@ export function Download() {
                   <Button
                     size="sm"
                     variant="primary"
-                    disabled={v.verification?.status === "invalid"}
+                    disabled={v.verification?.status === "invalid" || powershellUnverified}
+                    title={powershellUnverified ? "必须取得官方 SHA-256 后才能安装 PowerShell 7" : undefined}
                     onClick={() => start(v)}
                   >
                     <DownloadIcon className="size-3.5" />

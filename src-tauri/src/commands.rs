@@ -1218,6 +1218,77 @@ pub async fn integrate_external_env(
     Ok(name)
 }
 
+/// 预览把已纳管的外部环境搬进受管目录（只读）。
+#[tauri::command]
+pub async fn preview_move_environment(
+    state: State<'_, AppState>,
+    env_type: EnvType,
+    name: String,
+) -> Result<crate::migration::MovePlan> {
+    let _scan_guard = state.scans.mutation();
+    let root = require_root(&state)?;
+    tokio::task::spawn_blocking(move || crate::migration::preview_move(&root, env_type, &name))
+        .await
+        .map_err(|e| AppError::msg(format!("搬移预览失败: {e}")))?
+}
+
+/// 执行搬移。预览之后外部目录或环境状态变化会被拒绝。
+#[tauri::command]
+pub async fn execute_move_environment(
+    state: State<'_, AppState>,
+    plan: crate::migration::MovePlan,
+) -> Result<crate::migration::MoveResult> {
+    let _scan_guard = state.scans.mutation();
+    let guard = crate::migration::LOCK
+        .try_lock()
+        .map_err(|_| AppError::msg("正在执行迁移、重装或搬移任务，请稍后重试"))?;
+    let root = require_root(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        crate::migration::execute_move(&root, &plan)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("搬移任务失败: {e}")))?
+}
+
+/// 预览删除搬移后残留的外部旧目录（只读）。
+///
+/// `source` 必须由调用方给出：搬移完成后受管目录已不指向外部路径，无法从链接反推。
+#[tauri::command]
+pub async fn preview_discard_moved_source(
+    state: State<'_, AppState>,
+    env_type: EnvType,
+    name: String,
+    source: String,
+) -> Result<crate::migration::DiscardPlan> {
+    let _scan_guard = state.scans.mutation();
+    let root = require_root(&state)?;
+    tokio::task::spawn_blocking(move || {
+        crate::migration::preview_discard(&root, env_type, &name, std::path::Path::new(&source))
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("删除预览失败: {e}")))?
+}
+
+/// 删除外部旧目录。**不可恢复**。
+#[tauri::command]
+pub async fn execute_discard_moved_source(
+    state: State<'_, AppState>,
+    plan: crate::migration::DiscardPlan,
+) -> Result<()> {
+    let _scan_guard = state.scans.mutation();
+    let guard = crate::migration::LOCK
+        .try_lock()
+        .map_err(|_| AppError::msg("正在执行迁移、重装或搬移任务，请稍后重试"))?;
+    let root = require_root(&state)?;
+    tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        crate::migration::execute_discard(&root, &plan)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("删除任务失败: {e}")))?
+}
+
 /// 从版本输出行提取纯版本号(如 `openjdk version "17.0.12" ...` → `17.0.12`)
 fn version_token(raw: &str) -> Option<String> {
     let b = raw.as_bytes();
@@ -1360,6 +1431,8 @@ fn switch_commands(env_type: EnvType) -> &'static [&'static str] {
         EnvType::Gh => &["gh"],
         EnvType::Mingw => &["gcc"],
         EnvType::Adb => &["adb"],
+        EnvType::DotNet => &["dotnet"],
+        EnvType::PowerShell => &["pwsh"],
     }
 }
 
@@ -1478,7 +1551,7 @@ pub fn preview_uninstall_env(
     reject_active_install(&state, env_type, &name)?;
     let root = require_root(&state)?;
     let backups = state.with_cfg(|c| c.backups_dir());
-    let mut store = pathman::RegistryPathStore::open(&backups);
+    let mut store = pathman::RegistryPathStore::open(pathman::EnvScope::User, &backups);
     let (preview, _) = preview_uninstall_with_path_mode(
         &root, env_type, &name, mode, &backups.join("ownership/journal.json"), &mut store,
     )?;
@@ -1518,7 +1591,7 @@ pub async fn uninstall_env(
     reject_active_install(&state, env_type, &name)?;
     let root = require_root(&state)?;
     let backups = state.with_cfg(|c| c.backups_dir());
-    let mut store = pathman::RegistryPathStore::open(&backups);
+    let mut store = pathman::RegistryPathStore::open(pathman::EnvScope::User, &backups);
     // Re-derive with the requested mode. An Uninstall-shaped re-derivation
     // would never match a Detach submission and every Detach would look stale.
     let mode = expected_preview.mode;
@@ -3155,6 +3228,31 @@ pub fn save_user_path(state: State<'_, AppState>, entries: Vec<String>) -> Resul
     pathman::save_user_path(&entries, &backups)
 }
 
+#[tauri::command]
+pub fn preview_system_path_edit(
+    state: State<'_, AppState>,
+    entries: Option<Vec<String>>,
+    expected_path: Option<String>,
+) -> Result<crate::path_ownership::EditPlan> {
+    pathman::preview_system_path_edit(entries.as_deref(), expected_path.as_deref(), &state.with_cfg(|c| c.backups_dir()))
+}
+
+#[tauri::command]
+pub async fn save_system_path(
+    state: State<'_, AppState>,
+    plan: crate::path_ownership::EditPlan,
+) -> Result<()> {
+    let _query_guard = state.tool_queries.mutation();
+    let _scan_guard = state.scans.mutation();
+    let backups = state.with_cfg(|c| c.backups_dir());
+    let checked = pathman::preview_system_path_edit(Some(&plan.entries), Some(&plan.expected_path), &backups)?;
+    if checked != plan {
+        return Err(AppError::msg("系统 PATH 预览已失效，请重新预览"));
+    }
+    tokio::task::spawn_blocking(move || crate::elevate::write_system_env(&[pathman::EnvWriteOp::Path { plan }]))
+        .await.map_err(|e| AppError::msg(format!("系统 PATH 写入任务失败: {e}")))?
+}
+
 /// 一键集成:为已安装的类型补全 current\* PATH 条目,返回新增条目
 #[tauri::command]
 pub fn integrate_current_to_path(state: State<'_, AppState>) -> Result<Vec<String>> {
@@ -3883,8 +3981,37 @@ pub struct EnvVarInfo {
     pub label: String,
     /// 当前用户级值(未设置为 None)
     pub value: Option<String>,
+    /// 系统级值（需要管理员权限才能修改）
+    pub system_value: Option<String>,
     /// 根据当前激活环境推导的建议值
     pub suggested: Option<String>,
+}
+
+/// 任意环境变量条目（含用户自行添加、不在常见清单里的）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomEnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// 读取指定作用域的全部自定义环境变量（不在 COMMON_ENV_VARS 里的）。
+#[tauri::command]
+pub fn get_custom_env_vars(scope: pathman::EnvScope) -> Result<Vec<CustomEnvVar>> {
+    let all = pathman::get_env_vars(scope)?;
+    let mut rows: Vec<CustomEnvVar> = all
+        .into_iter()
+        .filter(|(name, _)| !COMMON_ENV_VARS.iter().any(|(known, _, _)| known.eq_ignore_ascii_case(name)))
+        .map(|(name, value)| CustomEnvVar { name, value })
+        .collect();
+    rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(rows)
+}
+
+/// 当前进程是否已具备管理员权限（用于决定是否要走提权子进程）。
+#[tauri::command]
+pub fn is_elevated() -> bool {
+    pathman::is_elevated()
 }
 
 fn suggested_env_path(root: &Path, env_type: EnvType, name: &str) -> Option<String> {
@@ -3905,15 +4032,21 @@ fn suggested_env_path(root: &Path, env_type: EnvType, name: &str) -> Option<Stri
 #[tauri::command]
 pub fn get_env_vars(state: State<'_, AppState>) -> Result<Vec<EnvVarInfo>> {
     let user_vars = pathman::get_user_env_vars()?;
+    // 系统级变量读取不需要管理员权限（HKLM 环境键默认可读），只有写入才需要。
+    // 读不到时降级为空表：这不该让整个页面报错。
+    let system_vars = pathman::get_env_vars(pathman::EnvScope::System).unwrap_or_default();
     let root = state.with_cfg(|c| c.resolve_root());
 
     Ok(COMMON_ENV_VARS
         .iter()
         .map(|&(name, label, env_type)| {
-            let value = user_vars
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .map(|(_, v)| v.clone());
+            let lookup = |map: &std::collections::HashMap<String, String>| {
+                map.iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                    .map(|(_, v)| v.clone())
+            };
+            let value = lookup(&user_vars);
+            let system_value = lookup(&system_vars);
             // 根据当前激活环境推导建议值
             let suggested = match (env_type, &root) {
                 (Some(t), Some(r)) => suggested_env_path(r, t, name),
@@ -3930,6 +4063,7 @@ pub fn get_env_vars(state: State<'_, AppState>) -> Result<Vec<EnvVarInfo>> {
                 name: name.into(),
                 label: label.into(),
                 value,
+                system_value,
                 suggested,
             }
         })
@@ -3937,16 +4071,35 @@ pub fn get_env_vars(state: State<'_, AppState>) -> Result<Vec<EnvVarInfo>> {
 }
 
 #[tauri::command]
-pub fn save_env_var(state: State<'_, AppState>, name: String, value: String) -> Result<()> {
+pub async fn save_env_var(
+    state: State<'_, AppState>,
+    name: String,
+    value: String,
+    scope: pathman::EnvScope,
+) -> Result<()> {
     let _query_guard = state.tool_queries.mutation();
     let _scan_guard = state.scans.mutation();
     let backups = state.with_cfg(|c| c.backups_dir());
-    if value.trim().is_empty() {
-        pathman::delete_user_env_var(&name, &backups)
-            .map_err(|e| AppError::msg(format!("删除失败(可能本就未设置): {e}")))
-    } else {
-        pathman::set_user_env_var(&name, value.trim(), &backups)
+    let trimmed = value.trim().to_string();
+
+    if scope == pathman::EnvScope::User {
+        return if trimmed.is_empty() {
+            pathman::delete_user_env_var(&name, &backups)
+                .map_err(|e| AppError::msg(format!("删除失败(可能本就未设置): {e}")))
+        } else {
+            pathman::set_user_env_var(&name, &trimmed, &backups)
+        };
     }
+
+    // 系统级：组装一条操作交给提权子进程。等待子进程是阻塞的，必须离开异步运行时。
+    let op = if trimmed.is_empty() {
+        pathman::EnvWriteOp::Delete { name }
+    } else {
+        pathman::EnvWriteOp::Set { name, value: trimmed }
+    };
+    tokio::task::spawn_blocking(move || crate::elevate::write_system_env(&[op]))
+        .await
+        .map_err(|e| AppError::msg(format!("提权写入任务失败: {e}")))?
 }
 
 // ---------- 包管理器路径配置 ----------
@@ -6113,6 +6266,23 @@ mod tests {
     }
 
     #[test]
+    fn powershell_current_path_entry_is_selected_for_path_integration() {
+        let dir = crate::test_support::TestDir::new();
+        let root = dir.path().join("managed");
+        let installed = root.join("envs").join(EnvType::PowerShell.folder()).join("7.6.9");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(installed.join("pwsh.exe"), b"fixture").unwrap();
+
+        switcher::switch(&root, EnvType::PowerShell, "7.6.9").unwrap();
+
+        assert_eq!(
+            current_path_entries(&root),
+            vec![root.join("current").join("powershell").to_string_lossy().into_owned()]
+        );
+        assert!(root.join("current/powershell/pwsh.exe").is_file());
+    }
+
+    #[test]
     fn manifest_records_every_entry_and_states_its_portability_limits() {
         let env = |name: &str, kind: EnvType, current: bool, link: bool| ManagedEnv {
             name: name.into(),
@@ -6127,6 +6297,7 @@ mod tests {
             identity_path: format!("D:/managed/envs/{name}"),
             is_link_entry: link,
             is_external_link: false,
+            moved_from: None,
         };
         let overview = Overview {
             root: Some("D:/managed".into()),

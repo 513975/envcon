@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
@@ -58,6 +59,17 @@ pub async fn probe_version_with_reason(env_type: EnvType, dir: &Path) -> Version
         EnvType::Mingw => {
             probe_simple(&dir.join("bin").join("gcc.exe"), &["--version"], Duration::from_secs(5), "gcc --version").await
         }
+        EnvType::DotNet => {
+            probe_simple(&dir.join("dotnet.exe"), &["--version"], Duration::from_secs(10), "dotnet --version").await
+        }
+        EnvType::PowerShell => {
+            probe_simple(
+                &dir.join("pwsh.exe"),
+                &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"],
+                Duration::from_secs(10),
+                "pwsh --version",
+            ).await
+        }
         other => probe_version_legacy(other, dir)
             .await
             .ok_or_else(|| "未取得版本；此类型目前不提供结构化原因（可能来自文件解析或多次尝试）".to_string()),
@@ -88,6 +100,11 @@ async fn probe_version_legacy(env_type: EnvType, dir: &Path) -> Option<String> {
         EnvType::Gh => probe_gh(dir).await,
         EnvType::Mingw => probe_mingw(dir).await,
         EnvType::Adb => probe_adb(dir).await,
+        EnvType::DotNet => probe_cmd(&dir.join("dotnet.exe"), &["--version"]).await,
+        EnvType::PowerShell => probe_cmd(
+            &dir.join("pwsh.exe"),
+            &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"],
+        ).await,
     }
 }
 
@@ -112,6 +129,9 @@ async fn probe_simple(
 ) -> Result<String, String> {
     if !exe.exists() {
         return Err(format!("缺少可执行文件：{}", exe.display()));
+    }
+    if !is_probably_windows_executable(exe) {
+        return Err(format!("{label} 失败：文件不是有效 Windows 可执行文件"));
     }
     let output = run_capture(exe, args, timeout)
         .await
@@ -214,6 +234,9 @@ async fn probe_cmd(exe: &Path, args: &[&str]) -> Option<String> {
     if !exe.exists() {
         return None;
     }
+    if !is_probably_windows_executable(exe) {
+        return None;
+    }
     let output = run_capture(exe, args, Duration::from_secs(3)).await.ok()?;
     let s = output.trim();
     // 兼容 "v24.17.0" / "Python 3.14.0" / "deno 2.1.0 (...)" / "bun 1.1.x"
@@ -228,6 +251,20 @@ async fn probe_cmd(exe: &Path, args: &[&str]) -> Option<String> {
         s
     };
     version_token(s).or_else(|| s.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_string))
+}
+
+/// Avoid handing arbitrary fixture/text files to CreateProcess. Besides giving
+/// a clearer diagnostic, this keeps malformed `.exe` files from blocking a
+/// Windows probe before the async timeout can be observed.
+fn is_probably_windows_executable(path: &Path) -> bool {
+    if path.extension().is_none_or(|ext| !ext.eq_ignore_ascii_case("exe")) {
+        return true;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut magic = [0u8; 2];
+    file.read_exact(&mut magic).is_ok() && magic == *b"MZ"
 }
 
 /// 去掉 "word " 前缀(仅当后跟版本号数字)
@@ -529,6 +566,15 @@ mod tests {
             super::probe_version(crate::types::EnvType::Node, empty.path()).await,
             None
         );
+    }
+
+    #[tokio::test]
+    async fn powershell_probe_reports_a_missing_pwsh_binary_without_shell_fallback() {
+        let dir = crate::test_support::TestDir::new();
+        let probe = super::probe_version_with_reason(crate::types::EnvType::PowerShell, dir.path()).await;
+        assert_eq!(probe.version, None);
+        let reason = probe.reason.unwrap_or_default();
+        assert!(reason.contains("pwsh.exe"), "unexpected: {reason}");
     }
 
     /// `snippet` is the only part of a probe failure the user actually reads,

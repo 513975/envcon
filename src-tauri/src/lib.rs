@@ -8,6 +8,7 @@ pub mod commands;
 pub mod config;
 pub mod detect;
 pub mod download;
+pub mod elevate;
 pub mod error;
 pub mod install;
 pub mod pathman;
@@ -19,6 +20,7 @@ pub mod packages;
 pub mod package_managers;
 pub mod package_scan;
 pub mod migration;
+pub mod move_journal;
 pub mod pip_reinstall;
 pub mod global_reinstall;
 pub mod uv_recovery;
@@ -37,6 +39,11 @@ use std::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 提权写入子模式：同一个 exe 带 `--env-write <file>` 启动时只执行写入并退出，
+    // 不初始化 GUI。这样产品保持单文件，且日常使用不需要管理员权限。
+    if let Some(code) = elevate::run_subcommand_if_requested() {
+        std::process::exit(code);
+    }
     let cfg = config::AppConfig::load();
     let scans = scan_cache::ScanCache::new(&cfg.data_dir);
     tauri::Builder::default()
@@ -68,12 +75,18 @@ pub fn run() {
             commands::set_root,
             commands::scan_system,
             commands::integrate_external_env,
+            commands::preview_move_environment,
+            commands::execute_move_environment,
+            commands::preview_discard_moved_source,
+            commands::execute_discard_moved_source,
             commands::switch_env,
             commands::preview_uninstall_env,
             commands::uninstall_env,
             commands::open_path,
             commands::get_path_state,
             commands::save_user_path,
+            commands::preview_system_path_edit,
+            commands::save_system_path,
             commands::integrate_current_to_path,
             commands::get_sources,
             commands::list_versions,
@@ -92,6 +105,8 @@ pub fn run() {
             commands::list_path_backups,
             commands::restore_path_backup,
             commands::get_env_vars,
+            commands::get_custom_env_vars,
+            commands::is_elevated,
             commands::save_env_var,
             commands::get_tool_configs,
             commands::inspect_uv_layout,

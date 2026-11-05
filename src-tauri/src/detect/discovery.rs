@@ -133,9 +133,8 @@ pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
     for dir in android_platform_tools_roots(&result.environment) {
         result.walk(&dir, 0, "Android SDK", false);
     }
+    roots.extend(program_files_roots(&result.environment));
     for (var, children) in [
-        ("ProgramFiles", vec!["nodejs", "Python", "Java", "Eclipse Adoptium", "Go", "Git", "LLVM", "CMake", "dotnet"]),
-        ("ProgramFiles(x86)", vec!["Python", "Java", "Git"]),
         ("LOCALAPPDATA", vec!["Programs/Python", "Programs/nodejs", "pnpm", "uv"]),
         ("APPDATA", vec!["npm", "Python", "Composer", "pypoetry"]),
         ("ProgramData", vec!["chocolatey/bin", "ComposerSetup"]),
@@ -174,6 +173,19 @@ pub fn discover(managed: Option<&Path>, projects: &[PathBuf]) -> Discovery {
     }
     for project in projects { result.walk(project, 6, "项目目录", true); }
     result
+}
+
+fn program_files_roots(environment: &HashMap<String, String>) -> Vec<(PathBuf, usize)> {
+    let mut roots = Vec::new();
+    for (var, children) in [
+        ("PROGRAMFILES", &["nodejs", "Python", "Java", "Eclipse Adoptium", "Go", "Git", "LLVM", "CMake", "dotnet", "PowerShell/7", "PowerShell/7-preview"][..]),
+        ("PROGRAMFILES(X86)", &["Python", "Java", "Git"][..]),
+    ] {
+        if let Some(base) = environment.get(var) {
+            roots.extend(children.iter().map(|child| (PathBuf::from(base).join(child), 3)));
+        }
+    }
+    roots
 }
 
 fn android_platform_tools_roots(environment: &HashMap<String, String>) -> Vec<PathBuf> {
@@ -338,5 +350,16 @@ mod tests {
         let mut scan = empty();
         scan.walk(&dir.path().join("missing"), 6, "项目目录", true);
         assert_eq!(scan.warnings.len(), 1);
+    }
+
+    #[test]
+    fn program_files_discovery_includes_power_shell_7_roots_without_system_power_shell() {
+        let dir = crate::test_support::TestDir::new();
+        let mut environment = HashMap::new();
+        environment.insert("PROGRAMFILES".into(), dir.path().to_string_lossy().into_owned());
+        let roots = program_files_roots(&environment);
+        assert!(roots.iter().any(|(root, _)| root.ends_with("PowerShell/7")));
+        assert!(roots.iter().any(|(root, _)| root.ends_with("PowerShell/7-preview")));
+        assert!(!roots.iter().any(|(root, _)| root.to_string_lossy().contains("WindowsPowerShell")));
     }
 }

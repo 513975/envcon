@@ -28,6 +28,8 @@ try {
     window.envs = [
       { name: "jdk-owned", envType: "jdk", isCurrent: true, isLinkEntry: false, isExternalLink: false },
       { name: "jdk-linked", envType: "jdk", isCurrent: false, isLinkEntry: true, isExternalLink: true },
+      // 已搬入受管的环境：真实目录 + 来源记录，卡片上应出现「删除旧目录」。
+      { name: "jdk-moved", envType: "jdk", isCurrent: false, isLinkEntry: false, isExternalLink: false, movedFrom: "E:/external/jdk-old" },
       { name: "llvm-registered", envType: "llvm", isCurrent: false, isLinkEntry: false, isExternalLink: false },
     ].map(e => ({ ...e, path: `D:/managed/envs/${e.envType === "llvm" ? "llvms" : "jdks"}/${e.name}`, identityPath: e.isExternalLink ? "E:/external/jdk" : `D:/managed/envs/${e.envType === "llvm" ? "llvms" : "jdks"}/${e.name}`,
       version: "25.0.1", sizeBytes: null, sizeComplete: false, status: "available", statusDetail: null }));
@@ -147,6 +149,32 @@ try {
           case "scan_system": return { warnings: [], tools: [{ tool: "Rust", version: "1.90.0", path: "E:/rust/toolchains/stable/bin/rustc.exe",
             command: "rustc.exe", source: "PATH", envType: "rust", installRoot: "E:/rust/toolchains/stable", identityPath: "E:/rust/toolchains/stable/bin/rustc.exe", isPreferred: true, error: null }] };
           case "integrate_external_env": return "system-1.90.0";
+          case "preview_move_environment":
+            window.lastMovePreview = {
+              envType: args.envType,
+              name: args.name,
+              source: "E:/external/jdk",
+              target: `D:/managed/envs/jdks/${args.name}`,
+              files: 42,
+              bytes: 1048576,
+              links: 0,
+            };
+            return window.lastMovePreview;
+          case "execute_move_environment":
+            // 不改写 window.envs：后续断言仍然依赖 jdk-linked 保持外部链接状态。
+            return { target: args.plan.target, source: args.plan.source, files: 42, bytes: 1048576 };
+          case "preview_discard_moved_source":
+            window.lastDiscardPreview = {
+              envType: args.envType,
+              name: args.name,
+              source: args.source,
+              files: 42,
+              bytes: 1048576,
+            };
+            return window.lastDiscardPreview;
+          case "execute_discard_moved_source":
+            window.discardedSource = args.plan.source;
+            return null;
           case "get_sources": return [{ id: "mirror", label: "Mirror" }, { id: "official", label: "Official" }];
           case "list_versions": return Array.from({ length: 125 }, (_, i) => ({ version: `26.${124-i}.0`, date: "2026-09-16", sizeBytes: null, url: null, note: window.offline ? "离线缓存（在线查询失败）" : null }));
           case "get_tool_configs": case "get_caches": case "install_tasks": return [];
@@ -442,6 +470,59 @@ try {
   );
   await page.evaluate(() => { window.redetectStillBroken = false; });
 
+  // 搬入受管：只有外部链接条目才有这个入口；受管普通目录本来就在受管位置。
+  assert.equal(await page.getByRole("button", { name: "搬入受管目录 jdk-owned", exact: true }).count(), 0);
+  await page.getByRole("button", { name: "搬入受管目录 jdk-linked", exact: true }).click();
+  const moveDialog = page.getByRole("dialog");
+  await moveDialog.getByText("将把外部目录复制进受管目录，完成后受管条目是真实目录，不再依赖原位置。", { exact: true }).waitFor();
+  // 预览必须如实列出源与范围，并明确说明原外部目录会保留。
+  assert.equal(await moveDialog.getByText(/E:\/external\/jdk/, { exact: false }).count() > 0, true);
+  assert.equal(await moveDialog.getByText(/42 个文件/, { exact: false }).count() > 0, true);
+  assert.equal(await moveDialog.getByText(/原外部目录仍然保留/, { exact: false }).count() > 0, true);
+  assert.deepEqual(await page.evaluate(() => window.calls.find(c => c.command === "preview_move_environment").args), {
+    envType: "jdk", name: "jdk-linked",
+  });
+  await moveDialog.getByRole("button", { name: "确认搬入受管目录", exact: true }).click();
+  // 搬移成功后自动进入「删除外部旧目录」确认：不可恢复，必须独立确认。
+  const discardDialog = page.getByRole("dialog");
+  await discardDialog.getByText("受管副本已核对完整覆盖该目录，删除后不可恢复。", { exact: true }).waitFor();
+  assert.deepEqual(
+    await page.evaluate(() => window.calls.find(c => c.command === "execute_move_environment").args.plan),
+    await page.evaluate(() => window.lastMovePreview),
+  );
+  assert.deepEqual(await page.evaluate(() => window.calls.find(c => c.command === "preview_discard_moved_source").args), {
+    envType: "jdk", name: "jdk-linked", source: "E:/external/jdk",
+  });
+  // 取消删除：不得删除任何东西。
+  await discardDialog.getByRole("button", { name: "取消", exact: true }).click();
+  assert.equal(await page.evaluate(() => window.calls.filter(c => c.command === "execute_discard_moved_source").length), 0);
+  assert.equal(await page.getByRole("dialog").count(), 0);
+  // 取消后该环境仍是外部链接，后续卸载断言依赖这一状态。
+  assert.equal(await page.getByRole("button", { name: "移除管理 jdk-linked", exact: true }).count(), 1);
+
+  // 搬入后取消删除的环境必须仍能重新打开删除入口：受管位置已是真实目录，
+  // 不再有链接指向旧目录，入口只能来自搬移记录（`movedFrom`）。
+  assert.equal(
+    await page.getByRole("button", { name: "删除外部旧目录 jdk-owned", exact: true }).count(),
+    0,
+    "没有搬移记录的环境不能出现删除旧目录入口",
+  );
+  const discardAgain = page.getByRole("button", { name: "删除外部旧目录 jdk-moved", exact: true });
+  assert.equal(await discardAgain.count(), 1);
+  assert.equal(
+    await discardAgain.getAttribute("title"),
+    "删除搬移前的外部旧目录：E:/external/jdk-old",
+  );
+  await discardAgain.click();
+  const againDialog = page.getByRole("dialog");
+  await againDialog.getByText("受管副本已核对完整覆盖该目录，删除后不可恢复。", { exact: true }).waitFor();
+  assert.deepEqual(
+    await page.evaluate(() => window.calls.filter(c => c.command === "preview_discard_moved_source").at(-1).args),
+    { envType: "jdk", name: "jdk-moved", source: "E:/external/jdk-old" },
+  );
+  await againDialog.getByRole("button", { name: "取消", exact: true }).click();
+  assert.equal(await page.evaluate(() => window.calls.filter(c => c.command === "execute_discard_moved_source").length), 0);
+
   // Switching must report the post-switch command diagnosis, not just "done".
   // llvm-registered is a plain, non-current environment at this point.
   await page.getByRole("button", { name: /^LLVM/ }).click();
@@ -709,5 +790,5 @@ try {
   await page.setViewportSize({ width: 1100, height: 850 });
   await page.screenshot({ path: "tests/release-052-download-desktop.png", fullPage: true });
   assert.deepEqual(errors, []);
-  console.log("PASS: environment removal preview/blocked-range/cancel/failure/busy, exact installer preview executes original-uninstall action and submits expectedPreview, changed link ownership blocks execution, per-link legacy confirmation/default retention/cancel reset, owned/shared PATH preview and partial recheck result, Rust integration, official default, pagination/history search, cache alert and responsive layouts");
+  console.log("PASS: environment removal preview/blocked-range/cancel/failure/busy, exact installer preview executes original-uninstall action and submits expectedPreview, changed link ownership blocks execution, per-link legacy confirmation/default retention/cancel reset, owned/shared PATH preview and partial recheck result, move external env into managed dir with preview/execute/discard-cancel, Rust integration, official default, pagination/history search, cache alert and responsive layouts");
 } finally { await browser.close(); }

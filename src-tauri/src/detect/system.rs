@@ -43,6 +43,7 @@ const TOOLS: &[(&str, &str, &[&str], Duration)] = &[
     // 其他常用
     ("Git", "git", &["--version"], Duration::from_secs(5)),
     (".NET", "dotnet", &["--version"], Duration::from_secs(10)),
+    ("PowerShell 7", "pwsh", &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"], Duration::from_secs(10)),
     ("Docker", "docker", &["--version"], Duration::from_secs(8)),
     ("ADB", "adb", &["version"], Duration::from_secs(5)),
 ];
@@ -66,6 +67,7 @@ fn integrable_type(tool: &str) -> Option<EnvType> {
         "Git" => Some(EnvType::Git),
         "GCC" => Some(EnvType::Mingw),
         "ADB" => Some(EnvType::Adb),
+        "PowerShell 7" => Some(EnvType::PowerShell),
         _ => None,
     }
 }
@@ -91,6 +93,10 @@ fn looks_like(env_type: EnvType, root: &Path) -> bool {
         EnvType::Mingw => has(root.join("bin").join("gcc.exe")),
         EnvType::Rust => is_rust_toolchain(root),
         EnvType::Adb => is_adb_installation(root),
+        // 只有 dotnet.exe 不够：.NET Runtime 单独安装时也有这个可执行文件，
+        // 但它是运行库不是 SDK。SDK 必然带 sdk\ 目录，据此区分两者。
+        EnvType::DotNet => has(root.join("dotnet.exe")) && root.join("sdk").is_dir(),
+        EnvType::PowerShell => has(root.join("pwsh.exe")),
     }
 }
 
@@ -500,6 +506,7 @@ const CORE_TOOLS: &[(&str, &str)] = &[
     ("Java", "JDK"),
     ("Go", "Go"),
     ("Rust", "Rust"),
+    ("PowerShell 7", "PowerShell 7"),
 ];
 
 fn unscanned_core_summaries() -> Vec<ToolScanSummary> {
@@ -718,6 +725,50 @@ mod tests {
         std::fs::create_dir_all(d.path().join("lib/rustlib")).unwrap();
         assert!(install_root_for(EnvType::Rust, &d.path().join("bin/rustc.exe")).is_some());
         assert_eq!(integrable_type("Rust"), Some(EnvType::Rust));
+    }
+
+    /// .NET 的目录布局与多数工具不同：dotnet.exe 直接在根目录，没有 bin/ 子目录。
+    /// 更关键的是 .NET Runtime 单独安装时也有 dotnet.exe，但它是运行库不是 SDK，
+    /// 纳入管理后无法编译项目。必须靠 sdk/ 目录把两者区分开。
+    #[test]
+    fn dotnet_requires_an_sdk_directory_so_a_runtime_is_not_mistaken_for_it() {
+        let d = crate::test_support::TestDir::new();
+        let runtime = d.path().join("runtime-only");
+        std::fs::create_dir_all(runtime.join("shared")).unwrap();
+        std::fs::write(runtime.join("dotnet.exe"), b"fixture").unwrap();
+        // 只有 dotnet.exe 不能算 SDK。
+        assert!(!looks_like(EnvType::DotNet, &runtime));
+        assert!(install_root_for(EnvType::DotNet, &runtime.join("dotnet.exe")).is_none());
+
+        let sdk = d.path().join("dotnet-sdk");
+        std::fs::create_dir_all(sdk.join("sdk/10.0.100")).unwrap();
+        std::fs::write(sdk.join("dotnet.exe"), b"fixture").unwrap();
+        // 补上 sdk/ 之后才被识别，且安装根就是 exe 所在目录本身。
+        assert!(looks_like(EnvType::DotNet, &sdk));
+        assert_eq!(
+            install_root_for(EnvType::DotNet, &sdk.join("dotnet.exe")),
+            Some(sdk.clone())
+        );
+        // PATH 入口直接是 current/dotnet，没有 bin 层。
+        let root = d.path().join("managed");
+        assert_eq!(EnvType::DotNet.path_entries(&root), vec![root.join("current/dotnet")]);
+    }
+
+    #[test]
+    fn powershell_requires_pwsh_and_uses_a_dedicated_path_entry() {
+        let d = crate::test_support::TestDir::new();
+        assert!(!looks_like(EnvType::PowerShell, d.path()));
+        // Windows PowerShell 5.1 exposes powershell.exe, not pwsh.exe, and
+        // must never be promoted to the PowerShell 7 environment type.
+        std::fs::write(d.path().join("powershell.exe"), b"fixture").unwrap();
+        assert!(!looks_like(EnvType::PowerShell, d.path()));
+        std::fs::write(d.path().join("pwsh.exe"), b"fixture").unwrap();
+        assert!(looks_like(EnvType::PowerShell, d.path()));
+        assert_eq!(
+            EnvType::PowerShell.path_entries(&d.path().join("managed")),
+            vec![d.path().join("managed/current/powershell")]
+        );
+        assert_eq!(integrable_type("PowerShell 7"), Some(EnvType::PowerShell));
     }
 
     #[tokio::test]
