@@ -5,3 +5,10 @@
 - 未验证不得标记已完成；源码完成、已打包和正式发布分别记录，并附可核对证据。
 - 新发现若影响计划，应记录关联 ID、实际影响和下一步；不要覆盖或删除历史完成记录。
 - 不涉及改进条目的日常问答无需更改进度。仅记录实际发生的工作。
+
+# 代码检索（codegraph）
+
+- 查符号定义、调用链路、影响面或「某功能怎么实现」时，先走 codegraph，不要先 grep 或逐个读文件。本项目索引在 `.codegraph/`（本地生成，不入库）。
+- Reasonix 中 MCP 工具不直接展开：用 `use_capability` 搜索并调用 `mcp-tool:codegraph/codegraph_explore`，`call` 时传 `query` 与 `projectPath`（绝对路径，必填）。Claude Code 中直接调 `mcp__codegraph__codegraph_explore`。
+- 返回的源码带行号，视为已读，不必重复打开。索引与磁盘有秒级延迟；响应若带 staleness 提示，其中列出的文件仍需直接读。
+- 已知局限：Rust 模块别名导入（`use a as b;`）的调用边会漏，`callers` / `impact` 在该场景会低估影响面，需人工补查。

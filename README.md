@@ -40,10 +40,8 @@ EnvCon 是一款面向 Windows 的**开发环境工具下载与扫描工具**。
 - 根目录占用空间统计
 
 ### 📦 环境管理
-- **0.5.3 首轮持续改进**：启动配置查询合并、环境变量读取去除隐式目录扫描；损坏配置提示与写入保护、上次有效配置恢复、前端旧响应保护。[改进记录](docs/iterations/iteration-0.5.3.md) · [测试方式与覆盖](docs/guides/testing.md)。
-- **0.5.4 / IMP-01**：版本化扫描缓存、后台核对、更新时间与失效控制；环境及缓存大小按需统计，支持取消、进度和部分结果。性能实测与打包状态见 [IMP-01 验收记录](docs/iterations/imp01.md)，主进度见 [ROADMAP](ROADMAP.md)。
 - **0.5.5 / ADB**：扫描 PATH 和 Android SDK 标准目录，管理、下载、切换及卸载 Platform Tools；已有 SDK 只链接 `platform-tools`，不会删除其他 SDK 组件。[使用与边界](docs/guides/adb.md)。
-- **0.5.2 修订**：明确的卸载/移除管理入口；支持纳入本机 rustup 实际工具链；合并同一 Git 安装的重复入口。[版本说明与验证](docs/releases/release-0.5.2.md)。
+- **扫描与验证**：支持增量扫描缓存、按需统计大小及取消；测试入口见[验证指南](docs/guides/testing.md)，历史验收以 [ROADMAP](ROADMAP.md) 和 `docs/evidence/` 为准。
 - **多版本并存**:同一类型环境可安装任意多个版本,互不干扰
 - **一键切换**:通过 Junction 指针切换当前版本,无需改动 PATH
 - **链接来源核验**：新增切换/纳管链接记录入口、目标和文件身份；卸载预览及执行时核对。历史无来源记录但身份可读取的链接默认保留，可在预览中逐项确认仅移除入口；不因此认领创建来源。记录损坏、未完成或身份不匹配的链接仍阻止移除；外部目标保留。
@@ -65,15 +63,11 @@ EnvCon 是一款面向 Windows 的**开发环境工具下载与扫描工具**。
 - **每次修改 PATH 前自动备份**,可随时恢复
 
 ### 包管理器
-- **0.5.2 通用包管理器工作区**：支持包管理器当前版本扫描、按安装方式尝试自更新、扫描后直接删除旧包、环境移除及启动后台预热。pipx、Cargo、.NET CLI 没有通用自更新命令；其他更新在执行后比较前后版本，版本未变化不等于已是最新版。npm 缺少来源记录时可确认从公共仓库按固定版本恢复。[能力与限制](docs/guides/package-managers.md) · [本轮审计](docs/audits/key-function-audit-2026-09-15.md)。
+- 支持多个包管理器的版本探测、自更新诊断、全局包扫描与路径配置；具体能力和限制见[使用指南](docs/guides/package-managers.md)。
 - **历史全局包**：可查询旧目录并进入重装，跳过 npm 隐藏更新残留；支持已配置的空目标，预览实际命令及缓存路径，拒绝非空冲突。[使用说明](docs/guides/global-package-reinstall.md)。
-- **0.4.2 旧包清理**：全部重装成功后，可预览并确认卸载指定旧包，保留运行时及新环境；支持逐包诊断和清理报告。[范围与限制](docs/guides/old-package-cleanup.md)。
-- **0.4.1 界面整理**：与环境管理共用选择按钮，已验证可用管理器显示绿灯；路径操作跟随所选管理器。本机扫描按工具分类汇总，多路径与诊断展开查看。[扫描结果说明](docs/guides/scan-results.md)。
 - **包管理器路径配置**:一键设置 npm / pnpm / yarn / pip 的全局安装路径与缓存路径
 - **包管理器数据迁移与全局包重装**:预览旧目录并迁移数据，或在新目录逐包恢复 npm、pnpm、Yarn Classic、pip 全局包。详见 [迁移说明](docs/guides/package-manager-migration.md) 和 [重装说明](docs/guides/global-package-reinstall.md)。
-- **0.3.1 审查修订**:修复 npm 配置冲突、pnpm 11 安装组识别及安装进程树超时清理，完善任务恢复、逐包结果和弹窗布局。[审查与验证记录](docs/audits/reinstall-audit-2026-09-12.md)。
 - **Python 包重装**:从旧解释器或 site-packages 读取清单，按选择的旧版本安装到新虚拟环境，展示失败与依赖检查结果。详见 [重装说明](docs/guides/python-package-reinstall.md)。
-- **0.4.0 包管理器工作区**:左侧独立入口，查看 npm/pnpm/Yarn Classic 全局包、项目直接依赖及 pip 当前/虚拟环境包，支持搜索版本与安装位置。路径设置、缓存、迁移与重装集中放置。[使用说明](docs/guides/package-managers.md) · [关键代码审计](docs/audits/key-function-audit-2026-09-12.md)。
 - 缓存检测与一键清理(npm / pip / cargo 等缓存目录)
 
 ### ⚙️ 设置

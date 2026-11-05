@@ -34,7 +34,7 @@ rtk cargo test --offline --lib host_query_benchmark -- --ignored --nocapture --t
 
 ## 本轮矩阵（2026-09-18）
 
-0.5.4 原生基准：从项目根运行 `rtk proxy node tests/native-benchmark.mjs <exe> <label> <playwright-module> 3`。先后测量两个版本，不要与构建/测试并行。脚本仅启动私有 EXE 副本、隔离 WebView 配置和固定测试目录；不会启动安装器或修改用户 PATH/管理器配置。Windows Job 对进程树累计计数，包括短命令、启动器和 WebView2；资源是逻辑 I/O 与提交内存，不声称物理磁盘吞吐或整机内存。缓存冷/热是应用快照状态，未清空 OS 文件缓存。结果写入 tests/artifacts/native-benchmark，正式摘要见 [IMP-01](../iterations/imp01.md)。
+原生性能基准：从项目根运行 `rtk proxy node tests/native-benchmark.mjs <exe> <label> <playwright-module> 3`。先后测量两个版本，不要与构建/测试并行。脚本仅启动私有 EXE 副本、隔离 WebView 配置和固定测试目录；不会启动安装器或修改用户 PATH/管理器配置。Windows Job 对进程树累计计数，包括短命令、启动器和 WebView2；资源是逻辑 I/O 与提交内存，不声称物理磁盘吞吐或整机内存。缓存冷/热是应用快照状态，未清空 OS 文件缓存。结果写入 tests/artifacts/native-benchmark；汇总见根目录 [ROADMAP](../../ROADMAP.md)，基准数据见 `docs/evidence/imp01/imp01-benchmark.json`。
 
 | 场景 | 验证方式 | 结果 / 边界 |
 | --- | --- | --- |

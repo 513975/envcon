@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-24",
+  "version": "0.5.5",
+  "target": "D:\\SOLO project\\envcon\\src-tauri\\target-install01-exe-20261024",
+  "previousArtifacts": [
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target\\release\\envcon.exe",
+      "size": 9541632,
+      "sha256": "8e12c3a0d7b602a814e1bfe7495b6d38819a069b19bd857f0b6c0123b59a356b"
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target\\release\\bundle\\nsis\\EnvCon_0.5.5_x64-setup.exe",
+      "size": 3237688,
+      "sha256": "32dfd33c60ab841b1a0ba5ec0fb9ca4d2ed0352ec110ede5845290c5c78d59ef"
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target\\release\\bundle\\msi\\EnvCon_0.5.5_x64_en-US.msi",
+      "size": 4595712,
+      "sha256": "b52bdb43c6e1fe6c23955912435f777f35e599ab91e706b871fba0c0ad2e568f"
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target-v0.5.5\\release\\envcon.exe",
+      "size": 8318464,
+      "sha256": "e31f14bce50cf3ef9e13863ff362a6aadcc73e4265087c634cae56c8260efe23"
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target-v0.5.5\\release\\bundle\\nsis\\EnvCon_0.5.5_x64-setup.exe",
+      "size": 2842439,
+      "sha256": "7071493d047085c9356f56b77cd6b18d0338e0b7e7cb6f041860f8b2bff71a1e"
+    }
+  ]
+}

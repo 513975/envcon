@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-03",
+  "scope": "INSTALL-01 Rust recovery, component verification, regression, and executable artifact",
+  "status": "rust-installed-and-verified; regression-and-exe-verified; system-path-and-llvm-real-install-not-verified",
+  "rust": {
+    "toolchain": "stable-x86_64-pc-windows-msvc",
+    "version": "1.99.1",
+    "managedRoot": "D:\\DevEnvManager\\envs\\rusts\\rust-stable",
+    "currentJunction": "D:\\DevEnvManager\\current\\rust",
+    "currentTarget": "D:\\DevEnvManager\\envs\\rusts\\rust-stable",
+    "components": [
+      "cargo-x86_64-pc-windows-msvc",
+      "clippy-x86_64-pc-windows-msvc",
+      "rust-std-x86_64-pc-windows-msvc",
+      "rustc-x86_64-pc-windows-msvc",
+      "rustfmt-x86_64-pc-windows-msvc"
+    ],
+    "commands": {
+      "activeToolchain": "stable-x86_64-pc-windows-msvc (default)",
+      "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "cargoClippy": "clippy 0.1.99 (58cf8f9c35 2026-10-13)",
+      "cargoFmt": "rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)"
+    },
+    "historicalFailedDirectoriesPreserved": 4,
+    "systemPathModified": false
+  },
+  "verification": {
+    "rustTests": "364 passed / 14 ignored",
+    "frontendBuild": "passed",
+    "readStateTests": "2 suites passed",
+    "uiTests": "10 suites passed",
+    "clippy": "passed; 1 existing sort-style suggestion",
+    "diffCheck": "passed"
+  },
+  "artifact": {
+    "path": "src-tauri/target-install01-exe-20261102/release/envcon.exe",
+    "format": "Windows x64 PE32+ GUI",
+    "fileVersion": "0.5.5",
+    "productVersion": "0.5.5",
+    "bytes": 9565184,
+    "sha256": "49bdb3b7d3a2dd8bfb1419a3611709e966c31b210f25830dee026f4ca40d5d15",
+    "installerGenerated": false,
+    "started": false,
+    "published": false
+  },
+  "notVerified": [
+    "real system PATH write",
+    "LLVM isolated installer component completeness",
+    "formal release or code signing"
+  ]
+}

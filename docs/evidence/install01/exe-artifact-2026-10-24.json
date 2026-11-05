@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-24",
+  "timeZone": "Asia/Shanghai",
+  "version": "0.5.5",
+  "artifact": {
+    "path": "D:\\SOLO project\\envcon\\src-tauri\\target-install01-exe-20261024\\release\\envcon.exe",
+    "sizeBytes": 9593856,
+    "sizeMiB": 9.15,
+    "sha256": "dd6ad765e58543754ab401854ce4c4a62b80a3875bc15387eced221b414da678",
+    "architecture": "Windows x64",
+    "peMachine": "0x8664",
+    "peOptionalMagic": "0x20b",
+    "subsystem": "Windows GUI",
+    "FileVersion": "0.5.5",
+    "ProductVersion": "0.5.5",
+    "FileDescription": "EnvCon",
+    "OriginalFilename": ""
+  },
+  "build": {
+    "command": "tauri build --no-bundle -- --offline",
+    "cargoTargetDir": "D:\\SOLO project\\envcon\\src-tauri\\target-install01-exe-20261024",
+    "exitCode": 0,
+    "sourceHead": "45f8a71db0df8473638eb2b1a2be58118752b3e2",
+    "dirtyWorkspace": true,
+    "sourceSnapshotSha256": "6e99db7b260f6e1765e4ede5c6127ff45f7c4f12954784d356c4c202f0209bb8",
+    "sourceFilesUnchangedDuringBuild": true,
+    "bundleDirectoryExists": false,
+    "installerProduced": false,
+    "published": false
+  },
+  "verification": {
+    "verify": {
+      "exitCode": 0,
+      "rustPassed": 360,
+      "rustIgnored": 14,
+      "uiSuites": 10,
+      "readStateSuites": 2,
+      "frontendBuild": "passed"
+    },
+    "clippy": {
+      "exitCode": 0,
+      "warnings": 1,
+      "warning": "unnecessary_sort_by in commands.rs"
+    },
+    "diffCheck": {
+      "exitCode": 0
+    },
+    "actualToolInstall": false,
+    "actualSystemPathWrite": false,
+    "llvmIsolatedInstall": false,
+    "executableLaunched": false
+  },
+  "previousArtifacts": [
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target\\release\\envcon.exe",
+      "size": 9541632,
+      "sha256": "8e12c3a0d7b602a814e1bfe7495b6d38819a069b19bd857f0b6c0123b59a356b",
+      "unchanged": true
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target\\release\\bundle\\nsis\\EnvCon_0.5.5_x64-setup.exe",
+      "size": 3237688,
+      "sha256": "32dfd33c60ab841b1a0ba5ec0fb9ca4d2ed0352ec110ede5845290c5c78d59ef",
+      "unchanged": true
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target\\release\\bundle\\msi\\EnvCon_0.5.5_x64_en-US.msi",
+      "size": 4595712,
+      "sha256": "b52bdb43c6e1fe6c23955912435f777f35e599ab91e706b871fba0c0ad2e568f",
+      "unchanged": true
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target-v0.5.5\\release\\envcon.exe",
+      "size": 8318464,
+      "sha256": "e31f14bce50cf3ef9e13863ff362a6aadcc73e4265087c634cae56c8260efe23",
+      "unchanged": true
+    },
+    {
+      "path": "D:\\SOLO project\\envcon\\src-tauri\\target-v0.5.5\\release\\bundle\\nsis\\EnvCon_0.5.5_x64-setup.exe",
+      "size": 2842439,
+      "sha256": "7071493d047085c9356f56b77cd6b18d0338e0b7e7cb6f041860f8b2bff71a1e",
+      "unchanged": true
+    }
+  ]
+}

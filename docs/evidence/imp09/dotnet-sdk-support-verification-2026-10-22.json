@@ -1,0 +1,134 @@
+{
+  "id": "imp09-dotnet-sdk-support",
+  "title": ".NET SDK 作为第 17 类环境接入",
+  "date": "2026-10-22",
+  "status": "implemented",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "relatedRoadmapItem": "IMP-09 适配器扩展与能力建模；R0 执行清单第 1 项「冻结 16 类工具能力矩阵」",
+  "request": {
+    "verbatim": "还有添加 .net sdk 的功能",
+    "decision": ".NET 范围：LTS 与 STS 全部提供"
+  },
+  "gapBefore": {
+    "symptom": "软件能识别 `dotnet` 命令，但不能下载、安装或切换 .NET SDK 版本。",
+    "detail": "`EnvType` 只有 16 个变体，不含 DotNet。`dotnet` 仅作为包管理器存在，且自更新被明确拒绝（「.NET CLI 由 .NET SDK 随附，请更新 SDK 后重启应用」）。"
+  },
+  "design": {
+    "runtimeVsSdk": "只装了 .NET Runtime 的目录同样有 `dotnet.exe`，但它无法编译项目。结构判定要求 `dotnet.exe` **且** `sdk/` 目录存在；缺 `sdk/` 时诊断信息明确写出「这可能是只装了 .NET 运行库，而不是 SDK」，而不是笼统的「结构不完整」。",
+    "zipLayout": "Windows 上 .NET SDK 只提供 zip（无官方 exe 安装器）。zip 内直接是 `dotnet.exe` 与 `sdk/` 等目录，没有统一顶层目录，因此 `strip_top: false`——剥一层会把内容散到目标目录之外。",
+    "pathEntry": "`dotnet.exe` 直接在 SDK 根目录，没有 `bin` 子层，因此 PATH 入口是 `current\\dotnet` 而非 `current\\dotnet\\bin`。",
+    "versionSource": "官方 `releases-index.json`，每个通道取当前最新 SDK。",
+    "noChecksum": "微软不发布逐文件 SHA-256 清单（只有 `releases.json` 内的 SHA-512），因此如实标为 `Unverified`，不假装已校验。"
+  },
+  "onlineVerification": {
+    "why": "此前 `releases-index.json` 的解析只经过合成夹具，从未在真实响应上跑过。这是最可能藏真实缺陷的地方。",
+    "endpoint": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json",
+    "response": "HTTP 200，6988 字节，14 个通道",
+    "fieldsObserved": "channel-version, latest-release, latest-release-date, security, latest-runtime, latest-sdk, product, support-phase, release-type, releases.json, supported-os.json",
+    "defectsFound": [
+      {
+        "defect": "`support-phase` 实际有四种取值（active / maintenance / go-live / eol），原实现只处理了 `eol`，其余一律按「LTS」或「STS」输出——用户看不出某通道已进入维护期。",
+        "fix": "改为按 phase 分档：eol → 「已停止支持（原 X）」、maintenance → 「X · 维护期」、其余 → 「X」。"
+      },
+      {
+        "defect": "11.0 通道的 `latest-sdk` 是 `11.0.100-rc.2.26504.105`（RC 预发布版），`support-phase` 为 `go-live`。原实现把它标成「STS」，用户装完才发现不是正式发布。",
+        "fix": "新增 `is_prerelease_version`，识别 -rc./-preview./-alpha/-beta 等标记，命中或 phase 为 go-live 时标注「预览版（X），非正式发布」。"
+      },
+      {
+        "defect": "2.0 与 1.0 通道的 `latest-sdk` 分别是 2.1.202 与 1.1.14，与 2.1/1.1 通道重复，导致同一版本出现两行。",
+        "fix": "排序后按版本号去重。"
+      }
+    ],
+    "urlSpotCheck": "对 10.0.402（正式）与 11.0.100-rc.2.26504.105（RC）各做一次 HEAD，两者均返回 HTTP 200，说明推导出的下载地址格式正确、预览版也确实可下载。"
+  },
+  "fixtures": [
+    {
+      "name": "sources::dotnet_index_takes_one_sdk_per_channel_and_labels_support_phase",
+      "asserts": ["空版本被跳过而非生成 404 链接", "按版本号降序", "LTS/STS/已停止支持 分别标注", "日期原样保留", "下载地址为 Windows x64 zip", "校验状态为 Unverified", "非 JSON 与空索引均报错"]
+    },
+    {
+      "name": "sources::dotnet_index_flags_prereleases_and_dedupes_channels_sharing_a_version",
+      "asserts": ["预览版标注含「预览版」", "maintenance 标注为「STS · 维护期」", "eol 标注为「已停止支持（原 STS）」", "重复版本各只保留一行", "排序仍为降序"]
+    },
+    {
+      "name": "sources::dotnet_prerelease_detection_does_not_flag_stable_versions",
+      "asserts": ["10.0.402/9.0.319/8.0.426/3.1.426/1.1.14 不被误判为预览版", "-rc./-preview./-alpha/-beta 均被识别"]
+    },
+    {
+      "name": "detect::system::dotnet_requires_an_sdk_directory_so_a_runtime_is_not_mistaken_for_it",
+      "asserts": ["只有 dotnet.exe 不算 SDK", "补上 sdk/ 后被识别", "安装根为 exe 所在目录", "PATH 入口为 current/dotnet 无 bin 层"]
+    },
+    {
+      "name": "sources::every_environment_has_a_consistent_windows_download_spec",
+      "asserts": ["17 类（含 DotNet）都有可构造的下载规格，扩展名为 zip"]
+    },
+    {
+      "name": "install::dotnet_archive_validation_reads_the_sdk_directory_name_not_the_binary",
+      "asserts": [
+        "只有 dotnet.exe 没有 sdk/ 时结构判定拒绝",
+        "补上 sdk/10.0.402 后校验通过",
+        "版本不符（10.0.404）时报错且错误信息含期望版本",
+        "校验读目录名而不是执行 dotnet.exe——未校验的二进制不能执行"
+      ]
+    }
+  ],
+  "verification": {
+    "targetFixtures": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml dotnet_ -- --test-threads=1",
+      "result": "5 passed / 0 failed"
+    },
+    "sourcesModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml sources:: -- --test-threads=1",
+      "result": "23 passed / 0 failed / 4 ignored"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "348 passed / 0 failed / 14 ignored"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1710 modules, built in 894ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> 九套套件",
+      "result": "九套全部 PASS"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/types.rs",
+    "src-tauri/src/sources.rs",
+    "src-tauri/src/detect/system.rs",
+    "src-tauri/src/detect/mod.rs",
+    "src-tauri/src/detect/probe.rs",
+    "src-tauri/src/commands.rs",
+    "src/lib/types.ts",
+    "src/pages/Download.tsx",
+    "src/pages/Environments.tsx",
+    "src/components/EnvTypeBadge.tsx"
+  ],
+  "notVerified": [
+    "未在真实 Windows 上安装 .NET SDK：下载、解压、`dotnet --version` 探测全部只经合成夹具。",
+    "未验证 `strip_top: false` 在真实 zip 上的结果——zip 内部布局依据官方说明推断，未实际解压核对。",
+    "未验证真实 SDK 目录下 `sdk/` 的确切层级（当前按根目录下的 `sdk/` 判定）。",
+    "未覆盖 .NET SDK 的多版本并存语义：官方安装器支持同机多 SDK，而本应用按「一个环境一个目录」建模。"
+  ],
+  "limitations": [
+    "只列出每个通道的**当前**最新 SDK，不提供历史补丁版本——要展开需逐个通道再请求 `releases.json`，请求量成倍增加。",
+    "预览版仍会出现在列表中（明确标注），不主动过滤：用户可能确实需要 RC。",
+    ".NET 未纳入 R0 执行清单的 16 类资产矩阵与下载核验：没有做过真实下载、长度比对与归档结构检查。",
+    ".NET 未纳入 UNINST-01 的卸载覆盖范围：卸载走通用「删除受管目录」，未针对 `dotnet.exe` + `sdk/` 布局做专项校验。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "只做了两个只读 HEAD 请求与一次 JSON 读取；未下载安装包，未安装或修改任何真实 .NET 环境。"
+  }
+}

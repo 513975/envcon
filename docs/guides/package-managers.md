@@ -45,7 +45,7 @@
 - 0.4.2 起，重装全部成功后可预览并确认卸载指定旧包；不自动删除，详情见 [旧包清理](old-package-cleanup.md)。
 - “开发缓存”包含 npm、pnpm、Yarn、pip 及构建工具缓存。执行前再次核对显示路径，拒绝管理根、用户根、运行时和明显的项目目录；部分清理失败不会显示为全部成功。
 
-详见 [目录迁移](package-manager-migration.md)、[全局包重装](global-package-reinstall.md)、[Python 包重装](python-package-reinstall.md) 和 [关键功能审计](../audits/key-function-audit-2026-09-12.md)。
+详见 [目录迁移](package-manager-migration.md)、[全局包重装](global-package-reinstall.md)、[Python 包重装](python-package-reinstall.md)；历史验收记录集中在根目录 [ROADMAP](../../ROADMAP.md)。
 
 ## 能力边界
 
@@ -64,7 +64,7 @@ Cargo 的 CARGO_HOME 含配置、凭证和安装记录，因此不作为可随�
 
 ## 旧包扫描
 
-0.5.1 可在扫描来源中直接预览并删除旧包，无需先重装；默认不选择任何包，执行前再次验证来源。npm 缺少来源记录时，可明确确认从 `registry.npmjs.org` 下载同名固定版本；这不恢复原始来源，不适用于私有包。工具自更新及后台扫描的具体支持范围见 [0.5.1 审计](../audits/key-function-audit-2026-09-15.md)。
+旧包可先预览再删除，默认不选择任何包，执行前再次验证来源。npm 缺少来源记录时，可明确确认从 `registry.npmjs.org` 下载同名固定版本；这不恢复原始来源，不适用于私有包。
 
 “旧包扫描”提供常见位置、全部本地固定/可移动磁盘、指定目录三种范围，可停止并保留结果。按管理器及目录分组，显示安装记录数量和可重装数量；展开可查看版本与阻止恢复的原因，直接进入对应重装窗口。
 

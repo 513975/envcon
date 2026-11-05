@@ -27,3 +27,13 @@
 | 0.5.2 | `16cc486669a8a2998f82fed2c7287ab687470d929a52a89b873aefe38516a504` |
 | 0.5.3 | `64dba5931a8eb976abd3736e4c772b043288ad5916d8314664ba393d8cd6e950` |
 | 0.5.4 | `ff5a5a42845d8cbf62d0bd1d6764cd56a268d88d7f56d8479a2bfc3b9ac0c0f5` |
+
+## 后续本地修复版可执行文件（2026-11-02）
+
+本次安装修复未改应用版本声明，独立生成 Windows x64 EXE，不生成安装包、未启动产物或正式发布。该 EXE 基于当前 0.5.5 工作区，不代表创建了 0.5.6 正式版本。
+
+| 产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `src-tauri/target-install01-exe-20261102/release/envcon.exe` | 9,565,184 | `49bdb3b7d3a2dd8bfb1419a3611709e966c31b210f25830dee026f4ca40d5d15` |
+
+Rust 实装、组件、回归和产物证据：`docs/evidence/install01/rust-and-exe-verification-2026-11-03.json`。

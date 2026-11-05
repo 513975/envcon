@@ -1,0 +1,488 @@
+{
+  "capturedDuringBuild": true,
+  "head": "45f8a71db0df8473638eb2b1a2be58118752b3e2",
+  "dirty": true,
+  "aggregateSha256": "6e99db7b260f6e1765e4ede5c6127ff45f7c4f12954784d356c4c202f0209bb8",
+  "files": [
+    {
+      "path": "index.html",
+      "sha256": "7822d26a73db455395fb18ed264712fb3d00339872bb3c8baa3ec64b89a4e791"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "583dd12ec5db59cfaaeb8a03783c0d9add89919682d4c67f507aeb1007632e3f"
+    },
+    {
+      "path": "package.json",
+      "sha256": "042dfa87255797fd8af64e33d6ab8cad897e9b3ac8cea5d56eb16ded11c37b75"
+    },
+    {
+      "path": "public/tauri.svg",
+      "sha256": "3f32698a9cb64f4d06d4df89ecb903418347589a17d297208a7f68741a8b5672"
+    },
+    {
+      "path": "public/vite.svg",
+      "sha256": "4a748afd443918bb16591c834c401dae33e87861ab5dbad0811c3a3b4a9214fb"
+    },
+    {
+      "path": "src-tauri/Cargo.lock",
+      "sha256": "cf1557eea886668df1d16724eb9d7db513fd1e2aa0a1b210ac82ab2a3933fcc6"
+    },
+    {
+      "path": "src-tauri/Cargo.toml",
+      "sha256": "8c8e7f27730d2216ac871f9b7f93dd960dcd4d83ddfe4fdc4aeb5453b8bd82f4"
+    },
+    {
+      "path": "src-tauri/build.rs",
+      "sha256": "4ae2333b11623039cc115e29b696e7ff5cdfcd5b7d628280ddf48fa733e6418d"
+    },
+    {
+      "path": "src-tauri/icons/128x128.png",
+      "sha256": "1f3689f6374b0553996fdc99743799216703835070145d7f0e6ec11e6280139e"
+    },
+    {
+      "path": "src-tauri/icons/128x128@2x.png",
+      "sha256": "69194785eef4323955af73b0c03362ac0804db056c2424f9715076cabc0ed103"
+    },
+    {
+      "path": "src-tauri/icons/32x32.png",
+      "sha256": "d151f11e325f7502de0c739a2e51697aa569fd4701ae6e11fae1a3b4c7d5f157"
+    },
+    {
+      "path": "src-tauri/icons/Square107x107Logo.png",
+      "sha256": "fd8658ff0e2c177ce0779d11fea1574e9d7d82a52a3a9197038f37b07fe24475"
+    },
+    {
+      "path": "src-tauri/icons/Square142x142Logo.png",
+      "sha256": "c348fcf2d2f2f9714a41925184926f77f440676987d233ae1daf4fd94fda245f"
+    },
+    {
+      "path": "src-tauri/icons/Square150x150Logo.png",
+      "sha256": "d46dc2bc568f911b9cb978de68b4a7e3ad458fbac15196597849c43c40f4b65a"
+    },
+    {
+      "path": "src-tauri/icons/Square284x284Logo.png",
+      "sha256": "80d93a5257c89ea57023c30500c889b4df062430ffb0b4fed4ca4785d13e29ac"
+    },
+    {
+      "path": "src-tauri/icons/Square30x30Logo.png",
+      "sha256": "c3ce70e22ec2ed3ea2d0362a767d087e6cadb93ec71e80010649f892520175f4"
+    },
+    {
+      "path": "src-tauri/icons/Square310x310Logo.png",
+      "sha256": "624dd93ddb1f0d69f2a4aa7af0b0646ae3ae6347cbb42dab56ef88dba7f38d07"
+    },
+    {
+      "path": "src-tauri/icons/Square44x44Logo.png",
+      "sha256": "f9eca6f00dba41cfecfedbc9a6f88014b4ee0f9dbf016e202c7ede09c60107ef"
+    },
+    {
+      "path": "src-tauri/icons/Square71x71Logo.png",
+      "sha256": "66a6b51da8962a9472c9d29b1b08e3309561521bf7fbaac52b9f680df13ff487"
+    },
+    {
+      "path": "src-tauri/icons/Square89x89Logo.png",
+      "sha256": "fe8da53273722bb6fd66e98bf6810e8a7db22aeff27c6c1a096d57ba556b9ef4"
+    },
+    {
+      "path": "src-tauri/icons/StoreLogo.png",
+      "sha256": "5412fce324344999aad82f6b69abcaa6c8792eac7b79a4b321aaaeacd0525eaf"
+    },
+    {
+      "path": "src-tauri/icons/icon.icns",
+      "sha256": "3dc10493b7de48a61de58f768f8a5708d3a44a068c148cedf0502b9b9b71ba5d"
+    },
+    {
+      "path": "src-tauri/icons/icon.ico",
+      "sha256": "e38ca88e1d5490f3dcbc3c3fa525f7fcb7b80fff3cb2f3a4eb1b2d018c0915c1"
+    },
+    {
+      "path": "src-tauri/icons/icon.png",
+      "sha256": "b5d93c8ec365c08b11bd006e46a46e227c681d30bb295af3d017573bfc752a83"
+    },
+    {
+      "path": "src-tauri/src/app_update.rs",
+      "sha256": "1fc5f732b4c20b35a9da9caa6ec1f3d8d1821f8ca37b6e9b9fd661d6e419a367"
+    },
+    {
+      "path": "src-tauri/src/caches.rs",
+      "sha256": "e366380b927ae6335a90911e103c9a7ac98c3dc93f9a7d2392c785943de8277a"
+    },
+    {
+      "path": "src-tauri/src/commands.rs",
+      "sha256": "62e0ba82ca8163dd3be943a0faa8caec17f754771b6a07db38e06a4234835609"
+    },
+    {
+      "path": "src-tauri/src/config.rs",
+      "sha256": "2e67cf7216cb26c0bfea4c50be281da9788001281bf0e0486ccc97ecfd47bdc8"
+    },
+    {
+      "path": "src-tauri/src/detect/discovery.rs",
+      "sha256": "5c67471ba8f7a9d08c0a32b814556b025c24a4c7a6902f79efed8a83b648115c"
+    },
+    {
+      "path": "src-tauri/src/detect/mod.rs",
+      "sha256": "6842db841c05bdc9a796572b2f69ce9096df4cf644982859865c4d9027a12cba"
+    },
+    {
+      "path": "src-tauri/src/detect/probe.rs",
+      "sha256": "ae2f9414fa926d8522eec87d204c0b89aaad1893fd0421ed1080f433c91e5b2f"
+    },
+    {
+      "path": "src-tauri/src/detect/system.rs",
+      "sha256": "127219787d8a31877675179374295f201d7ce3875233c2e96d80e48a0281fc86"
+    },
+    {
+      "path": "src-tauri/src/download.rs",
+      "sha256": "42c6d10c2ea5d380fb4191964e1b21f47b21f3ea628fd4334c60b4e25be040d1"
+    },
+    {
+      "path": "src-tauri/src/elevate.rs",
+      "sha256": "a768a5460e4658f83af14a4b9899ca775a0e36ac302a897a7da0a4fcf750ae6b"
+    },
+    {
+      "path": "src-tauri/src/error.rs",
+      "sha256": "fce65aa861c1b292c2e30ba5792537bec19416f2e6a6ccb8d5fdd7042eaa930b"
+    },
+    {
+      "path": "src-tauri/src/fsutil.rs",
+      "sha256": "262a77aa80c42f7f5e8ab25ca8b446d1feb1ac66e40f5ea791980c3c233d0592"
+    },
+    {
+      "path": "src-tauri/src/global_reinstall.rs",
+      "sha256": "3e7cba942fd00cdde3624b0664ca852766e56f0f5d4e87c73be03b32ab07ecd6"
+    },
+    {
+      "path": "src-tauri/src/install.rs",
+      "sha256": "f2d1e4afc1dae64b8fa576798e562f42f8d1430e56c544e1aa9b2125c9ba1e0e"
+    },
+    {
+      "path": "src-tauri/src/installer_uninstall.rs",
+      "sha256": "4de1f110fb253acec77fa0684ea0b41a23ffa82d7409732ebdaba589a100f2cb"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "1559826da065f0cfbbbdd4611d59a94140ee380821c4f826e8c8b95f6d8f6894"
+    },
+    {
+      "path": "src-tauri/src/link_ownership.rs",
+      "sha256": "b08c6a5527a4c46177ba881f18ed80c160dfb5711815b14e01cb6c45578c9773"
+    },
+    {
+      "path": "src-tauri/src/main.rs",
+      "sha256": "d9a37d6b4bfc455d204f7a23a5443f7c36a9ba7fd0956d4d7ba8cf765e66dd2c"
+    },
+    {
+      "path": "src-tauri/src/migration.rs",
+      "sha256": "8d463e14d508b32347e74e26d07bc21d01848baacbdd39777d84417ea0261f51"
+    },
+    {
+      "path": "src-tauri/src/move_journal.rs",
+      "sha256": "b8f3bdff12e52acfcad42bcc4a6ffa623473fd7ffcd5a7e787d9c53bc98dc1d1"
+    },
+    {
+      "path": "src-tauri/src/old_packages.rs",
+      "sha256": "fcbbb895614fc2db42bf63c45f07855ca7189d3c1059006c4b76d23e3a477625"
+    },
+    {
+      "path": "src-tauri/src/package_managers/commands.rs",
+      "sha256": "157d58883c224500a4b41d076a79242078ea5391b86c9574a1ebfebbb180c284"
+    },
+    {
+      "path": "src-tauri/src/package_managers/mod.rs",
+      "sha256": "10f20cd14fadf18018b3af3f1a5ffd7beaf41fb89cd7b986e846c98a07f8faff"
+    },
+    {
+      "path": "src-tauri/src/package_managers/native.rs",
+      "sha256": "0bc8362f3c8412509b23419978660be362628d91e6a753916d74c8986ad5fa5d"
+    },
+    {
+      "path": "src-tauri/src/package_managers/node.rs",
+      "sha256": "4e83872704de7cf07f31749238cd84e0e842403199c74b3d12b02585c2f6f44e"
+    },
+    {
+      "path": "src-tauri/src/package_managers/types.rs",
+      "sha256": "117c3b4dc55b2bf6078f66b1bd8fd77b0017000c25b22ccea394aa4e0fd60230"
+    },
+    {
+      "path": "src-tauri/src/package_scan.rs",
+      "sha256": "fbfa96c5b94c74ae4efdd8fe4ccdca1173194faf2c5cd4ec9521efdc318ea3b3"
+    },
+    {
+      "path": "src-tauri/src/packages.rs",
+      "sha256": "e9174974c71c9747d1d090f6fe9d10f15a9cf10996a199b4d2e81030b4bc6dab"
+    },
+    {
+      "path": "src-tauri/src/path_ownership.rs",
+      "sha256": "cd672c51cd51552ac3693a2ea1b336f2ab3703d2bf3ddb7f87048d856b8e2999"
+    },
+    {
+      "path": "src-tauri/src/pathman.rs",
+      "sha256": "f5b41b7d839b6d1def845609970a8f42af328aafe56d8f3bf153ace1bbadde1b"
+    },
+    {
+      "path": "src-tauri/src/pip_reinstall.rs",
+      "sha256": "5cfb30f0f5fc2d7a8272ee62490712488b57902031526cadac41f778cd198d30"
+    },
+    {
+      "path": "src-tauri/src/pkgtools.rs",
+      "sha256": "882605e493ec1bf50eae707194bcd07784ce5cad3b2be077ab202df678ecb5e5"
+    },
+    {
+      "path": "src-tauri/src/reinstall_process.rs",
+      "sha256": "a7f02dd86c6ffed0b80b6a388169d82c1e4d88803830b8b338ac3a2cd8ad1bd1"
+    },
+    {
+      "path": "src-tauri/src/scan_cache.rs",
+      "sha256": "5a11d647ff5fe0026b0419de45128846aa931ec86cdf4454602264ace451d06d"
+    },
+    {
+      "path": "src-tauri/src/singleflight.rs",
+      "sha256": "b818e831a2698778a56590fbc9f55c65097b08c304906e89cb72aa0d64f19872"
+    },
+    {
+      "path": "src-tauri/src/size_tasks.rs",
+      "sha256": "436d39aacc3013063a6634526b34de41c474fa8aa917704891c46f0c7c69cc3b"
+    },
+    {
+      "path": "src-tauri/src/sources.rs",
+      "sha256": "b1a1eafbbd16e2c957c8ae498f39fc213ca6b6895bbc197388361f8d7758f930"
+    },
+    {
+      "path": "src-tauri/src/sources/android.rs",
+      "sha256": "f720273c777b2b7b426e3a56fde2a88d320b63d208d964eff0412566eb6e374a"
+    },
+    {
+      "path": "src-tauri/src/switcher.rs",
+      "sha256": "444bdca606f47b3f5441a06dd48652dfe446e26008a7ab7aa73459374687b6c8"
+    },
+    {
+      "path": "src-tauri/src/test_support.rs",
+      "sha256": "0a3361635f6f29df5f7f53cd58a8d0d0d08544e942f16be15c9362a7ea6335cd"
+    },
+    {
+      "path": "src-tauri/src/types.rs",
+      "sha256": "4b8ab5db94250546b8331a1605eb3a62b95da3a1ca1475ea88f94becbede2a75"
+    },
+    {
+      "path": "src-tauri/src/update_journal.rs",
+      "sha256": "1ca6b143e22d4a5b57dc4df888b0c6fc6836383c573298b955b4f0e8cd76502b"
+    },
+    {
+      "path": "src-tauri/src/uv_recovery.rs",
+      "sha256": "7de2ec32555794cb8245b68ffd0b0a80d7bfcaa1298b0cc554ab9ca1bcc71f36"
+    },
+    {
+      "path": "src-tauri/tauri.conf.json",
+      "sha256": "69ba5b550dc2d6019931fc45178216a984dca8639995fc35e5e78d3d28af9d38"
+    },
+    {
+      "path": "src/App.tsx",
+      "sha256": "5aeb0e5cb5c02fd4eb377bcf50f59022bac5df4c95af7f311e5cd2986d1b2929"
+    },
+    {
+      "path": "src/components/DirectorySize.tsx",
+      "sha256": "0d1b16f0b86b39ae4803c441b2ac8c96e7d12bcc63a5095a411aba2d316552e4"
+    },
+    {
+      "path": "src/components/EnvTypeBadge.tsx",
+      "sha256": "bab811eaf7851e5ef6ddd9862f32f6e4fb15be092f0ce33a655dc9b75d8e72c7"
+    },
+    {
+      "path": "src/components/GlobalPackageReinstall.tsx",
+      "sha256": "63b9160ac0c765cf1c0d5915a1c39e8b8101fe310d276e82155e634b3a8ae419"
+    },
+    {
+      "path": "src/components/GlobalSourceSelect.tsx",
+      "sha256": "652c0efafa9ea45d752452906dea4a81cfbcb13e98dbbddd46f9bb9b82bad2aa"
+    },
+    {
+      "path": "src/components/InstalledPackages.tsx",
+      "sha256": "ca5bb43ad75258feee0eb8c8d005ce8c299cb5325a8a1eb7d4e61dd719fa8b7f"
+    },
+    {
+      "path": "src/components/OldPackageCleanup.tsx",
+      "sha256": "8612162c211808a0baec9fec64b5b9118bf8189ae9985f2adf5b68cfe4225cba"
+    },
+    {
+      "path": "src/components/OldPackageScan.tsx",
+      "sha256": "e7b9aaa962afd5a1b897804c88dfa22bc4585d6b0a1489e677924197732d219e"
+    },
+    {
+      "path": "src/components/PipReinstall.tsx",
+      "sha256": "0f3084cc848ada60b5152c56f4f9b1954ace56800916a85e88bf781423abfb6f"
+    },
+    {
+      "path": "src/components/ScanResults.tsx",
+      "sha256": "0288921fd45acab2e4aa9f8538cb973a4128679ef624a7a54f5741b20b69f8b9"
+    },
+    {
+      "path": "src/components/ScanStatus.tsx",
+      "sha256": "935c00aeb55a172712c579e7af24fc9242b934d68fb61c86c22e26d1554797cb"
+    },
+    {
+      "path": "src/components/SystemPathEditor.tsx",
+      "sha256": "9441fd392d138c38c3b807c70f37cf37dbbfb33674b8495f51d11815b6aa9115"
+    },
+    {
+      "path": "src/components/ToolMigration.tsx",
+      "sha256": "acd84bfd291535c4a728a6180bf045aa4b7ac5e829523ccddfe6e16f8a47b29d"
+    },
+    {
+      "path": "src/components/layout/PageShell.tsx",
+      "sha256": "af49d1c9676584966c84fe2165e0222eee20b47a747715ae8c28131c9c40e8aa"
+    },
+    {
+      "path": "src/components/layout/Sidebar.tsx",
+      "sha256": "9144c8ec836978e11c21d709f37d6f9536eaeaf0e36a00c9abcc2dc6712b3464"
+    },
+    {
+      "path": "src/components/ui/Badge.tsx",
+      "sha256": "1e98b9fdb760359c7d84bfa88c2f267e1918470558a1344473f0009d9d8b3b14"
+    },
+    {
+      "path": "src/components/ui/Button.tsx",
+      "sha256": "56a9cf1c085ae57a7d5d6261da58ec7a40f2f84bdaf39ec11b7ebed804ee95d1"
+    },
+    {
+      "path": "src/components/ui/Card.tsx",
+      "sha256": "d0588b450d388055cc29d6ef37dc63104256fc8c1445cc0e472c54d437bfd68f"
+    },
+    {
+      "path": "src/components/ui/Empty.tsx",
+      "sha256": "7217336201ccffce4053790ea34b77691afa6effeaa44e6f05307f712572dff5"
+    },
+    {
+      "path": "src/components/ui/Modal.tsx",
+      "sha256": "48107cf892f241addcadde2c3e1b575c00f206171207e4c9aadbefedc6aafa1f"
+    },
+    {
+      "path": "src/components/ui/ProgressBar.tsx",
+      "sha256": "d4c93d3fef8222f08c4dfbb1729f7bf8b4ff7f864fc9a043a67c5f062c0536c1"
+    },
+    {
+      "path": "src/components/ui/SelectionButton.tsx",
+      "sha256": "fdc989152db56dc34d81ab88046aba689bee2f548d50c2fb75c0fbbb2daef334"
+    },
+    {
+      "path": "src/components/ui/Toast.tsx",
+      "sha256": "cf4cd8a145f421eb2f6b177c3763e164b4db050fae2bf3255c1e4b5174f196d4"
+    },
+    {
+      "path": "src/lib/api.ts",
+      "sha256": "dfacbc98566db1278f1bf4041e2daeb6640d98725f27535cbce7eac00b1c3093"
+    },
+    {
+      "path": "src/lib/errorInfo.ts",
+      "sha256": "fef69fe8988f62f8fd3225cbbdfccedd27c67a1ea198a46b806e03e98e9bfee8"
+    },
+    {
+      "path": "src/lib/format.ts",
+      "sha256": "d245359a5b5a7d08e1027a9b449dac7cee73a12b22f4a6d77a34b28296ac78c8"
+    },
+    {
+      "path": "src/lib/installStore.ts",
+      "sha256": "9bc6b8edbc389efc8df10f2396eec9a68f287103387cba24bdf6005e79d4d48b"
+    },
+    {
+      "path": "src/lib/managerCatalog.json",
+      "sha256": "7a1f2c871e2c205462ebca6fc9fe3deb8844fe52342bba1466e3861debfcc329"
+    },
+    {
+      "path": "src/lib/managers.ts",
+      "sha256": "5a35c6d7d377973459bd72d4c4518b6a7e8d411da695868fc5988f3ef1cfad31"
+    },
+    {
+      "path": "src/lib/readCache.ts",
+      "sha256": "375f332821376c127bd4df0b885498007659d60e20f685ff4cb04bb7abb6eb35"
+    },
+    {
+      "path": "src/lib/scanClient.ts",
+      "sha256": "1ee11c1ce98303a241101e5e1efbd0926315e4adb26033848c14d97733812f6e"
+    },
+    {
+      "path": "src/lib/scanGroups.ts",
+      "sha256": "6d8eaf19390831c20359d3f6a4a875f9d0a3b47cfd172f6ac69fd57b80feede7"
+    },
+    {
+      "path": "src/lib/scanPreferences.ts",
+      "sha256": "3a1ba843e56c4d9e5ad9da1f03e3e03a4a60111935e8c4909538b3bb612d32ac"
+    },
+    {
+      "path": "src/lib/sizeStore.ts",
+      "sha256": "0fe87ff6fc9a94bfdd60629972a4c67b634d9c3187784f1bc198821842da642f"
+    },
+    {
+      "path": "src/lib/store.ts",
+      "sha256": "52cde1a9aec98d6659f2e568faeb21e7689f83d2dee977c67a1b67d6d9c9368f"
+    },
+    {
+      "path": "src/lib/tauri.ts",
+      "sha256": "93bfb25c9e74b07d9c007b992936b55ec2d68953b53c7ba9b59f2e1ed5edd37e"
+    },
+    {
+      "path": "src/lib/toast.ts",
+      "sha256": "842d21fcb945c7f7d6c91a3cc9a343df9c6f49d3da97433122d89e989c4d9020"
+    },
+    {
+      "path": "src/lib/types.ts",
+      "sha256": "f8fde86d1dc86ea39be7f6a7a025a50c061e024d2cead3985536509ebea43cba"
+    },
+    {
+      "path": "src/lib/useTaskStatus.ts",
+      "sha256": "5802a8e2606ff8b96c7cf065a2a5ebabcb82ddf5b8342c0d57c5282a314763c3"
+    },
+    {
+      "path": "src/lib/version.ts",
+      "sha256": "7c0a9ae96abf2254d78414e6472d88c8c684222e3e05863e91ec9c277361dccb"
+    },
+    {
+      "path": "src/main.tsx",
+      "sha256": "403b4017154c1199d2b649c26dc2818b4cf63a46a465e8087dbecbf2d2952fe5"
+    },
+    {
+      "path": "src/pages/Dashboard.tsx",
+      "sha256": "a5154406e12816852c8484b578ebcd9cd442e4fd5f3ba25f8059d3fdc2b1e9f8"
+    },
+    {
+      "path": "src/pages/Download.tsx",
+      "sha256": "c58e21386a3ce21aea19977eda36d53b627232b58ff642deb0fd4c9643e33cd5"
+    },
+    {
+      "path": "src/pages/Environments.tsx",
+      "sha256": "7529e7dda8ed7849727f582ec05676cec9530b45a993ffc2b87240a41f7ecaba"
+    },
+    {
+      "path": "src/pages/PackageManagers.tsx",
+      "sha256": "3c2e844e67498e93922f6ff716047cec4902c2889c9b24788819573c9a67f3cc"
+    },
+    {
+      "path": "src/pages/Paths.tsx",
+      "sha256": "768b00a4dd189413bacc14e9b50396780fef4f674b3e3d1875897765ee8782be"
+    },
+    {
+      "path": "src/pages/Settings.tsx",
+      "sha256": "7e14cdec1b2f2aefbb42b95165ebf4b5e61c5bea5e1e038132772fe7ea36947a"
+    },
+    {
+      "path": "src/styles/global.css",
+      "sha256": "027f383c03158998534798ec9dae97746676b5d1d070db9650fe4adab24ab014"
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "sha256": "6b1994808efabd11506066c16a5047de065cb900be0e481729e062adaa20b454"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "9671b50541bcb0112d8914cf5f82c838fcaaa25bc3f14ab90cf40a49e929224e"
+    },
+    {
+      "path": "tsconfig.node.json",
+      "sha256": "6ec602b8aa146888c76f0b41ca3515f91f95919f6e6417a4670decaba8fcb982"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "494dbba8857029e9b2d6c9392b1606a7b69f5996a107e98b4332931bc701c596"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "id": "r0-user-reported-install",
+  "title": "用户自报已安装并使用 0.5.5 构建",
+  "date": "2026-10-22",
+  "status": "reported-by-user",
+  "owner": "用户",
+  "targetVersion": "0.5.5",
+  "relatedRoadmapItem": "R0 执行清单第 3 项（隔离 Windows 安装冒烟）；R0 门槛",
+  "source": {
+    "kind": "user-report",
+    "verbatim": "不需要做冒烟测试，我已经安装了，你将这些实际测试归档。",
+    "interpretation": "用户表示已在自己机器上完成安装并实际使用该构建，据此认为无需再补隔离安装冒烟。"
+  },
+  "whatThisDoesEstablish": [
+    "用户自述已完成安装流程，未反馈安装失败。",
+    "按用户要求，不再执行隔离 Windows 安装冒烟（Windows Sandbox / VM 路线到此终止）。"
+  ],
+  "whatThisDoesNotEstablish": [
+    "未观察到安装过程：没有安装日志、截图或退出码。",
+    "未观察到运行时行为：没有应用启动截图、功能操作记录或错误输出。",
+    "未验证安装后目录布局、注册表登记项、卸载行为与用户数据保留。",
+    "未验证运行环境信息：Windows 版本、是否管理员权限、CPU 架构、WebView2 运行时版本均未知。",
+    "未验证本会话新增功能是否在该构建中可用——该构建生成于 2026-10-22 01:57，若用户安装的是更早的 0.5.5，则不含 .NET SDK、搬入受管等改动。"
+  ],
+  "whyNotMarkedVerified": {
+    "rule": "项目规则：未验证不得标记已完成；源码完成、已打包和正式发布分别记录，并附可核对证据。",
+    "reason": "「用户自报」是他人陈述，不是可核对证据。按规则只能记录为「已报告」，不能升级为「已验证」，R0 因此不因本条关闭。"
+  },
+  "impactOnRoadmap": {
+    "r0": "R0 门槛不再阻塞在「无隔离环境」上，但也不因本条视为已满足——转为「用户已实际使用，书面验收证据仍缺」。",
+    "isolatedSmoke": "按用户决定停止推进 Windows Sandbox 与 Hyper-V 安装冒烟路线，相关脚本残留已在早前清理。",
+    "downstream": "R1、R3 等依赖 R0 关闭的实机验收项，其状态不变。"
+  },
+  "openQuestionsForUser": [
+    "安装的构建版本是哪一个？若早于 2026-10-22 01:57，则不含本会话新增功能。",
+    "实际使用中是否遇到错误、崩溃或功能异常？如实报告的问题可以转为可修复的缺陷记录。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "本条仅记录用户陈述，未在本机执行安装、未读写用户注册表或 PATH。"
+  }
+}

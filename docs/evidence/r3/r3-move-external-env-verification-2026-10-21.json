@@ -1,0 +1,185 @@
+{
+  "id": "r3-move-external-env-into-managed",
+  "title": "把外部纳管环境搬入受管目录，并可选择性删除旧目录",
+  "date": "2026-10-21",
+  "status": "implemented",
+  "owner": "Codex",
+  "targetVersion": "0.5.9",
+  "relatedRoadmapItem": "支持「卸载并清理相关用户 PATH」「仅移除管理记录」「保留目录并停用」模式；明确对受管普通目录、外部链接的不同适用范围，避免隐式搬移或更改外部目录。",
+  "request": {
+    "verbatim": "还有添加 .net sdk 的功能，还有安装在其他地方的环境使用软件纳入管理时，能不能删除掉？或者移动到收管目录",
+    "decisions": [
+      "外部目录怎么处理：两者都提供 —— 先移动，再可选删除旧目录",
+      "移动后原路径：原路径不保留任何东西",
+      ".NET 范围：LTS 与 STS 全部提供"
+    ]
+  },
+  "defect": {
+    "symptom": "外部安装被纳管后，受管位置只是一个指向外部目录的 junction。用户既不能把它真正搬进受管目录，也不能在搬入后清掉外部旧目录。",
+    "rootCause": "`integrate_external_env` 只做 `link_ownership::create`（建立 junction 并写来源记录），原目录原地不动。此前没有任何搬运或清理外部目标的路径，这是刻意的安全设计（只清除能证明归属的资源），但留下了「纳管了却永远清不掉外部目录」的缺口。",
+    "howFound": "用户直接提出需求；读 `integrate_external_env` 与 `link_ownership` 确认现状后设计。"
+  },
+  "design": {
+    "twoStep": "搬移与删除是两步，不是一个动作。删除是不可恢复操作，必须由用户在搬移成功后单独确认。",
+    "targetEqualsLink": "关键发现：纳管本身就是用 `envs/<folder>/<name>` 这个 junction 指向外部目录，因此**搬入的目标路径与当前链接是同一位置**。搬移的动作是「删掉链接，再在该位置建一个装着同样内容的真实目录」。初版把「目标已存在」当成拒绝条件，会导致永远拒绝——已修正。",
+    "noBackLink": "按用户决定，搬移完成后原位置不留任何回指链接。与既有 `migration.rs` 的包管理器迁移（会在原位留 junction）语义不同，因此新增独立的 `MovePlan`/`MoveResult` 而非复用 `MigrationPlan`。",
+    "deleteGuards": [
+      "受管位置仍是链接（还没搬移）→ 拒绝：此时删外部目录等于删掉环境本身",
+      "外部路径是管理根目录、其祖先或其内部 → 拒绝",
+      "外部路径或受管目录是用户目录/系统目录或其祖先 → 拒绝",
+      "受管副本与外部旧目录的相对路径或字节数不完全一致 → 拒绝",
+      "执行时重跑预览并比对计划；递归删除前再确认不是重解析点"
+    ]
+  },
+  "implementation": {
+    "previewMove": "只读给出 envType/name/source/target/files/bytes/links，并在触碰磁盘前拒绝所有不安全情形。",
+    "executeMove": "先复制到同一分类目录下以 `.` 开头的临时目录（扫描会跳过）→ 逐字节校验 → 复检源未变 → 经 `link_ownership::remove` 删纳管链接 → rename 到位。任一步失败保留原链接与外部目录；rename 失败则重建链接回滚。",
+    "discardStaging": "递归删除前逐一验证：位于目标分类目录内、名字匹配 `.{name}-moving-` 形状、本身不是重解析点。任一不满足就放弃清理并保留现场。",
+    "previewDiscard": "要求受管位置是真实目录，且受管副本按相对路径与大小完全覆盖外部旧目录。",
+    "executeDiscard": "重跑预览比对计划，递归删除前再确认目标不是链接、仍是普通目录。",
+    "commands": [
+      "preview_move_environment",
+      "execute_move_environment",
+      "preview_discard_moved_source",
+      "execute_discard_moved_source"
+    ],
+    "ui": "外部链接条目新增「搬入受管」按钮；搬移对话框展示源、目标、文件数/字节数并明确原目录保留；搬移成功后自动进入「删除外部旧目录」确认（不可恢复，独立按钮），取消则保留且不再自动提示。"
+  },
+  "fixtures": [
+    {
+      "name": "move_preview_reports_source_target_and_inventory_without_touching_disk",
+      "asserts": ["源解析为外部目录的真实路径", "目标就是当前纳管链接所在位置（不能 canonicalize，否则会跟随链接）", "files/bytes 与实际一致", "预览后链接对象仍在、外部内容原样"]
+    },
+    {
+      "name": "move_preview_rejects_entries_that_are_not_external_links",
+      "asserts": ["受管普通目录被拒绝", "不存在的名字被拒绝", "非法名称（../outside、D:\\outside）被拒绝"]
+    },
+    {
+      "name": "move_preview_reports_a_vanished_external_target",
+      "asserts": ["外部目标被删时报「无法访问」", "悬空链接对象仍保留（不能用 junction::exists——它会解析目标）"]
+    },
+    {
+      "name": "move_preview_rejects_a_target_already_inside_the_managed_root",
+      "asserts": ["外部目标位于管理根目录内时拒绝"]
+    },
+    {
+      "name": "move_exec_materializes_a_real_directory_and_leaves_no_back_link",
+      "asserts": ["受管位置由 junction 变为真实目录", "内容逐字节一致", "外部原始目录仍保留（删除是独立步骤）", "外部原路径不留回指链接", "无 staging 残留"]
+    },
+    {
+      "name": "move_exec_refuses_when_the_external_directory_changed_after_preview",
+      "asserts": ["预览后外部目录改动则拒绝执行", "链接与外部内容保持原样", "无 staging 残留"]
+    },
+    {
+      "name": "move_exec_failure_preserves_the_link_and_discards_staging",
+      "asserts": ["源文件被独占打开时执行失败", "原纳管链接仍在", "外部内容不动", "无 staging 残留"]
+    },
+    {
+      "name": "discard_removes_the_external_copy_only_after_a_verified_move",
+      "asserts": ["搬移完成后可删除外部旧目录", "外部路径消失", "受管副本完好"]
+    },
+    {
+      "name": "discard_refuses_before_the_environment_was_actually_moved",
+      "asserts": ["受管位置仍是链接时拒绝删除", "外部内容保留"]
+    },
+    {
+      "name": "discard_refuses_when_the_managed_copy_does_not_cover_the_external_one",
+      "asserts": ["外部新增内容后受管副本不再覆盖，拒绝删除", "外部新增文件保留"]
+    },
+    {
+      "name": "discard_refuses_paths_inside_the_managed_root",
+      "asserts": ["管理根目录本身被拒绝", "受管环境目录被拒绝且内容保留"]
+    },
+    {
+      "name": "discard_execute_refuses_when_the_plan_no_longer_matches",
+      "asserts": ["预览后外部内容变化则拒绝执行", "外部目录不被删除", "受管副本不变"]
+    },
+    {
+      "name": "move_then_discard_clears_the_source_record",
+      "asserts": ["搬移后来源记录存在", "删除旧目录后记录随之清除", "外部目录消失", "受管副本完好"]
+    },
+    {
+      "name": "a_failed_move_leaves_no_source_record",
+      "asserts": ["源文件被独占打开导致搬移失败时不写来源记录", "避免界面出现指向未搬移环境的删除入口"]
+    },
+    {
+      "name": "move_journal::a_recorded_source_survives_a_round_trip",
+      "asserts": ["未记录时返回 None", "写入后可读回且路径等价", "记录按环境名与类型隔离", "forget 幂等"]
+    },
+    {
+      "name": "move_journal::a_corrupt_or_mismatched_record_is_treated_as_absent",
+      "asserts": ["非 JSON、schema 不匹配、名字不匹配、source 为空、含未知字段——一律当作没有记录"]
+    },
+    {
+      "name": "move_journal::a_name_with_path_separators_is_rejected",
+      "asserts": ["环境名含 ../、/ 或 \\ 时拒绝写入与读取"]
+    }
+  ],
+  "uiAssertions": {
+    "file": "tests/release-052-ui.mjs",
+    "items": [
+      "受管普通目录不显示「搬入受管」入口",
+      "外部链接条目点击后发起 preview_move_environment，参数为 envType/name",
+      "对话框如实列出源路径、42 个文件、以及「原外部目录仍然保留」",
+      "确认后 execute_move_environment 的 plan 与预览完全一致",
+      "搬移成功自动进入删除确认，preview_discard_moved_source 参数含 source",
+      "取消删除后 execute_discard_moved_source 调用数为 0",
+      "取消后该环境仍是外部链接，后续卸载断言依赖此状态",
+      "没有搬移记录的环境不显示「删除旧目录」入口",
+      "有 movedFrom 的环境显示「删除旧目录」按钮，title 含完整旧路径",
+      "点击后以 { envType, name, source } 发起 preview_discard_moved_source",
+      "再次取消后仍不执行删除"
+    ]
+  },
+  "verification": {
+    "migrationModule": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml migration:: -- --test-threads=1",
+      "result": "23 passed / 0 failed"
+    },
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "348 passed / 0 failed / 14 ignored"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml",
+      "result": "0 errors / 0 warnings"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "build": {
+      "command": "npm run build",
+      "result": "1710 modules, built in 950ms"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> 九套套件",
+      "result": "九套全部 PASS，release-052 输出含 move external env into managed dir with preview/execute/discard-cancel"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/migration.rs",
+    "src-tauri/src/commands.rs",
+    "src-tauri/src/lib.rs",
+    "src/lib/api.ts",
+    "src/pages/Environments.tsx",
+    "tests/release-052-ui.mjs"
+  ],
+  "notVerified": [
+    "未在真实 Windows 环境上搬移真实安装目录（全部为临时目录夹具）。",
+    "未测试超大目录（数万文件）的复制耗时与用户取消：搬移没有取消入口，只能等它完成。",
+    "未覆盖搬移过程中断电或进程被杀：此时会留下 `.name-moving-<stamp>` 临时目录，扫描会跳过它，但没有自动清理。",
+    "未覆盖删除时目标被其他进程占用：会返回错误，但未验证受管副本在部分删除后仍完整。",
+    "未在真实 UI 上点击这两个对话框（UI 路径全程 mock）。"
+  ],
+  "limitations": [
+    "same_shape 只比较相对路径与字节数，不比较内容哈希：搬移时已逐字节校验，这里回答的是「副本是否仍覆盖旧目录每一项」。若外部目录在搬移后被改成同尺寸内容，删除预览仍会通过。",
+    "删除成功后来源记录随之清除，界面不再显示该旧路径（执行前对话框会显示完整路径）。这是刻意的：旧目录已不存在，保留一个指向空路径的入口只会误导。",
+    "搬移没有取消入口；大目录需要等待完成。",
+    "搬移记录写入失败时搬移本身仍然成功，但会返回明确错误说明「后续将无法从这里删除旧目录」——此时用户需要手动清理外部旧目录。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": false,
+    "note": "全部夹具在临时目录内构造；未搬移或删除任何真实安装目录，未执行真实包管理器命令。"
+  }
+}

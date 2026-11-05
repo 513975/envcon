@@ -21,6 +21,7 @@ src-tauri/target-*/
 # 子目录内容默认纳入版本控制；此处只排除根目录下的临时笔记。
 /docs/*.md
 !/docs/README.md
+!/docs/archive-legacy.md
 /findings.md
 /progress.md
 /task_plan.md
@@ -43,7 +44,6 @@ src-tauri/target-*/
 !/tests/packages-ui.mjs
 !/tests/native-benchmark.mjs
 !/tests/benchmark-process.ps1
-!/docs/imp01.md
 /src-tauri/tests/*
 !/src-tauri/tests/download_test.rs
 !/src-tauri/tests/sources_test.rs
@@ -62,3 +62,9 @@ src-tauri/target-*/
 *.njsproj
 *.sln
 *.sw?
+
+# codegraph 本地索引：按 AGENTS.md 约定「本地生成，不入库」
+.codegraph/
+
+# planning-with-files 本地工作笔记，与根目录 findings/progress/task_plan 约定一致
+.planning/

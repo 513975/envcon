@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-03",
+  "scope": "PowerShell 7 integration regression for EnvCon source version 0.6.0",
+  "status": "passed",
+  "command": "npm run verify",
+  "environment": {
+    "cargoHome": "D:\\DevEnvManager\\current\\rust\\cargo-home",
+    "rustupHome": "D:\\DevEnvManager\\current\\rust\\rustup-home",
+    "playwrightModule": "C:\\Users\\island\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright",
+    "overridesAppliedTo": "verification process only"
+  },
+  "results": {
+    "typescript": "passed",
+    "productionBuild": "passed; 1711 modules",
+    "rustLibraryTests": {
+      "passed": 373,
+      "failed": 0,
+      "ignored": 14
+    },
+    "readCacheTests": "passed",
+    "scanClientTests": "passed",
+    "uiSuites": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "limitations": [
+    "EnvCon IPC-driven PowerShell installation and switching were not executed.",
+    "No application executable was packaged and no release was published."
+  ]
+}

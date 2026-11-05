@@ -52,4 +52,4 @@
 
 Bun 执行前在目标创建独立 package.json，避免空目标向父目录查找项目。Cargo 固定安装版本并请求 locked 依赖；自定义仓库、Git 或本地安装记录不会冒充 crates.io 包。.NET 使用独立 NuGet 配置，仅恢复已确认的 nuget.org 来源。uv/pipx 附加依赖、注入包或自定义参数保留诊断，避免不完整复制原安装要求。
 
-审查与回归记录见 [新功能审查](../audits/reinstall-audit-2026-09-12.md)。
+历史审查与回归记录已并入根目录 [ROADMAP](../../ROADMAP.md)。

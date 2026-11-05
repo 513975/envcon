@@ -1,0 +1,93 @@
+{
+  "id": "dl-verify-rust-channel-version",
+  "title": "Rust 渠道显示具体工具链版本号",
+  "date": "2026-10-22",
+  "status": "implemented",
+  "owner": "Codex",
+  "targetVersion": "0.5.6",
+  "relatedRoadmapItem": "R1 DL-VERIFY-01 官方资产校验资料；下载中心版本列表",
+  "request": {
+    "verbatim": "还有就是Rust的版本下载功能不显示具体版本号，能不能也显示版本号",
+    "interpretation": "下载中心 Rust 一栏原本只列出 stable / beta / nightly 三个渠道名，用户看不出实际会装到哪个版本。要求在不改变「按渠道安装」语义的前提下，把具体版本号显示出来。"
+  },
+  "gapBefore": {
+    "listing": "`rust_channels()` 是纯静态函数，返回三条固定记录，note 字段只有「稳定版工具链」「公测版工具链」「每日构建」，不含任何版本信息。",
+    "userImpact": "同一个 stable 渠道在不同日期装到的版本不同；用户无法判断当前列表对应的是 1.98 还是 1.99，也无法确认某个修复是否已包含在内。",
+    "whyStaticBefore": "rustup 按渠道安装而非按版本安装，因此代码从未去查具体版本。但「不按版本安装」不等于「不该告诉用户版本」。"
+  },
+  "design": {
+    "channelNameStaysInVersion": "`VersionInfo.version` 仍是 `stable` / `beta` / `nightly`。该字段是后续下载与 rustup 安装调用的依据，改成具体版本号会让安装参数失效。具体版本只写进 `note` 供展示。",
+    "manifestSource": "读取 `https://static.rust-lang.org/dist/channel-rust-{channel}.toml` 的 `[pkg.rust] version`。这是 rustup 自己用来决定装什么版本的清单文件，与安装结果同源。",
+    "versionExtraction": "清单里的值形如 `1.99.1 (58cf8f9c3 2026-10-13)`，括号内是 commit 与发布日期。只取第一个空白之前的部分得到语义版本；beta / nightly 的 `-beta.7`、`-nightly` 后缀原文保留，不能裁剪，否则会误报渠道实际提供的工具链。",
+    "partialFailureIsNotFatal": "三个渠道并发查询，单个渠道失败不影响其它渠道。失败时标注「版本号查询失败：<原因>」，清单无法解析时标注「清单格式无法解析，具体版本号未知」。渠道本身仍可安装，因此不能让整张表消失，更不能猜一个版本号填上去。",
+    "pureBuilderForTests": "校验依据抽成纯函数 `rust_channel_verification(channel)`，让既有夹具不必联网即可核对。原夹具直接调用 `rust_channels()`，改成本地解析后会发起真实网络请求，那是测试污染。"
+  },
+  "implementation": {
+    "backend": {
+      "file": "src-tauri/src/sources.rs",
+      "rust_manifest_version": "用 `toml` 反序列化成嵌套 Option 结构，缺任何一层都返回 None，调用方据此显示「未知」而不是编造。",
+      "RUST_CHANNELS（常量）": "常量数组 `[(&str, &str); 3]` 保存渠道名与中文说明，作为单一事实来源；`channel_label` 从中查表。",
+      "rust_channels（函数）": "改为 async，用 `join_all` 并发拉取三个渠道。",
+      "rust_channel_verification": "纯函数，返回三个渠道共用的 rustup-init.exe.sha256 校验依据。",
+      "fetch_versions": "分支由 `Ok(rust_channels())` 改为 `rust_channels().await`。"
+    },
+    "frontend": {
+      "change": "无需改动。`Download.tsx` 已渲染 `v.version` 与 `v.note`（Badge），版本号随 note 自动显示。"
+    }
+  },
+  "verification": {
+    "fixtures": [
+      {
+        "name": "rust_manifest_version_keeps_the_semver_and_drops_the_commit_block",
+        "covers": "用真实清单样本断言解析出 `1.99.1`；beta 样本得到 `1.100.0-beta.7`；nightly 样本得到 `1.101.0-nightly`。后两者确认后缀未被裁剪。"
+      },
+      {
+        "name": "rust_manifest_version_reports_none_instead_of_inventing_a_version",
+        "covers": "缺 [pkg.rust]、空字符串、非法 TOML、有 [pkg.rust] 但无 version 键，四种情况均返回 None。锁定「不编造版本号」这一要求。"
+      },
+      {
+        "name": "rust_channels_cover_every_official_channel_with_a_checksum",
+        "covers": "渠道顺序为 stable/beta/nightly，每个渠道都有非空说明且校验依据为 ChecksumFile。防止漏渠道导致安装选项消失。"
+      }
+    ],
+    "rust": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml -- --test-threads=1",
+      "result": "354 passed / 0 failed / 14 ignored"
+    },
+    "rustTargeted": {
+      "command": "cargo test --offline --lib --manifest-path src-tauri/Cargo.toml rust_ -- --test-threads=1",
+      "result": "7 passed / 0 failed（含 3 项新夹具与 4 项既有 Rust 相关夹具）"
+    },
+    "compile": {
+      "command": "cargo check --offline --manifest-path src-tauri/Cargo.toml --tests",
+      "result": "0 errors / 0 warnings"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "exit 0"
+    },
+    "ui": {
+      "command": "node tests/run-ui.mjs <global playwright module> tests/download-ui.mjs",
+      "result": "PASS"
+    },
+    "build": {
+      "command": "npx tauri build --bundles nsis",
+      "result": "release profile 编译 7m02s；产出 bundle/nsis/EnvCon_0.5.5_x64-setup.exe"
+    }
+  },
+  "changedFiles": [
+    "src-tauri/src/sources.rs",
+    "ROADMAP.md"
+  ],
+  "limitations": [
+    "三个渠道是并发请求，首次打开 Rust 版本列表会比其它类型慢（三次 HTTPS 握手）；无缓存。",
+    "夹具使用静态清单样本，未验证真实联网下三个渠道的当前版本号。",
+    "网络超时或清单格式变更后的实际展示文案未实机验证。",
+    "版本号只用于展示，不影响安装行为：安装仍按渠道执行 `rustup`，因此列表显示 1.99.1 时若隔天安装，实际可能装到更晚的补丁版本。",
+    "未显示发布日期。清单里有 `date` 字段，但语义是「清单生成日期」而非版本发布日期，直接展示容易误导，本轮不做。"
+  ],
+  "boundaries": {
+    "touchedRealUserEnvironment": true,
+    "note": "本轮同批执行了用户明确要求的 Rust 运行时清理（改 PATH、删 14 个 rustup shim）。该项独立记录在 ROADMAP 变更日志，不在本证据范围内。代码改动本身未写入任何真实环境。"
+  }
+}
