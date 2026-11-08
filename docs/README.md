@@ -15,9 +15,9 @@
 
 - [前端重构项目说明（OpenDesign 交付版）](proposals/ui-redesign-brief-2026-11.md)：逐页需求、交互状态、安全边界、技术约束与验收标准；待产品审核和排期，不代表已批准实施。
 
-## 当前审计与证据
+## 审计与证据（各项注明快照日期；当前状态以路线图为准）
 
-- [工具安装完整性审计](audits/tool-install-completeness-audit-2026-10-22.md)：Rust 组件安装、系统 PATH、Python / Gradle 取舍及 LLVM 待验证项。
+- [工具安装完整性审计](audits/tool-install-completeness-audit-2026-10-22.md)：截至 2026-11-03 的 Rust 组件安装、系统 PATH、Python / Gradle 取舍及 LLVM 待验证项快照。
 - [早期审计与旧版本归档摘要](archive-legacy.md)。
 - `evidence/`：按改进条目归档的测试、实机检查和构建证据。证据是生成时快照；当前状态请对照 `ROADMAP.md`。
 - [0.5.5 构建记录](releases/release-0.5.5.md)与[可复核产物记录](releases/release-record-0.5.5-20261018-230054.json)。

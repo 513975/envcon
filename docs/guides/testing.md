@@ -18,7 +18,7 @@ rtk npm run verify
 rtk npm run verify -- --skip-ui
 ```
 
-`tests/verify.mjs` 按顺序执行 TypeScript/Vite 生产构建、Rust 离线串行库测试、read-cache/scan-client 两套读状态专项与六套 UI 测试（设置、启动、0.5.2、下载、扫描、大小）。遇到错误立即失败退出。串行运行 Rust 进程夹具，避免重型并行构建影响超时测试。测试脚本纳入版本控制，截图、临时数据和 tooling 不纳入。
+`tests/verify.mjs` 按顺序执行 TypeScript/Vite 生产构建、Rust 离线串行库测试、read-cache/scan-client 两套读状态专项与十套 UI 测试（路径、设置、启动、0.5.2、下载、包管理器更新、扫描总览、扫描、大小、包列表）。遇到错误立即失败退出。串行运行 Rust 进程夹具，避免重型并行构建影响超时测试。测试脚本纳入版本控制，截图、临时数据和 tooling 不纳入。
 
 `--offline --lib` 不包括全部集成测试；被忽略的真实安装测试、在线源测试和本机扫描/基准必须分别显式执行，不能计入默认通过数。
 

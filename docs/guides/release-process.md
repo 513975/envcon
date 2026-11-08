@@ -16,7 +16,7 @@
 pwsh -File scripts/record-release.ps1
 ```
 
-脚本会生成 `docs/release-record-<version>-<UTC时间>.json`，记录 commit、分支、工作区是否脏、Node/Rust 构建环境、两个锁文件哈希以及已存在产物的 SHA-256。工作区脏或没有产物时会如实写入，不能把该记录当作“已发布”。
+脚本默认在 `docs/release-record-<version>-<UTC时间>.json` 生成记录，记录 commit、分支、工作区是否脏、Node/Rust 构建环境、两个锁文件哈希以及发现的产物 SHA-256。已存在的产物只标为“存在但来源未核实”；工作区脏或没有产物时也会如实记录，不能把记录当作“已发布”。
 
 ## Tag 命名
 
@@ -51,4 +51,4 @@ git push origin v0.6.0
 
 ## 当前状态
 
-2026-10-19：0.5.5 源码仍在工作区，版本号未变；未创建或推送新 tag，未打包本轮产物，未上传 Release。代码签名和时间戳需要证书/密钥，当前标为阻塞。
+截至 2026-11-08：`package.json`、`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 的源码元数据版本一致为 0.6.0。最新的 0.6.0 源码回归证据记录于 2026-11-03；其中 EnvCon 应用内 PowerShell 安装/切换仍未验收。当前本地可核对的 EXE/NSIS 产物版本为 0.5.5，未发现 0.6.0 产物；GitHub 上最新 Release 仍为 v0.5.0 预发布，未创建 v0.6.0 tag 或 Release。因此 0.6.0 尚未打包或发布。代码签名和时间戳仍需证书/签名服务。

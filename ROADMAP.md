@@ -1,14 +1,16 @@
 # EnvCon 持续改进与进度追踪
 
-最后更新：2026-11-03
+最后更新：2026-11-08
+
+当前源码元数据版本为 0.6.0（`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 一致）。2026-11-03 的 PWSH-01 回归证据记录 Rust 373 passed / 14 ignored、`npm run verify` 的 10 套 UI 通过；EnvCon 应用内 PowerShell 安装/切换仍待验收。当前工作区可核对的 EXE/NSIS 均为 0.5.5，尚无 0.6.0 打包证据；GitHub 最新 Release 为 v0.5.0 预发布，尚无 v0.6.0 tag/Release。源码元数据版本不代表已打包或正式发布。
 
 INSTALL-01-a / a.1：rustup-init 文件名分派缺陷已修复，受管 Rust 工具链已恢复并实测。`D:\DevEnvManager\current\rust` 指向 `D:\DevEnvManager\envs\rusts\rust-stable`；Rust 1.99.1 的 rustc、cargo、clippy、rustfmt 均可运行，五个基础组件已安装。四个历史失败目录保留，未修改系统级 PATH。
 
 2026-11-02 回归与打包：完整 verify 通过（Rust 364 passed / 14 ignored、生产构建、两套读状态、10 套 UI），Clippy 通过并有 1 条既有排序风格建议。仅生成 Windows x64 GUI EXE，未生成安装包、未启动或发布；产物版本仍为 0.5.5。路径、大小、SHA-256 及 Rust 组件实测见 `docs/evidence/install01/rust-and-exe-verification-2026-11-03.json`。
 
-INSTALL-01 仍进行中：系统 PATH 真实写入未执行；LLVM 安装器组件范围仍未实测。目标版本 0.5.6；负责人 Codex。当前源码版本 0.5.5，不代表 0.5.6 已交付或正式发布。长期改进完成数不变。
+INSTALL-01 仍进行中：系统 PATH 真实写入未执行；LLVM 安装器组件范围仍未实测。该专项记录目标版本为 0.5.6；负责人 Codex。2026-11-03 的 EXE 证据对应 0.5.5，而当前源码元数据已为 0.6.0；这不表示 INSTALL-01 已完成或发布。长期改进完成数不变。
 
-PWSH-01 PowerShell 7 接入专项：进行中；负责人 Codex；目标源码版本 0.6.0。源码已接通独立 `pwsh.exe` 扫描/版本识别、官方稳定 Windows x64 ZIP、官方 SHA-256 门禁、安装结构/精确版本核验与前端展示。最近完整串行 Rust 库回归通过（373 passed / 14 ignored），`npm run verify` 含前端构建、读状态与 10 套 UI 全部通过。官方 v7.6.9 ZIP、SHA-256、隔离 `current/powershell` 命令调用及 5.1 保持独立已实测；下一步仍是 EnvCon 应用内安装/切换验收，再分别记录打包和发布。不会替换 Windows PowerShell 5.1、写系统级 PATH 或接入 MSI/MSIX/WinGet；长期 IMP 完成数不变。
+PWSH-01 PowerShell 7 接入专项：进行中；负责人 Codex；目标源码版本 0.6.0。源码已接通独立 `pwsh.exe` 扫描/版本识别、官方稳定 Windows x64 ZIP、官方 SHA-256 门禁、安装结构/精确版本核验与前端展示。2026-11-03 记录的完整串行 Rust 库回归通过（373 passed / 14 ignored），`npm run verify` 含前端构建、读状态与 10 套 UI 全部通过。官方 v7.6.9 ZIP、SHA-256、隔离 `current/powershell` 命令调用及 5.1 保持独立已实测；下一步仍是 EnvCon 应用内安装/切换验收，再分别记录打包和发布。不会替换 Windows PowerShell 5.1、写系统级 PATH 或接入 MSI/MSIX/WinGet；长期 IMP 完成数不变。
 PWSH-01 的代码/版本目标为 0.6.0；这不代表 R4/REL-01 发布门槛已满足，也不表示已打包或发布。
 
 UIR-01 前端重构：OpenDesign 交接提案已整理，负责人 Codex，目标版本/排期待审核；本项当前仅有设计说明，不属于已批准实施范围，不计入长期改进完成数，也未改业务代码或运行测试。下一步由用户审核范围与快捷键/导航决策后，再决定是否纳入路线。
@@ -151,13 +153,13 @@ P1：优先投入；P2：中期完善；P3：按实际需求与发布条件推�
 - 包管理器页面显示的是当前已安装版本和可执行路径，不等于官方最新版本。更新仅指管理器自身自更新，不是升级所有全局包；无通用自更新能力的 pipx、Cargo、.NET CLI 继续明确显示不支持。
 - 外部纳管环境只解除 EnvCon 创建的链接/记录，不删除原安装；完整卸载指可安全证明归属的 EnvCon 资源，不承诺删除所有与该语言相关的共享数据。
 - 暂缓：项目版本文件解析、一键项目构建、隔离终端、依赖求解、WSL/Docker、Conda、完整 MSVC/Windows SDK、新包管理器及大规模 UI 重构。现有功能不因延期直接删除。
-- R4 / REL-01 可执行部分已加入工作区：Windows CI 工作流、干净克隆验证脚本、版本/产物记录脚本、发布与回退流程文档，以及只读的应用版本检查/升级提示。CI 尚未在 GitHub 运行；当前 HEAD 的干净克隆缺少 11 个未提交文件（`PRODUCT_ASSESSMENT.md`、三份 Rust 集成测试、三份 UI 测试、workflow、发布文档和两份脚本），因此 ASMT-06 与 R4 均未关闭。代码签名、正式 Release 上传、tag 推送和 EXE/NSIS 真实安装/覆盖/卸载矩阵仍为外部阻塞。
+- R4 / REL-01 可执行部分已加入工作区：Windows CI 工作流、干净克隆验证脚本、版本/产物记录脚本、发布与回退流程文档，以及只读的应用版本检查/升级提示。此前 clean clone 暴露的未跟踪文件问题已修复，相关文档、测试、workflow 和脚本现均纳入 Git；fresh clone 验证仍需重跑。Windows CI 的 GitHub 运行结果尚未记录在本清单，需核对成功结果后再关闭 ASMT-06 / R4。代码签名、正式 Release 上传、tag 发布和 EXE/NSIS 真实安装/覆盖/卸载矩阵仍未完成。
 
 补充维护项：PATH-01 是已发现的 P1 写操作风险，目标版本为 0.5.7～0.5.8，不是新增产品方向；实现前必须先建立 uv 嵌套目录和 pnpm/Yarn 目录模型隔离夹具。项目环境管理、自动依赖配置和隔离终端仍不在当前范围。
 
 ### R0 执行清单（下一步）
 
-1. 冻结 16 类工具和 10 种包管理器的能力矩阵：每项写清默认下载资产、安装方式、版本来源、当前扫描/更新/卸载行为及未支持边界。（**2026-10-22 范围变化**：.NET SDK 已作为第 17 类接入 `EnvType`，但**尚未纳入本执行清单的资产矩阵与下载核验**——它只有官方 `releases-index.json` 解析与结构判定夹具，没有做过真实下载、长度比对与归档结构检查。在补齐这些之前，本清单的「16 类」口径不变。）
+1. 冻结 16 类工具和 10 种包管理器的能力矩阵：每项写清默认下载资产、安装方式、版本来源、当前扫描/更新/卸载行为及未支持边界。（范围沿革：.NET SDK 于 2026-10-22 成为第 17 类，PowerShell 7 于 2026-11-03 成为第 18 类；两者均在这份历史 R0 16 类矩阵之外单独跟踪。.NET 尚缺真实资产下载、长度及归档结构核验；PowerShell 的实施和验证范围见 PWSH-01。R0 矩阵仍按其原定 16 类范围验收。）
 2. 为 16 类默认资产实际下载文件并检查长度、文件类型/归档结构，记录可取得的官方 SHA-256；将网络失败、镜像差异和无官方校验资料分别记录，不能用 HEAD 代替。R0 只建立资产和证据基线，下载时强制校验由 R1 实现。（2026-10-19：16/16 完整下载与结构检查通过；12/16 取得官方 SHA-256 且全部一致。**镜像差异已比对**：6 类双源资产镜像与官方逐字节一致。**4 类原记“无校验资料”经复查均有发布方文件**——Rust/PHP 为 SHA-256 且已接入，Maven(SHA-512)/ADB(SHA-1) 因算法不支持而明确标注。证据 `docs/evidence/r0/r0-mirror-and-publisher-checksums-verification-2026-10-19.json`。）
 3. 优先在一次性 Windows VM 验证 Python：选择有真实 Windows x64 安装器的版本，检查发布日期、安装、实际路径和版本探测；再对其余可安全运行的安装方式做冒烟。（**2026-10-20 阻塞已解除**：主机启用 Windows Sandbox（`Containers-DisposableClientVM` + `HypervisorPlatform`）后，以一次性 Windows 11 Enterprise 10.0.26100 完成 EnvCon 安装冒烟 10/10 通过。Gen 2 Hyper-V 虚拟机因 UEFI 引导失败不可用，Gen 1 可引导到安装界面但未完成安装；Sandbox 路线已在同用途上替代。证据 `docs/evidence/r0/r0-sandbox-install-smoke-verification-2026-10-20.json`。下一步：按同一路线验证 Python 真实安装器。）
 4. 用隔离夹具复核十种包管理器的当前版本和自更新结果；明确“不支持”“失败”“版本未变化”“版本变化”，不在用户的全局环境执行更新。（2026-10-19：离线矩阵已完成——10/10 管理器的 catalog 能力、覆盖夹具、隔离结果与跳过原因均已记录；真实版本读取与自更新仍为 0/10，见 `docs/evidence/r0/r0-package-manager-matrix-2026-10-19.json`。）
@@ -435,9 +437,10 @@ UIR-01（Codex；目标版本/排期待定；2026-11-03）：完成 OpenDesign �
 
 | ID | 当前子项 / 下一步 | 阻塞与解除条件 | 实现与验证证据 | 构建 / 发布状态 | 更新时间 |
 | --- | --- | --- | --- | --- | --- |
+| DOC-REVIEW / 文档一致性核对 | Codex；2026-11-08；完成本轮状态同步 | 无产品代码改动 | 核对受跟踪 Markdown 的本地链接、18 类环境与源码元数据；更新 10 套 UI 测试说明、release record 输出路径和构建/发布状态；更正路线图证据计数 | 未运行应用测试；未打包、未发布 | 2026-11-08 |
 | UIR-01 / 前端整体重构提案 | Codex；排期/目标版本待定；已形成说明，待用户审核范围及导航/快捷键决策 | 当前为提案，仍按大规模 UI 重构暂缓规则；用户明确纳入路线后解除 | `docs/proposals/ui-redesign-brief-2026-11.md`；只读源码盘点，未运行应用测试 | 未进入开发、未打包、未发布 | 2026-11-03 |
-| PWSH-01 / PowerShell 7 | Codex；0.6.0；进行中；真实 EnvCon 安装/切换待验收 | 打包/发布需另行记录；0.6.0 不代表 R4/REL-01 通过 | 完整 Rust 372 passed / 14 ignored；`npm run verify`（1711 modules、读缓存/扫描客户端、10 套 UI）通过；官方 PowerShell 7.6.9 ZIP、SHA-256、隔离 PATH 运行通过，证据见 `docs/evidence/powershell/pwsh-runtime-verification-2026-11-03.json` | 未打包、未发布 | 2026-11-03 |
-| REL-01 / ASMT-06 | Codex；0.6.0；可执行部分已实现、待验证；下一步提交工作区后运行 Windows CI 与 fresh clone 全流程，再决定 tag | 当前 HEAD 缺未提交文件，干净克隆失败；CI 未在 GitHub 运行；代码签名/Release/真实安装矩阵为外部阻塞；tag 推送需授权 | 新增 `.github/workflows/windows.yml`、`scripts/verify-fresh-clone.ps1`、`scripts/record-release.ps1`、`docs/guides/release-process.md` 和应用更新检查；`app_update::tests` 4 passed / 1 ignored；settings UI 更新检查场景 PASS；`cargo test --offline --lib` 230 passed / 14 ignored；离线集成测试 `sources_test` 的 3 项 download spec 测试通过。fresh clone（跳过安装/测试）当前 HEAD 失败 11 项：`PRODUCT_ASSESSMENT.md`、三份 Rust 集成测试、三份 UI 测试、workflow、发布文档和两份脚本；`docs/releases/release-record-0.5.5-20261018-230054.json` 已生成 | 未打包、未打 tag、未发布 | 2026-10-19 |
+| PWSH-01 / PowerShell 7 | Codex；0.6.0；进行中；真实 EnvCon 安装/切换待验收 | 打包/发布需另行记录；0.6.0 不代表 R4/REL-01 通过 | 完整 Rust 373 passed / 14 ignored；`npm run verify`（1711 modules、读缓存/扫描客户端、10 套 UI）通过；官方 PowerShell 7.6.9 ZIP、SHA-256、隔离 PATH 运行通过，证据见 `docs/evidence/powershell/pwsh-runtime-verification-2026-11-03.json` | 未打包、未发布 | 2026-11-03 |
+| REL-01 / ASMT-06 | Codex；0.6.0；可执行部分已实现、待验证；下一步重新运行 fresh clone 检查并核对 Windows CI 结果，再决定是否申请 tag | 先前发现的未跟踪文件缺失问题已修复；fresh clone 与 Windows CI 成功结果仍待核对；代码签名/Release/真实安装矩阵为外部阻塞；tag 推送需授权 | 新增 `.github/workflows/windows.yml`、`scripts/verify-fresh-clone.ps1`、`scripts/record-release.ps1`、`docs/guides/release-process.md` 和应用更新检查；`app_update::tests` 4 passed / 1 ignored；settings UI 更新检查场景 PASS；`cargo test --offline --lib` 230 passed / 14 ignored；离线集成测试 `sources_test` 的 3 项 download spec 测试通过。`verify-fresh-clone.ps1` 的 2026-10-19 首次检查曾因 11 个未跟踪文件失败；后续已将相关文件纳入 Git，修复后的 fresh clone 检查仍待执行；`docs/releases/release-record-0.5.5-20261018-230054.json` 已生成 | 未打包、未打 tag、未发布 | 2026-11-08 |
 | UNINST-01 / R3-h 生产执行链 | Codex；0.5.9；代码及隔离/UI 回归通过、实机待验证（提前实现）；下一步在 Windows VM/授权环境用真实 Python/LLVM 原厂卸载器验收，并核对目录外副作用 | 不得运行真实用户卸载器；真实安装/卸载验收依赖 VM/授权环境及 R0～R2 关闭；真实 PATH/注册表仍未写入 | `cargo test --offline --lib installer -- --test-threads=1`：21 passed / 0 failed / 217 filtered out；生产执行器超时测试 1 passed / 237 filtered out；完整 `npm run verify`：Rust 225 passed / 13 ignored、1708 modules 构建、两套读状态及九套 UI PASS。覆盖精确命令、无 shell、执行前登记/哈希复核、Junction 先解除、登记/运行时双复查、部分失败和无递归回退。`cargo check --offline` 0 errors / 1 个既有警告；`git diff --check` 0；fmt 缺组件未执行。证据见 `docs/evidence/uninstall/installer-uninstall-verification-2026-10-19.json` | 未打包、未发布 | 2026-10-19 |
 | UNINST-01 / R3-g 历史 PATH | Codex；0.5.9；代码及隔离/UI 回归通过，实机待验证（提前实现）；下一步在 Windows VM/授权环境复核真实 PATH；R3-h 生产链路已接入但仍待实机验收 | 实际 PATH/注册表不得写入；真实验收依赖 Windows VM/用户授权及 R0 关闭 | `path_ownership` 13 passed、`uninstall_legacy_path` 7 passed、`release-052-ui` PASS；完整 `npm run verify`：Rust 212 passed / 13 ignored、构建、两套读状态及八套 UI PASS。新增手工保存恢复夹具，确认 pending 经显式保存后只重建基线、不认领旧条目。`cargo check --offline` 0 errors / 1 个既有警告；`git diff --check` 0；fmt 因缺组件未执行。证据见 `docs/evidence/uninstall/legacy-path-verification-2026-10-19.json` | 未打包、未发布 | 2026-10-19 |
 | DL-VERIFY-01 / IMP-08、09 | Codex；0.5.7；**实现与隔离测试已通过，待验收（提前实现）**；下一步待 R0 关闭后验收；官方校验资料与镜像差异已于 2026-10-19 核实 | R0 门槛仅剩 Windows VM 安装冒烟；无可信资料仍只能显示未验证 | 2026-10-19：`cargo test --offline --lib` 264 passed / 14 ignored；sources 套件 20 passed；新增 Rust/PHP 校验文件接入与镜像不继承官方摘要的夹具；官方 16 类资产下载审计与 6 类镜像逐字节比对均通过 | 未打包、未发布 | 2026-10-19 |
@@ -460,12 +463,12 @@ UIR-01（Codex；目标版本/排期待定；2026-11-03）：完成 OpenDesign �
 > 这些是历史快照：其中的日期与措辞可能已被后续改动覆盖。
 > **判断当前状态请以第一节「状态总览」和第四节「能力路线」为准。**
 
-### 2026-10-19 R4 / REL-01 可执行部分
+### 2026-10-19 R4 / REL-01 可执行部分（历史实现记录；当前状态见上方总览）
 
-负责人：Codex；目标版本：0.6.0；状态：**进行中（源码/脚本已实现，CI、真实网络、安装矩阵与发布待验证）**；下一步：在工作区提交后运行 Windows CI 和干净克隆全流程，取得可用产物记录后再决定 tag；未获授权不推送 tag 或 Release。
+负责人：Codex；目标版本：0.6.0；状态：**进行中（源码/脚本已实现，CI、真实网络、安装矩阵与发布待验证）**；下一步：重新运行 fresh clone 检查并核对 Windows CI 结果，取得可用产物记录后再决定 tag；tag 或 Release 均需单独授权。
 
-- [x] **REL-01-a / 已实现、待 CI 验证**：新增 `.github/workflows/windows.yml`，在 Windows runner 执行 `npm ci`、`npm run build`、`cargo test --lib`，显式安装固定版本 Playwright 后运行 `npm run verify`；UI 测试使用 runner 自带的 Edge 通道。尚未在 GitHub Actions 实际运行，不能宣称 CI 通过。
-- [x] **REL-01-b / 脚本已实现、当前 HEAD 验证失败（未提交文件）**：新增 `scripts/verify-fresh-clone.ps1`，在临时目录克隆源仓库，检查 `ROADMAP.md`、`PRODUCT_ASSESSMENT.md`、必要测试、CI 和发布脚本是否存在且未受 `.gitignore` 误伤，再可选执行 `npm ci`、`npm run build`、`cargo test --lib --offline`。本轮以 `-SkipInstall -SkipTests` 运行，当前 HEAD 报告 11 个缺失文件：`PRODUCT_ASSESSMENT.md`、三份 `src-tauri/tests/*.rs` 集成测试、三份 UI 测试、CI workflow、`docs/guides/release-process.md` 及两份发布脚本；源工作区忽略规则检查未新增失败（已把 `src-tauri/tests` 的整目录忽略改为只允许三份明确集成测试）。提交前 ASMT-06 不通过。另行运行离线集成测试 `cargo test --offline --test sources_test download_spec -- --test-threads=1` → 3 passed / 2 filtered out（两项网络测试未运行）。
+- [x] **REL-01-a / 已实现、待 CI 验证**：新增 `.github/workflows/windows.yml`，在 Windows runner 执行 `npm ci`、`npm run build`、`cargo test --lib`，显式安装固定版本 Playwright 后运行 `npm run verify`；UI 测试使用 runner 自带的 Edge 通道。截至该历史记录尚未在 GitHub Actions 实际运行；当前运行状态见第一节和 REL-01 执行记录。
+- [x] **REL-01-b / 首次 fresh clone 检查（2026-10-19）失败，后续文件跟踪问题已修复**：该次 `-SkipInstall -SkipTests` 检查在临时克隆中发现 11 个缺失文件；其后相关文档、集成/UI 测试、CI workflow 和脚本已纳入 Git 跟踪。fresh clone 流程尚未在修复后重新运行，当前仍需验证。另行运行的离线集成测试 `cargo test --offline --test sources_test download_spec -- --test-threads=1` 为 3 passed / 2 filtered out（两项网络测试未运行）。
 - [x] **REL-01-c / 脚本已实现并生成记录**：新增 `scripts/record-release.ps1`，比对 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本，记录 commit/分支/工作区状态、Node/Rust 构建环境、锁文件 SHA-256、已有产物 SHA-256 和调用方提供的测试证据。本轮生成 `docs/releases/release-record-0.5.5-20261018-230054.json`：版本三处均为 0.5.5、`versionConsistent=true`、工作区 `dirty=true`，测试字段记录本轮 `npm run verify` 结果；发现的旧 0.5.5 NSIS 产物 SHA-256 为 `7071493d...f71a1e`，状态标为 `present-unverified-provenance`，不能证明由当前 commit 构建；不表示本轮已打包或已发布。
 - [x] **REL-01-d / 流程文档已实现、tag 未创建/未推送**：新增 `docs/guides/release-process.md` 并加入 `.gitignore` 例外，规定正式 tag 为 `v<semver>`、预发布为 `v<semver>-rc.<n>`，不移动/覆盖/删除已推送 tag；回退从可核对产物重新构建并记录。当前没有新 tag，未执行推送。
 - [x] **REL-01-e / 已实现、待真实 Release/网络验证**：新增后端 `app_update::check_latest` 与 `check_app_update` 命令，读取 GitHub Releases latest 元数据；区分 `upToDate`、`updateAvailable`、`noRelease`、`unknownVersion`、`error`，仅接受本仓库 Release URL，只展示发布说明与发布方摘要，不自动下载、执行或安装。设置页“关于”卡片增加“检查更新”和“打开发布页”，失败可重试，并明确提示不会自动安装、摘要需下载后另行核对。新增 4 项解析/版本比较测试（通过）；真实 GitHub Release 检查和真实升级未执行。
@@ -684,6 +687,7 @@ UIR-01（Codex；目标版本/排期待定；2026-11-03）：完成 OpenDesign �
 
 ## 七、变更日志
 
+2026-11-08 / 文档一致性核对：核对当前版本元数据、18 类环境类型、默认下载源、验证脚本 UI 套件数、release record 输出路径、产物版本和 GitHub Release 状态；修正 README、测试/发布指南、审计快照标题及路线图中的过期状态和计数。复核 PWSH-01 证据为 373 passed / 14 ignored。本次未改业务源码、未运行测试、未打包或发布，长期改进状态不变。
 2026-11-03 / UIR-01 前端重构提案：按用户意图编写 OpenDesign 交接说明，覆盖产品边界、六页信息架构与状态、关键流程、视觉系统、Tauri/API 约束和验收；`docs/README.md` 增加提案索引。当前仅供审核，仍属暂缓项；未改业务代码、未运行应用测试、未打包或发布。下一步由用户确认是否纳入路线及导航/快捷键决策。
 
 2026-10-24 / INSTALL-01-a.1 重新打开真实 Rust 安装门槛：用户删除旧 Rust 后通过上次 EXE 重装，出现 unknown proxy name。已定位到 install.rs 通用临时命名使 rustup-init 进入工具代理分派；前次夹具只覆盖构造步骤，未覆盖此真实启动边界。用户授权修复并真实安装 Rust，当前 cargo/rustc/rustup 不可用；先可信引导受管工具链，再回归/构建修复版并激活，不删除四个失败目录、不改系统 PATH。
