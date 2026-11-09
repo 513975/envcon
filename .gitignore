@@ -29,6 +29,7 @@ src-tauri/target-*/
 # Local test scripts and artifacts (not published)
 /tests/*
 !/tests/run-ui.mjs
+!/tests/paths-ui.mjs
 !/tests/release-052-ui.mjs
 !/tests/download-ui.mjs
 !/tests/startup-ui.mjs
