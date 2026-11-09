@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EnvCon — Windows 开发环境一站式管理工具</title>
-<meta name="description" content="EnvCon:面向 Windows 的便携式开发环境管理器。下载、安装、多版本切换、PATH 管理、缓存清理,一个应用全搞定。">
+<title>EnvCon — Windows 开发工具下载与扫描</title>
+<meta name="description" content="EnvCon 面向 Windows 开发者，集中查看开发工具下载来源，并扫描本机工具的版本、安装位置与检测结果。">
 <style>
   /* ============ 落地页基础 ============ */
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -387,11 +387,11 @@
 
 <header class="hero">
   <div class="container">
-<div class="hero-badge"><span class="dot"></span>v0.5.4 本地构建</div>
-    <h1>Windows 开发环境<br><span class="accent">一站式管理</span>工具</h1>
+<div class="hero-badge"><span class="dot"></span>源码 0.6.0 · 最新 Release v0.5.0 预发布</div>
+    <h1>Windows 开发工具<br><span class="accent">下载与扫描</span></h1>
     <p class="hero-sub">
-      下载、安装、多版本切换、PATH 管理、缓存清理 —— 一个应用全搞定。
-      所有环境绿色便携,NTFS Junction 秒级切换版本,国内镜像高速下载。
+      集中查看开发工具下载来源，并扫描本机已有工具的版本、安装位置和检测结果。
+      部分工具另支持安装、多版本切换与 PATH 辅助管理；具体能力因工具而异。
     </p>
     <div class="hero-actions">
       <a class="btn btn-primary" href="https://github.com/513975/envcon/releases" target="_blank">
@@ -406,10 +406,10 @@
   </div>
 </header>
 
-<!-- ============ 交互式界面预览(纯代码还原,点击左侧导航切换页面) ============ -->
+<!-- ============ 交互式界面示意(纯代码还原,点击左侧导航切换页面) ============ -->
 <section id="preview" class="preview-sec">
   <div class="container">
-    <p class="preview-hint">界面预览 · 点击左侧导航切换页面(与实际应用 1:1 还原)</p>
+    <p class="preview-hint">交互式界面示意 · 点击左侧导航切换；实际能力以当前版本与文档为准</p>
     <div class="appwin">
       <div class="appwin-bar">
         <span class="d d1"></span><span class="d d2"></span><span class="d d3"></span>
@@ -434,7 +434,7 @@
             <button data-page="packages"><svg><use href="#i-package"/></svg><span>包管理器</span></button>
             <button data-page="settings"><svg><use href="#i-gear"/></svg><span>设置</span></button>
           </nav>
-<div class="app-side-foot">v0.5.4 · 便携模式就绪</div>
+<div class="app-side-foot">源码 0.6.0 · Windows</div>
         </aside>
 
         <!-- 主区域 -->
@@ -516,7 +516,7 @@
               </div>
             </div>
 
-            <div class="banner">便携模式运行中 — 配置存储在 exe 旁的 data 目录,可直接放入 U 盘使用</div>
+            <div class="banner">便携模式示意 — 配置可位于 data 目录；迁移后需检查绝对路径、Junction 并重新配置 PATH</div>
           </div>
 
           <!-- 环境管理 -->
@@ -804,7 +804,7 @@
               <div class="kv">
                 <div class="lab">数据目录</div>
                 <div class="inp"><div class="field">D:\DevEnv\data(便携模式)</div></div>
-                <div class="note">便携模式:配置与环境同目录存放,复制整个根目录即可迁移到其他电脑。</div>
+                <div class="note">便携模式示意：迁移后需检查绝对路径和 Junction 目标，并重新配置 PATH。</div>
               </div>
             </div>
 
@@ -820,39 +820,39 @@
 <section id="features">
   <div class="container">
     <div class="section-head">
-      <h2>你关心的,它都管了</h2>
-      <p>从下载安装到版本切换,从 PATH 到缓存,覆盖开发环境管理的完整链路</p>
+      <h2>下载入口清晰，本机情况可见</h2>
+      <p>以工具下载与安装扫描为核心；其他管理能力按工具支持范围提供</p>
     </div>
     <div class="features">
       <div class="feature">
         <div class="icon">📦</div>
-        <h3>多版本管理</h3>
-        <p>JDK、Python、Node.js 等 15 类环境,任意多版本并存互不干扰,一键切换当前版本。</p>
+        <h3>开发工具下载</h3>
+        <p>覆盖 18 类开发工具，展示可用的官方来源与部分镜像选项；来源覆盖因工具而异。</p>
       </div>
       <div class="feature">
         <div class="icon">⚡</div>
-        <h3>国内镜像加速</h3>
-        <p>清华 TUNA、华为云、npmmirror、rsproxy 等镜像源内置,下载速度不再看运气。</p>
+        <h3>本机环境扫描</h3>
+        <p>查看已识别工具的版本、安装位置与检测结果，帮助快速找到已有环境。</p>
       </div>
       <div class="feature">
         <div class="icon">🔗</div>
-        <h3>散装环境纳入</h3>
-        <p>扫描 PATH 中已装的散装环境,以链接方式一键纳入统一管理,不移动文件。</p>
+        <h3>下载校验提示</h3>
+        <p>下载流程检查响应长度；仅在来源提供可用校验资料时验证摘要，未验证资产会明确区分。</p>
       </div>
       <div class="feature">
         <div class="icon">🛣️</div>
-        <h3>PATH 可视化管理</h3>
-        <p>用户/系统 PATH 增删排序,JAVA_HOME 等环境变量一键配置,修改前自动备份。</p>
+        <h3>辅助环境管理</h3>
+        <p>支持的工具可使用多版本切换、路径和环境变量管理等辅助能力；修改前可备份 PATH。</p>
       </div>
       <div class="feature">
         <div class="icon">🧹</div>
-        <h3>缓存检测清理</h3>
-        <p>npm、pip、cargo、Maven 等缓存目录一键检测占用并清理,还给磁盘一个清白。</p>
+        <h3>包管理器工具</h3>
+        <p>可查看受支持包管理器的版本、全局包与配置；迁移和重装能力以使用指南列明的范围为准。</p>
       </div>
       <div class="feature">
         <div class="icon">🧳</div>
-        <h3>绿色便携</h3>
-        <p>不写注册表、不散落 C 盘,整个根目录复制到 U 盘即可整机迁移。</p>
+        <h3>PowerShell 7</h3>
+        <p>PowerShell 7 与 Windows PowerShell 5.1 分开管理；不会替换系统自带版本。</p>
       </div>
     </div>
   </div>
@@ -862,7 +862,7 @@
   <div class="container">
     <div class="section-head">
       <h2>支持的环境</h2>
-      <p>16 种环境类型,持续增加中</p>
+      <p>18 种环境类型；各工具的下载、扫描和管理能力不同</p>
     </div>
     <div class="chips">
       <span class="chip">JDK</span>
@@ -880,6 +880,9 @@
       <span class="chip">Git</span>
       <span class="chip">GitHub CLI</span>
       <span class="chip">C/C++ (MinGW)</span>
+      <span class="chip">ADB</span>
+      <span class="chip">.NET SDK</span>
+      <span class="chip">PowerShell 7</span>
     </div>
   </div>
 </section>
