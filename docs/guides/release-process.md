@@ -51,4 +51,4 @@ git push origin v0.6.0
 
 ## 当前状态
 
-截至 2026-11-08：`package.json`、`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 的源码元数据版本一致为 0.6.0。最新的 0.6.0 源码回归证据记录于 2026-11-03；其中 EnvCon 应用内 PowerShell 安装/切换仍未验收。当前本地可核对的 EXE/NSIS 产物版本为 0.5.5，未发现 0.6.0 产物；GitHub 上最新 Release 仍为 v0.5.0 预发布，未创建 v0.6.0 tag 或 Release。因此 0.6.0 尚未打包或发布。代码签名和时间戳仍需证书/签名服务。
+截至 2026-11-09：源码元数据版本为 0.6.0。本机 Rust 库测试 374 passed / 14 ignored，`npm run verify`（前端、读状态测试、10 套 UI）、`cargo check --offline` 与 `git diff --check` 均通过；GitHub Windows CI 的 `42551986293` 仍是失败状态（358 passed / 15 failed），路径修复待推送后验证。GitHub Pages 已部署提交 `32d1b22`；该提交生成的 0.6.0 EXE 为 9,585,664 bytes、SHA-256 `d68bfb9cf343eb9ddfdcc1218e05137c57228b4b2f60ce0c86de991c2c2b31bd`，不包含当前修复，须在 CI 通过后从修复 commit 重建。EnvCon 应用内 PowerShell 安装/切换仍未验收；GitHub 最新 Release 仍为 v0.5.0 预发布，未创建 v0.6.0 tag 或 Release。因此尚未发布 0.6.0。代码签名和时间戳仍需证书/签名服务。

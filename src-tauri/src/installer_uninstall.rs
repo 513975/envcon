@@ -178,7 +178,7 @@ fn checked_path(value: &str) -> Result<PathBuf> {
 fn exact_location(value: &str, selected: &Path) -> Result<bool> {
     let path = checked_path(value)?;
     // Never collapse a Junction alias into the selected installation.
-    Ok(system::path_key(&path) == system::path_key(selected))
+    Ok(system::path_key_with_long_names(&path) == system::path_key_with_long_names(selected))
 }
 
 /// Accept a quoted absolute EXE or an unquoted path without whitespace.
@@ -261,7 +261,10 @@ fn validate_invocation(kind: EnvType, selected: &Path, record: &Registration) ->
         }
         EnvType::Llvm => {
             if !exe.file_name().is_some_and(|name| name.eq_ignore_ascii_case("Uninstall.exe"))
-                || exe.parent().is_none_or(|parent| system::path_key(parent) != system::path_key(selected))
+                || exe.parent().is_none_or(|parent| {
+                    system::path_key_with_long_names(parent)
+                        != system::path_key_with_long_names(selected)
+                })
                 || args.iter().any(|arg| arg != "/S")
             {
                 return Err(AppError::msg("LLVM 卸载入口必须是所选安装目录中的 Uninstall.exe，且只能携带 /S"));
@@ -504,6 +507,33 @@ mod tests {
             assert_eq!(plan.assessments.iter().filter(|a| a.state == "matched").count(), 1);
             assert_eq!(plan.assessments.iter().filter(|a| a.state == "otherInstallation").count(), 1);
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn exact_path_match_accepts_existing_short_path_spelling() {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+
+        let (_dir, root, mut snapshot) = fixture(EnvType::Llvm);
+        let input: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut output = vec![0u16; 32_768];
+        let length = unsafe {
+            GetShortPathNameW(input.as_ptr(), output.as_mut_ptr(), output.len() as u32)
+        } as usize;
+        if length == 0 || length >= output.len() {
+            return;
+        }
+        output.truncate(length);
+        let short_root = std::path::PathBuf::from(std::ffi::OsString::from_wide(&output));
+        if system::path_key(&short_root) == system::path_key(&root) {
+            return;
+        }
+        snapshot.records[0].install_location = Some(short_root.to_string_lossy().into_owned());
+
+        let plan = preview(EnvType::Llvm, &root, snapshot).unwrap();
+        assert_eq!(plan.state, "ready");
+        assert!(plan.assessments.iter().any(|assessment| assessment.state == "matched"));
     }
 
     #[test]

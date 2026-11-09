@@ -182,6 +182,43 @@ pub(crate) fn path_key(p: &Path) -> String {
             .to_string()
 }
 
+/// Normalize 8.3 spellings without resolving reparse points into their targets.
+pub(crate) fn path_key_with_long_names(path: &Path) -> String {
+    #[cfg(windows)]
+    if !has_reparse_component(path) {
+        if let Some(long_path) = long_path_name(path) {
+            return path_key(&long_path);
+        }
+    }
+    path_key(path)
+}
+
+#[cfg(windows)]
+fn long_path_name(path: &Path) -> Option<PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+
+    let input: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut output = vec![0u16; 32_768];
+    let mut length = unsafe {
+        GetLongPathNameW(input.as_ptr(), output.as_mut_ptr(), output.len() as u32)
+    } as usize;
+    if length == 0 {
+        return None;
+    }
+    if length >= output.len() {
+        output.resize(length + 1, 0);
+        length = unsafe {
+            GetLongPathNameW(input.as_ptr(), output.as_mut_ptr(), output.len() as u32)
+        } as usize;
+        if length == 0 || length >= output.len() {
+            return None;
+        }
+    }
+    output.truncate(length);
+    Some(PathBuf::from(std::ffi::OsString::from_wide(&output)))
+}
+
 fn canonicalize_nearest_existing(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()

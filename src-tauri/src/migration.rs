@@ -974,8 +974,8 @@ mod tests {
         let recorded = crate::move_journal::read(&root, EnvType::Node, "system-22")
             .expect("搬移成功后必须留下来源记录");
         assert_eq!(
-            crate::detect::system::path_key(Path::new(&recorded)),
-            crate::detect::system::path_key(&external)
+            crate::detect::system::path_key_with_long_names(Path::new(&recorded)),
+            crate::detect::system::path_key_with_long_names(&external)
         );
     }
 
