@@ -309,7 +309,10 @@ pub(crate) fn preview(kind: EnvType, selected: &Path, snapshot: RegistrySnapshot
                         .ok_or_else(|| AppError::msg("没有安装位置或卸载命令"))?;
                     let (exe, _) = parse_command(command)?;
                     return Ok(exe.file_name().is_some_and(|n| n.eq_ignore_ascii_case("Uninstall.exe"))
-                        && exe.parent().is_some_and(|p| system::path_key(p) == system::path_key(&selected)));
+                        && exe.parent().is_some_and(|p| {
+                            system::path_key_with_long_names(p)
+                                == system::path_key_with_long_names(&selected)
+                        }));
                 }
                 return Err(AppError::msg("缺少精确安装路径；不按显示名称或版本猜测"));
             }
@@ -511,7 +514,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn exact_path_match_accepts_existing_short_path_spelling() {
+    fn exact_path_match_accepts_short_path_for_location_and_fallback() {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
         use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
 
@@ -531,9 +534,17 @@ mod tests {
         }
         snapshot.records[0].install_location = Some(short_root.to_string_lossy().into_owned());
 
-        let plan = preview(EnvType::Llvm, &root, snapshot).unwrap();
+        let plan = preview(EnvType::Llvm, &root, snapshot.clone()).unwrap();
         assert_eq!(plan.state, "ready");
         assert!(plan.assessments.iter().any(|assessment| assessment.state == "matched"));
+
+        snapshot.records[0].install_location = None;
+        snapshot.records[0].uninstall_command = Some(format!(
+            "\"{}\" /S",
+            short_root.join("Uninstall.exe").display()
+        ));
+        let fallback_plan = preview(EnvType::Llvm, &root, snapshot).unwrap();
+        assert_eq!(fallback_plan.state, "ready");
     }
 
     #[test]

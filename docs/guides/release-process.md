@@ -51,4 +51,4 @@ git push origin v0.6.0
 
 ## 当前状态
 
-截至 2026-11-09：源码元数据版本为 0.6.0。本机 Rust 库测试 374 passed / 14 ignored，`npm run verify`（前端、读状态测试、10 套 UI）、`cargo check --offline` 与 `git diff --check` 均通过；修复提交 `8c8adc5` 已推送，fresh clone 验证也通过（22 个必需文件、`npm ci`、前端构建、Rust 374 passed / 14 ignored）。旧 Windows CI `42551986293` 是失败状态（358 passed / 15 failed）；新 run 的结果尚未能从 GitHub CLI 查询，取得通过证据后再构建发布 EXE。GitHub Pages 已部署提交 `32d1b22`；该提交生成的 0.6.0 EXE 为 9,585,664 bytes、SHA-256 `d68bfb9cf343eb9ddfdcc1218e05137c57228b4b2f60ce0c86de991c2c2b31bd`，不包含当前修复，不能作为发布资产。EnvCon 应用内 PowerShell 安装/切换仍未验收；GitHub 最新 Release 仍为 v0.5.0 预发布，未创建 v0.6.0 tag 或 Release。因此尚未发布 0.6.0。代码签名和时间戳仍需证书/签名服务。
+截至 2026-11-09：源码元数据版本为 0.6.0。Windows CI `42551986293` 失败 15 项；随后 `42557097874` 仍有 1 项 LLVM InstallLocation 缺省回退测试失败，当前已修复并扩展短路径回归。本机 Rust 374 passed / 14 ignored、完整 `npm run verify`（前端、读状态、10 套 UI）、`cargo check --offline` 和 `git diff --check` 均通过；最新代码尚未提交，CI/fresh clone 待重跑。最后一个 EXE 来自 `8c8adc5`，9,586,688 bytes、SHA-256 `8593e3999a669de70dbf3e31024d6e707753302e836159b3f8c9ce7aaf7b6912`，不包含当前补丁，不能作为发布资产。GitHub Pages 已部署 `32d1b22`；应用内 PowerShell 安装/切换仍未验收；最新 Release 仍是 v0.5.0 预发布，尚无 v0.6.0 tag/Release。代码签名和时间戳仍需证书/签名服务。
