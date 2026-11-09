@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-09T07:08:12.9123063Z",
+  "version": "0.6.0",
+  "versionConsistent": true,
+  "versionSources": {
+    "packageJson": "0.6.0",
+    "tauriConfig": "0.6.0",
+    "cargoToml": "0.6.0"
+  },
+  "git": {
+    "commit": "4892dfec887018c2cc8f536e331e2c46c5a0d436",
+    "branch": "main",
+    "dirty": false
+  },
+  "buildEnvironment": {
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "architecture": "X64",
+    "node": "v24.17.0",
+    "npm": "11.18.0",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)"
+  },
+  "lockfiles": {
+    "packageLock": {
+      "path": "package-lock.json",
+      "sha256": "4e48745145061707a8ca29361bf896391ad69444995d122b92a7df7773868081"
+    },
+    "cargoLock": {
+      "path": "src-tauri/Cargo.lock",
+      "sha256": "ce36e5e7d4ec07d4d8ddcc028a6840b81d84f5133d39e24e6c02e727a4b5a3b6"
+    }
+  },
+  "artifacts": [
+    {
+      "path": "src-tauri/target-v0.6.0-final/release/envcon.exe",
+      "status": "built-and-verified",
+      "bytes": 9590784,
+      "lastWriteTimeUtc": "2026-11-09T06:58:38.3948132Z",
+      "sha256": "4082894c045dd101ac02b77bbb06b0f89bfc1898709aa6f28ca663a64d375e41",
+      "provenance": {
+        "buildCommit": "4892dfec887018c2cc8f536e331e2c46c5a0d436",
+        "command": "npm run tauri -- build --no-bundle -- --offline",
+        "builtAtLocal": "2026-11-09T14:58:38+08:00",
+        "architecture": "Windows x64",
+        "peMachine": "0x8664",
+        "subsystem": "Windows GUI",
+        "fileVersion": "0.6.0",
+        "productVersion": "0.6.0",
+        "signed": false
+      }
+    }
+  ],
+  "artifactDiscovery": "The single EXE was explicitly built from the recorded commit with Tauri --no-bundle, then hashed and checked before upload.",
+  "notes": "EXE build source is the recorded clean commit; its tag and public GitHub prerelease were independently verified. No installer package was produced. The prerelease does not satisfy all stable-release acceptance gates.",
+  "status": {
+    "source": "recorded",
+    "tests": "Windows CI 42575447096 passed on source commit 4892dfec887018c2cc8f536e331e2c46c5a0d436; Pages deployment 42575446887 succeeded; fresh-clone npm ci, build and Rust tests passed; local npm run verify and cargo check --offline passed for identical tree; local Windows x64 no-bundle build passed; version resource checked as 0.6.0",
+    "package": "built-verified-single-exe",
+    "release": "published-prerelease"
+  },
+  "verification": {
+    "evidence": "docs/releases/release-0.6.0-rc.1.md and ROADMAP.md (2026-11-09 REL-01 entry)",
+    "status": "Windows CI 42575447096 success (Rust 374 passed / 14 ignored, full verify including 2 read-state and 10 UI suites); Pages deployment 42575446887 success; fresh clone 31 required files, npm ci, frontend build and Rust tests passed; local full npm run verify and cargo check --offline passed; npm audit (full and production) 0 vulnerabilities; Windows x64 --no-bundle build; EXE metadata/size/SHA-256 checked; GitHub prerelease and uploaded asset verified."
+  },
+  "release": {
+    "tag": "v0.6.0-rc.1",
+    "url": "https://github.com/513975/envcon/releases/tag/v0.6.0-rc.1",
+    "publishedAt": "2026-11-09T07:14:52Z",
+    "prerelease": true,
+    "tagTarget": "4892dfec887018c2cc8f536e331e2c46c5a0d436",
+    "assets": [
+      "envcon.exe"
+    ]
+  }
+}

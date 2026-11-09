@@ -20,6 +20,7 @@
 - [工具安装完整性审计](audits/tool-install-completeness-audit-2026-10-22.md)：截至 2026-11-03 的 Rust 组件安装、系统 PATH、Python / Gradle 取舍及 LLVM 待验证项快照。
 - [早期审计与旧版本归档摘要](archive-legacy.md)。
 - `evidence/`：按改进条目归档的测试、实机检查和构建证据。证据是生成时快照；当前状态请对照 `ROADMAP.md`。
+- [0.6.0-rc.1 预发布说明](releases/release-0.6.0-rc.1.md)与[EXE 构建记录](releases/release-record-0.6.0-rc.1.json)。
 - [0.5.5 构建记录](releases/release-0.5.5.md)与[可复核产物记录](releases/release-record-0.5.5-20261018-230054.json)。
 
 ## 文档维护
