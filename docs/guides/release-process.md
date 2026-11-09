@@ -51,4 +51,4 @@ git push origin v0.6.0
 
 ## 当前状态
 
-截至 2026-11-09：源码元数据版本为 0.6.0。Windows CI `42551986293` 失败 15 项；随后 `42557097874` 仍有 1 项 LLVM InstallLocation 缺省回退测试失败，当前已修复并扩展短路径回归。本机 Rust 374 passed / 14 ignored、完整 `npm run verify`（前端、读状态、10 套 UI）、`cargo check --offline` 和 `git diff --check` 均通过；最新代码尚未提交，CI/fresh clone 待重跑。最后一个 EXE 来自 `8c8adc5`，9,586,688 bytes、SHA-256 `8593e3999a669de70dbf3e31024d6e707753302e836159b3f8c9ce7aaf7b6912`，不包含当前补丁，不能作为发布资产。GitHub Pages 已部署 `32d1b22`；应用内 PowerShell 安装/切换仍未验收；最新 Release 仍是 v0.5.0 预发布，尚无 v0.6.0 tag/Release。代码签名和时间戳仍需证书/签名服务。
+截至 2026-11-09：源码元数据版本为 0.6.0。Windows CI `42551986293` 失败 15 项；`42557097874` 失败 1 项，已修复 LLVM InstallLocation 缺省时的回退比较。修复 commit `d8bdcee` 的本机 Rust 374 passed / 14 ignored、完整 `npm run verify`（前端、读状态、10 套 UI）、`cargo check --offline`、`git diff --check` 和 fresh clone（22 个必需文件、`npm ci`、前端构建、Rust 374 passed / 14 ignored）均通过；但向 GitHub 推送时连接失败，远端 CI 待触发/核验。旧 EXE 来自 `8c8adc5`，9,586,688 bytes、SHA-256 `8593e3999a669de70dbf3e31024d6e707753302e836159b3f8c9ce7aaf7b6912`，不包含 `d8bdcee`，不能作为发布资产。GitHub Pages 已部署 `32d1b22`；应用内 PowerShell 安装/切换仍未验收；最新 Release 仍是 v0.5.0 预发布，尚无 v0.6.0 tag/Release。代码签名和时间戳仍需证书/签名服务。
