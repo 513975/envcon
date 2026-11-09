@@ -2,7 +2,7 @@
 
 最后更新：2026-11-09
 
-当前源码元数据版本为 0.6.0（三处版本一致）。最新 Windows 验证提交 `4892dfec887018c2cc8f536e331e2c46c5a0d436`：Windows workflow `42575447096` 成功（Rust 374 passed / 14 ignored，完整 verify 含两套读状态与 10 套 UI），Pages workflow `42575446887` 成功。对该提交的 fresh clone 验证 31 个必需文件、`npm ci`、前端构建和 Rust 374 passed / 14 ignored 均通过；完整与生产 `npm audit` 均为 0，本机 `npm run verify`、`cargo check --offline` 通过。已从该提交使用 `--no-bundle` 构建独立 Windows x64 EXE：9,590,784 bytes，SHA-256 `4082894c045dd101ac02b77bbb06b0f89bfc1898709aa6f28ca663a64d375e41`，文件/产品版本 0.6.0，未生成安装包。GitHub 预发布 `v0.6.0-rc.1` 已于 2026-11-09 发布，仅上传 EXE；不代表 0.6.0 稳定版完成。EnvCon 内 PowerShell 7 安装/切换、真实安装/覆盖升级/卸载与数据保留矩阵、代码签名/时间戳仍待完成。证据：`docs/releases/release-0.6.0-rc.1.md` 与同名 JSON。
+当前源码元数据版本为 0.6.0（三处版本一致）。最新 Windows 验证提交 `4892dfec887018c2cc8f536e331e2c46c5a0d436`：Windows workflow `42575447096` 成功（Rust 374 passed / 14 ignored，完整 verify 含两套读状态与 10 套 UI），Pages workflow `42575446887` 成功。文档同步提交 `7ee27293564da7e7ef2fcf3a301f987aced38ba8` 后，Windows workflow `42578991184` 通过、Pages workflow `42578990838` 部署成功；已检查线上首页显示 `v0.6.0-rc.1`。对该提交的 fresh clone 验证 31 个必需文件、`npm ci`、前端构建和 Rust 374 passed / 14 ignored 均通过；完整与生产 `npm audit` 均为 0，本机 `npm run verify`、`cargo check --offline` 通过。已从该提交使用 `--no-bundle` 构建独立 Windows x64 EXE：9,590,784 bytes，SHA-256 `4082894c045dd101ac02b77bbb06b0f89bfc1898709aa6f28ca663a64d375e41`，文件/产品版本 0.6.0，未生成安装包。GitHub 预发布 `v0.6.0-rc.1` 已于 2026-11-09 发布，仅上传 EXE；不代表 0.6.0 稳定版完成。EnvCon 内 PowerShell 7 安装/切换、真实安装/覆盖升级/卸载与数据保留矩阵、代码签名/时间戳仍待完成。证据：`docs/releases/release-0.6.0-rc.1.md` 与同名 JSON。
 
 INSTALL-01-a / a.1：rustup-init 文件名分派缺陷已修复，受管 Rust 工具链已恢复并实测。`D:\DevEnvManager\current\rust` 指向 `D:\DevEnvManager\envs\rusts\rust-stable`；Rust 1.99.1 的 rustc、cargo、clippy、rustfmt 均可运行，五个基础组件已安装。四个历史失败目录保留，未修改系统级 PATH。
 
@@ -688,6 +688,8 @@ UIR-01（Codex；目标版本/排期待定；2026-11-03）：完成 OpenDesign �
 ## 七、变更日志
 
 2026-11-09 / REL-01 0.6.0 RC：依赖审计修复提交 `4892dfec887018c2cc8f536e331e2c46c5a0d436` 已推送并通过 Windows workflow `42575447096`；Pages workflow `42575446887` 成功。31 文件 fresh clone 的 `npm ci`、前端构建及 Rust 374 passed / 14 ignored 通过；本机完整 verify 与 cargo check 通过，npm 完整/生产审计均 0。基于该提交构建 `--no-bundle` Windows x64 EXE，文件/产品版本 0.6.0、9,590,784 bytes、SHA-256 `4082894c045dd101ac02b77bbb06b0f89bfc1898709aa6f28ca663a64d375e41`；GitHub `v0.6.0-rc.1` 预发布已创建并只上传 EXE，未生成安装包。应用内 PowerShell 验收、真实安装/覆盖升级/卸载/数据保留及代码签名仍未完成；不宣称稳定版完成。证据见 `docs/releases/release-0.6.0-rc.1.md` 与 JSON。
+
+2026-11-09 / 发布页同步：文档提交 `7ee27293564da7e7ef2fcf3a301f987aced38ba8` 更新 GitHub Pages 首页的最新版本标记及文档索引；Windows 验证 `42578991184` 和 Pages 部署 `42578990838` 均通过，线上首页 HTTP 200 且显示 `v0.6.0-rc.1`。
 2026-11-09 / REL-01 依赖、CI 与产物状态：`5ddcb49` 的 Windows workflow `42564957845` 和 Pages workflow `42564957638` 均成功，包含 Rust 374 passed / 14 ignored、完整 verify/10 套 UI、31 文件 fresh clone、`npm ci`、前端构建与 Rust 测试。此前因 `.gitignore` 忽略 `tests/paths-ui.mjs` 导致的 CI 失败已通过提交 `5ddcb49` 修复。后续 `npm audit` 发现 `vite`、`source-map-js` 两个 high 开发依赖项；`npm audit fix` 更新 7 个锁定包，完整/生产审计均为 0，本机完整 `npm run verify` 与 `cargo check --offline` 通过。更新后的 `package-lock.json` 尚未提交/CI/fresh clone；更新前 EXE 不能作为发布资产，待新验证通过后重建。
 
 2026-11-08 / 文档一致性核对：核对当前版本元数据、18 类环境类型、默认下载源、验证脚本 UI 套件数、release record 输出路径、产物版本和 GitHub Release 状态；修正 README、测试/发布指南、审计快照标题及路线图中的过期状态和计数。复核 PWSH-01 证据为 373 passed / 14 ignored。本次未改业务源码、未运行测试、未打包或发布，长期改进状态不变。
